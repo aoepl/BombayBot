@@ -1,7 +1,26 @@
 services:
+  db:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ----
+      MYSQL_DATABASE: botdb
+      MYSQL_USER: botuser
+      MYSQL_PASSWORD: ----
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   bombaybot:
     build: .
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - ./config.cfg:/app/config.cfg:ro
       - ./logs:/app/logs
