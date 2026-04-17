@@ -1,4 +1,4 @@
-nextcord>=2.5
+nextcord>=2.6
 aiomysql>=0.2
 glicko2>=2.0
 trueskill>=0.4.5

@@ -13,8 +13,7 @@ from asyncio import iscoroutine
 from core import config, console, database, locales, cfg_factory
 from core.client import dc
 
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+loop = asyncio.get_event_loop()
 loop.run_until_complete(database.db.connect())
 
 # Load bot
@@ -94,7 +93,6 @@ async def think():
 	loop.stop()
 
 # Login to discord
-loop = asyncio.get_event_loop()
 loop.create_task(think())
 loop.create_task(dc.start(config.cfg.DC_BOT_TOKEN))
 
