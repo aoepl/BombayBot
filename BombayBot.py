@@ -13,7 +13,8 @@ from asyncio import iscoroutine
 from core import config, console, database, locales, cfg_factory
 from core.client import dc
 
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 loop.run_until_complete(database.db.connect())
 
 # Load bot
@@ -27,17 +28,14 @@ else:
 
 log = console.log
 
-# Gracefully exit on ctrl+c
-original_SIGINT_handler = signal.getsignal(signal.SIGINT)
 
-
-def ctrl_c(sig, frame):
+def _shutdown(sig, frame):
 	bot.save_state()
 	console.terminate()
-	signal.signal(signal.SIGINT, original_SIGINT_handler)
 
 
-signal.signal(signal.SIGINT, ctrl_c)
+signal.signal(signal.SIGINT, _shutdown)
+signal.signal(signal.SIGTERM, _shutdown)
 
 
 # Run commands from user console

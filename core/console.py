@@ -25,21 +25,25 @@ LogLevelToInt = {
 class Log:
 
 	def __init__(self):
-		# Create log dir if needed
-		if not os.path.exists(os.path.abspath("logs")):
-			os.makedirs('logs')
-
-		self.file = open(datetime.datetime.now().strftime("logs/log_%Y-%m-%d-%H:%M"), 'w')
 		self.loglevel = LogLevelToInt[cfg.LOG_LEVEL]
+		try:
+			if not os.path.exists(os.path.abspath("logs")):
+				os.makedirs('logs')
+			self.file = open(datetime.datetime.now().strftime("logs/log_%Y-%m-%d-%H:%M"), 'w')
+		except OSError:
+			self.file = None
 
 	@staticmethod
 	def display(string):
 		# Have to do this encoding/decoding bullshit because python fails to encode some symbols by default
 		string = string.encode(sys.stdout.encoding, 'ignore').decode(sys.stdout.encoding)
 
-		# Save user input line, print string and then user input line
-		line_buffer = readline.get_line_buffer()
-		sys.stdout.write("\r\n\033[F\033[K" + string + '\r\n>' + line_buffer)
+		if sys.stdout.isatty():
+			line_buffer = readline.get_line_buffer()
+			sys.stdout.write("\r\n\033[F\033[K" + string + '\r\n>' + line_buffer)
+		else:
+			sys.stdout.write(string + '\n')
+		sys.stdout.flush()
 
 	def log(self, data, log_level):
 		string = str(data).encode(sys.stdout.encoding, 'ignore').decode(sys.stdout.encoding)
@@ -48,10 +52,12 @@ class Log:
 			log_level,
 			string)
 		self.display(string)
-		self.file.write(string + '\r\n')
+		if self.file:
+			self.file.write(string + '\r\n')
 
 	def close(self):
-		self.file.close()
+		if self.file:
+			self.file.close()
 
 	def chat(self, data):
 		if self.loglevel <= 0:
@@ -77,7 +83,10 @@ class Log:
 def user_input():
 	readline.parse_and_bind("tab: complete")
 	while 1:
-		input_cmd = input('>')
+		try:
+			input_cmd = input('>')
+		except EOFError:
+			break  # stdin closed (e.g. no TTY in container)
 		user_input_queue.put(input_cmd)
 
 

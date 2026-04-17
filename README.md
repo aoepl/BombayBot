@@ -6,20 +6,29 @@
 * **MySQL**.
 * **gettext** for multilanguage support.
 
-### Installing
-* Create mysql user and database for PUBobot2:
-* * `sudo mysql`
-* * `CREATE USER 'pubobot'@'localhost' IDENTIFIED BY 'your-password';`
-* * `CREATE DATABASE pubodb CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;`
-* * `GRANT ALL PRIVILEGES ON pubodb.* TO 'pubobot'@'localhost';`
-* Install required modules and configure PUBobot2:
-* * `git clone https://github.com/Leshaka/PUBobot2`
-* * `cd PUBobot2`
-* * `pip3 install -r requirements.txt`
-* * `cp config.example.cfg config.cfg`
-* * `nano config.cfg` - Fill config file with your discord bot instance credentials and mysql settings and save.
-* * Optionally, if you want to use other languages, run script to compile translations: `./compile_locales.sh`.
-* * `python3 PUBobot2.py` - If everything is installed correctly the bot should launch without any errors and give you CLI.
+### Build
+#### Create mysql user and database for BombayBot:
+```
+sudo mysql
+CREATE USER 'pubobot'@'localhost' IDENTIFIED BY 'your-password';
+CREATE DATABASE pubodb CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+GRANT ALL PRIVILEGES ON pubodb.* TO 'pubobot'@'localhost';
+```
+
+#### Fill config file with your discord bot instance credentials and mysql settings and save.
+```shell
+cp config.example.cfg config.cfg
+nano config.cfg
+```
+
+#### Docker
+```shell
+docker build -t bombaybot .
+docker run -d \                    
+    -v $(pwd)/config.cfg:/app/config.cfg:ro \
+    --name bombaybot \
+    bombaybot
+```
 
 ## Credits
 Developer: **Leshaka**. Contact: leshkajm@ya.ru.  

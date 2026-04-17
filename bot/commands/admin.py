@@ -1,7 +1,7 @@
 __all__ = [
 	'noadds', 'noadd', 'forgive', 'rating_seed', 'rating_penality', 'rating_hide',
 	'rating_reset', 'rating_snap', 'stats_reset', 'stats_reset_player', 'stats_replace_player',
-	'phrases_add', 'phrases_clear', 'undo_match'
+	'phrases_add', 'phrases_clear', 'undo_match', 'douche_add', 'douche_leaderboard', 'douche_summary'
 ]
 
 from time import time
@@ -133,6 +133,38 @@ async def phrases_clear(ctx, player: Member):
 	ctx.check_perms(ctx.Perms.MODERATOR)
 	await bot.noadds.phrases_clear(ctx, member=player)
 	await ctx.success(ctx.qc.gt("Done."))
+
+async def douche_add(ctx, player: Member):
+	ctx.check_perms(ctx.Perms.MODERATOR)
+	await bot.douche.add(ctx, member=player)
+	await ctx.success(ctx.qc.gt("Done."))
+
+async def douche_summary(ctx, player: Member):
+	summary = await bot.douche.get_user_summary(ctx, player)
+	s = f"```markdown\n# Douche summary for {get_nick(player)}\n"
+	s += f"Received: {summary['received']} | Given: {summary['given']}\n"
+	if summary['recent']:
+		s += "\nRecent douche targets:\n"
+		s += "\n".join((
+			f"  -> {r['target_name']}"
+			for r in summary['recent']
+		))
+	await ctx.reply(s + "\n```")
+
+
+async def douche_leaderboard(ctx):
+	data = await bot.douche.get_leaderboard(ctx)
+	s = "```markdown\n Douche leaderboard:\n"
+	s += " # | Player | Count"
+	s += "\n-----------------------------\n"
+	if data:
+		s += "\n".join((
+			f" {i+1} | {row['name']} | {row['count']}"
+			for i, row in enumerate(data)
+		))
+	else:
+		s += "No data yet."
+	await ctx.reply(s + "\n```")
 
 
 async def undo_match(ctx, match_id: int):
