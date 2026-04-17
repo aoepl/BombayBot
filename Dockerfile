@@ -13,4 +13,6 @@ COPY . .
 
 RUN ./compile_locales.sh
 
+VOLUME ["/app/logs"]
+
 CMD ["python3", "BombayBot.py"]

@@ -1,0 +1,7 @@
+services:
+  bombaybot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./config.cfg:/app/config.cfg:ro
+      - ./logs:/app/logs

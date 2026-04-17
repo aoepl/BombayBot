@@ -21,15 +21,20 @@ cp config.example.cfg config.cfg
 nano config.cfg
 ```
 
-#### Docker
+#### Docker commands
 ```shell
-docker build -t bombaybot .
-docker run -d \                    
-    -v $(pwd)/config.cfg:/app/config.cfg:ro \
-    --name bombaybot \
-    bombaybot
-```
+# Build and start in background
+  docker compose up -d
+                                                                                                                                                                                                                         
+  # View logs
+  docker compose logs -f                                                                                                                                                                                                 
+                                                                  
+  # Stop
+  docker compose down
 
+  # Rebuild after code changes                                                                                                                                                                                           
+  docker compose up -d --build
+```
 ## Credits
 Developer: **Leshaka**. Contact: leshkajm@ya.ru.  
 Used libraries: [discord.py](https://github.com/Rapptz/discord.py), [aiomysql](https://github.com/aio-libs/aiomysql), [emoji](https://github.com/carpedm20/emoji/), [glicko2](https://github.com/deepy/glicko2), [TrueSkill](https://trueskill.org/), [prettytable](https://github.com/jazzband/prettytable).
