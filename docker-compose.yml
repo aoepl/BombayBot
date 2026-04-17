@@ -2,11 +2,13 @@ services:
   db:
     image: mysql:8
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      MYSQL_ROOT_PASSWORD: ----
-      MYSQL_DATABASE: botdb
-      MYSQL_USER: botuser
-      MYSQL_PASSWORD: ----
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - ./data/mysql:/var/lib/mysql
     healthcheck:
@@ -21,6 +23,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    environment:
+      DC_BOT_TOKEN: ${DC_BOT_TOKEN}
+      DC_CLIENT_ID: ${DC_CLIENT_ID}
+      DC_CLIENT_SECRET: ${DC_CLIENT_SECRET}
+      DC_OWNER_ID: ${DC_OWNER_ID}
+      DC_SLASH_SERVERS: ${DC_SLASH_SERVERS}
+      DB_URI: ${DB_URI}
+      LOG_LEVEL: ${LOG_LEVEL}
+      STATUS: ${STATUS}
+    env_file:
+      - .env
     volumes:
-      - ./config.cfg:/app/config.cfg:ro
       - ./logs:/app/logs

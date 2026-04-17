@@ -1,3 +1,4 @@
-/config.cfg
+/.env
 /logs/
 /data/
+/config.cfg
