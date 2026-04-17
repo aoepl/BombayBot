@@ -134,9 +134,9 @@ async def phrases_clear(ctx, player: Member):
 	await bot.noadds.phrases_clear(ctx, member=player)
 	await ctx.success(ctx.qc.gt("Done."))
 
-async def douche_add(ctx, player: Member):
+async def douche_add(ctx, player: Member, target: Member = None):
 	ctx.check_perms(ctx.Perms.MODERATOR)
-	await bot.douche.add(ctx, member=player)
+	await bot.douche.douche_add(ctx, member=player, moderator=ctx.author, target= target)
 	await ctx.success(ctx.qc.gt("Done."))
 
 async def douche_summary(ctx, player: Member):

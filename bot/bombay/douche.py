@@ -25,11 +25,11 @@ class Douche:
 		self.next_tick = 0
 
 	@staticmethod
-	async def douche_add(ctx, member, target, moderator):
+	async def douche_add(ctx, member, moderator, target = None):
 		await db.insert('douche', dict(
 			guild_id=ctx.channel.guild.id,
 			user_id=member.id,
-			target_id=target.id,
+			target_user_id=target.id,
 			name=get_nick(member),
 			target_name=get_nick(target),
 			at=int(time.time()),

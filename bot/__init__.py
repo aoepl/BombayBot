@@ -11,6 +11,7 @@ from .match.match import Match
 from .expire import expire
 from .stats import stats
 from .stats.noadds import noadds
+from .bombay.douche import douche
 from .exceptions import Exceptions as Exc
 from .context import Context, SlashContext, SystemContext
 from . import commands

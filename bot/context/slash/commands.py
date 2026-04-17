@@ -414,6 +414,29 @@ async def _stats_undo_match(
 ): await run_slash(bot.commands.undo_match, interaction=interaction, match_id=match_id)
 
 
+# douche -> ...
+
+@groups.admin_douche.subcommand(name='add', description='Record a player douched in a match.')
+async def _douche_add(
+		interaction: Interaction,
+		player: Member = SlashOption(verify=False),
+		target: Member = SlashOption(verify=False)
+): await run_slash(bot.commands.douche_add, interaction=interaction, player=player, target=target)
+
+
+@groups.admin_douche.subcommand(name='summary', description='Show douche summary for a player.')
+async def _douche_summary(
+		interaction: Interaction,
+		player: Member = SlashOption(verify=False)
+): await run_slash(bot.commands.douche_summary, interaction=interaction, player=player)
+
+
+@groups.admin_douche.subcommand(name='leaderboard', description='Show douche leaderboard.')
+async def _douche_leaderboard(
+		interaction: Interaction
+): await run_slash(bot.commands.douche_leaderboard, interaction=interaction)
+
+
 # root commands
 
 @dc.slash_command(name='add', description='Add yourself to the channel queues.', **guild_kwargs)
