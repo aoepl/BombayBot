@@ -24,6 +24,8 @@ nano config.cfg
 #### Docker commands
 ```shell
 # Build and start in background
+  docker compose down
+  docker compose build --no-cache
   docker compose up -d
                                                                                                                                                                                                                          
   # View logs

@@ -19,6 +19,7 @@ services:
 
   bombaybot:
     build: .
+    image: ${DOCKER_IMAGE:-bombaybot:latest}
     restart: unless-stopped
     depends_on:
       db:
