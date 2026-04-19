@@ -314,8 +314,169 @@ async def user_stats(channel_id, user_id):
 		"GROUP BY m.queue_name ORDER BY count DESC",
 		(channel_id, user_id)
 	)
+	ratings_data = await db.fetchone(
+			"""
+			WITH match_results AS (
+				SELECT at,
+					CASE WHEN rating_change > 0 THEN 1 WHEN rating_change < 0 THEN -1 ELSE 0 END AS result
+				FROM qc_rating_history
+				WHERE channel_id = %s AND user_id = %s AND match_id IS NOT NULL
+			),
+			grouped AS (
+				SELECT at, result,
+					ROW_NUMBER() OVER (ORDER BY at) -
+					ROW_NUMBER() OVER (PARTITION BY result ORDER BY at) AS grp
+				FROM match_results
+			),
+			streaks AS (
+				SELECT result, COUNT(*) AS streak_len
+				FROM grouped
+				GROUP BY result, grp
+			)
+			SELECT
+				h.user_id,
+				MAX(h.rating_before + h.rating_change) AS max_rating,
+				MIN(h.rating_before + h.rating_change) AS min_rating,
+				MAX(CASE WHEN h.rating_before + h.rating_change = (
+					SELECT MAX(rating_before + rating_change)
+					FROM qc_rating_history
+					WHERE channel_id = %s AND user_id = %s
+				) THEN from_unixtime(h.at) END) AS max_rating_at,
+				MAX(CASE WHEN h.rating_before + h.rating_change = (
+					SELECT MIN(rating_before + rating_change)
+					FROM qc_rating_history
+					WHERE channel_id = %s AND user_id = %s
+				) THEN from_unixtime(h.at) END) AS min_rating_at,
+				p.wins,
+				p.losses,
+				ROUND(p.wins / NULLIF(p.wins + p.losses, 0) * 100, 1) AS win_pct,
+				p.streak AS current_streak,
+				COALESCE((SELECT MAX(streak_len) FROM streaks WHERE result = 1), 0) AS max_win_streak,
+				COALESCE((SELECT MAX(streak_len) FROM streaks WHERE result = -1), 0) AS max_loss_streak
+			FROM qc_rating_history h
+			JOIN qc_players p ON p.channel_id = h.channel_id AND p.user_id = h.user_id
+			WHERE h.channel_id = %s AND h.user_id = %s
+			GROUP BY h.user_id, p.wins, p.losses, p.draws, p.streak
+			""",
+			[
+				channel_id, user_id,  # match_results CTE
+				channel_id, user_id,  # max_rating_at subquery
+				channel_id, user_id,  # min_rating_at subquery
+				channel_id, user_id,  # outer WHERE
+			]
+		)
+	map_data = await db.fetchall(
+			"""
+			WITH RECURSIVE map_split AS (
+				SELECT
+					match_id,
+					channel_id,
+					winner,
+					TRIM(SUBSTRING_INDEX(maps, '\n', 1)) AS map_name,
+					IF(LOCATE('\n', maps) > 0, SUBSTRING(maps, LOCATE('\n', maps) + 1), NULL) AS remaining
+				FROM qc_matches
+				WHERE channel_id = %s AND maps IS NOT NULL AND maps != ''
+
+				UNION ALL
+
+				SELECT
+					match_id,
+					channel_id,
+					winner,
+					TRIM(SUBSTRING_INDEX(remaining, '\n', 1)),
+					IF(LOCATE('\n', remaining) > 0, SUBSTRING(remaining, LOCATE('\n', remaining) + 1), NULL)
+				FROM map_split
+				WHERE remaining IS NOT NULL
+			)
+			SELECT
+				ms.map_name,
+				COUNT(*) AS played,
+				SUM(CASE WHEN pm.team = ms.winner THEN 1 ELSE 0 END) AS wins,
+				SUM(CASE WHEN ms.winner IS NOT NULL AND pm.team != ms.winner THEN 1 ELSE 0 END) AS losses,
+				ROUND(
+					SUM(CASE WHEN pm.team = ms.winner THEN 1 ELSE 0 END) /
+					NULLIF(SUM(CASE WHEN ms.winner IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1
+				) AS win_pct
+			FROM map_split ms
+			JOIN qc_player_matches pm ON ms.match_id = pm.match_id AND ms.channel_id = pm.channel_id
+			WHERE pm.user_id = %s
+			GROUP BY ms.map_name
+			HAVING played > 10
+			ORDER BY win_pct DESC
+			""",
+			[channel_id, user_id]
+		)
+	_ally_cte = """
+		WITH ally_stats AS (
+			SELECT
+				p.nick,
+				COUNT(*) AS played,
+				SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) AS wins,
+				SUM(CASE WHEN m.winner IS NOT NULL AND m.winner != pm1.team THEN 1 ELSE 0 END) AS losses,
+				ROUND(
+					SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) /
+					NULLIF(SUM(CASE WHEN m.winner IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1
+				) AS win_pct
+			FROM qc_player_matches pm1
+			JOIN qc_player_matches pm2
+				ON pm1.match_id = pm2.match_id
+				AND pm1.channel_id = pm2.channel_id
+				AND pm1.team = pm2.team
+				AND pm2.user_id != pm1.user_id
+			JOIN qc_matches m ON pm1.match_id = m.match_id AND pm1.channel_id = m.channel_id
+			JOIN qc_players p ON p.user_id = pm2.user_id AND p.channel_id = pm2.channel_id
+			WHERE pm1.channel_id = %s AND pm1.user_id = %s
+			GROUP BY p.nick
+			HAVING played >= 15
+		)
+	"""
+	_enemy_cte = """
+		WITH enemy_stats AS (
+			SELECT
+				p.nick,
+				COUNT(*) AS played,
+				SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) AS wins,
+				SUM(CASE WHEN m.winner IS NOT NULL AND m.winner != pm1.team THEN 1 ELSE 0 END) AS losses,
+				ROUND(
+					SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) /
+					NULLIF(SUM(CASE WHEN m.winner IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1
+				) AS win_pct
+			FROM qc_player_matches pm1
+			JOIN qc_player_matches pm2
+				ON pm1.match_id = pm2.match_id
+				AND pm1.channel_id = pm2.channel_id
+				AND pm1.team != pm2.team
+			JOIN qc_matches m ON pm1.match_id = m.match_id AND pm1.channel_id = m.channel_id
+			JOIN qc_players p ON p.user_id = pm2.user_id AND p.channel_id = pm2.channel_id
+			WHERE pm1.channel_id = %s AND pm1.user_id = %s
+			GROUP BY p.nick
+			HAVING played >= 15
+		)
+	"""
+	best_ally_data = await db.fetchall(
+		_ally_cte + "SELECT nick, played, wins, losses, win_pct FROM ally_stats ORDER BY win_pct DESC LIMIT 5",
+		[channel_id, user_id]
+	)
+	worst_ally_data = await db.fetchall(
+		_ally_cte + "SELECT nick, played, wins, losses, win_pct FROM ally_stats ORDER BY win_pct ASC LIMIT 5",
+		[channel_id, user_id]
+	)
+	best_enemy_data = await db.fetchall(
+		_enemy_cte + "SELECT nick, played, wins, losses, win_pct FROM enemy_stats ORDER BY win_pct DESC LIMIT 5",
+		[channel_id, user_id]
+	)
+	worst_enemy_data = await db.fetchall(
+		_enemy_cte + "SELECT nick, played, wins, losses, win_pct FROM enemy_stats ORDER BY win_pct ASC LIMIT 5",
+		[channel_id, user_id]
+	)
 	stats = dict(total=sum((i['count'] for i in data)))
 	stats['queues'] = data
+	stats['ratings'] = ratings_data
+	stats['maps'] = map_data
+	stats['best_ally'] = best_ally_data
+	stats['best_enemy'] = best_enemy_data
+	stats['worst_ally'] = worst_ally_data
+	stats['worst_enemy'] = worst_enemy_data
 	return stats
 
 
