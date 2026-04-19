@@ -35,5 +35,11 @@ services:
       STATUS: ${STATUS}
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/healthy"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
     volumes:
       - ./logs:/app/logs

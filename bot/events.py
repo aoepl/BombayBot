@@ -1,3 +1,4 @@
+import os
 import traceback
 from nextcord import ChannelType, Activity, ActivityType
 
@@ -5,6 +6,18 @@ from core.client import dc
 from core.console import log
 from core.config import cfg
 import bot
+
+_HEALTH_FILE = '/tmp/healthy'
+
+
+def _set_healthy(value: bool):
+    if value:
+        open(_HEALTH_FILE, 'w').close()
+    else:
+        try:
+            os.remove(_HEALTH_FILE)
+        except FileNotFoundError:
+            pass
 
 
 @dc.event
@@ -75,9 +88,11 @@ async def on_ready():
 		await bot.load_state()
 		bot.bot_was_ready = True
 		bot.bot_ready = True
+		_set_healthy(True)
 		log.info("Done.")
 	else:  # Reconnected, fetch new channel objects
 		bot.bot_ready = True
+		_set_healthy(True)
 		log.info("Reconnected to discord.")
 
 
@@ -85,6 +100,7 @@ async def on_ready():
 async def on_disconnect():
 	log.info("Connection to discord is lost.")
 	bot.bot_ready = False
+	_set_healthy(False)
 
 
 @dc.event
@@ -92,6 +108,7 @@ async def on_resumed():
 	log.info("Connection to discord is resumed.")
 	if bot.bot_was_ready:
 		bot.bot_ready = True
+		_set_healthy(True)
 
 
 @dc.event
