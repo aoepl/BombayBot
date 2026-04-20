@@ -95,13 +95,13 @@ async def stats(ctx, player: Member = None, period: str = None):
 				return val.strftime('%Y-%m-%d')
 			return datetime.datetime.fromtimestamp(int(val)).strftime('%Y-%m-%d')
 
-		embed.add_field(name='Result', value=f"Win: {str(ratings['wins'])} | Loss: {str(ratings['losses'])} | Win%: {str(ratings['win_pct'])}", inline=False)
-		embed.add_field(name='Rating', value=f"Max: {ratings['max_rating']} ({_fmt_at(ratings['max_rating_at'])}) | Min: {ratings['min_rating']} ({_fmt_at(ratings['min_rating_at'])})", inline=False)
+		embed.add_field(name='Result', value=f"Win: {str(ratings['wins'])} | Loss: {str(ratings['losses'])} | Winrate: {str(ratings['win_pct'])}%", inline=False)
+		embed.add_field(name='Rating', value=f"Max: **{ratings['max_rating']}** ({_fmt_at(ratings['max_rating_at'])}) | Min: **{ratings['min_rating']}** ({_fmt_at(ratings['min_rating_at'])})", inline=False)
 		embed.add_field(name='Streak', value=f"Current: {str(ratings['current_streak'])} | Max Win: {str(ratings['max_win_streak'])} | Max Loss: {str(ratings['max_loss_streak'])}", inline=False)
 
 	maps = data.get('maps')
 	if maps:
-		maps_data = "```markdown\n# Map | Played | Won | Lost | Win %\n"
+		maps_data = "```markdown\n# Map | Played | Won | Lost | Winrate\n"
 		for m in data['maps'][:5]:
 			maps_data += f"{m['map_name']} | {m['played']} | {m['wins']} | {m['losses']} | {m['win_pct']}%\n"
 		maps_data += "```"
@@ -109,7 +109,7 @@ async def stats(ctx, player: Member = None, period: str = None):
 
 	best_ally = data.get('best_ally')
 	if best_ally:
-		best_ally_data = "```markdown\n# Ally | Played | Won | Lost | Win %\n"
+		best_ally_data = "```markdown\n# Ally | Played | Won | Lost | Winrate\n"
 		for ba in data['best_ally'][:5]:
 			best_ally_data += f"{ba['nick']} | {ba['played']} | {ba['wins']} | {ba['losses']} | {ba['weighted_win_pct']}%\n"
 		best_ally_data += "```"
@@ -117,7 +117,7 @@ async def stats(ctx, player: Member = None, period: str = None):
 
 	worst_ally = data.get('worst_ally')
 	if worst_ally:
-		worst_ally_data = "```markdown\n# Ally | Played | Won | Lost | Win %\n"
+		worst_ally_data = "```markdown\n# Ally | Played | Won | Lost | Winrate\n"
 		for wa in data['worst_ally'][:5]:
 			worst_ally_data += f"{wa['nick']} | {wa['played']} | {wa['wins']} | {wa['losses']} | {wa['weighted_win_pct']}%\n"
 		worst_ally_data += "```"
@@ -125,7 +125,7 @@ async def stats(ctx, player: Member = None, period: str = None):
 
 	best_enemy = data.get('best_enemy')
 	if best_enemy:
-		best_enemy_data = "```markdown\n# Enemy | Played | Won | Lost | Win %\n"
+		best_enemy_data = "```markdown\n# Enemy | Played | Won | Lost | Winrate\n"
 		for be in data['best_enemy'][:5]:
 			best_enemy_data += f"{be['nick']} | {be['played']} | {be['wins']} | {be['losses']} | {be['weighted_win_pct']}%\n"
 		best_enemy_data += "```"
@@ -133,7 +133,7 @@ async def stats(ctx, player: Member = None, period: str = None):
 
 	worst_enemy = data.get('worst_enemy')
 	if worst_enemy:
-		worst_enemy_data = "```markdown\n# Enemy | Played | Won | Lost | Win %\n"
+		worst_enemy_data = "```markdown\n# Enemy | Played | Won | Lost | Winrate\n"
 		for we in data['worst_enemy'][:5]:
 			worst_enemy_data += f"{we['nick']} | {we['played']} | {we['wins']} | {we['losses']} | {we['weighted_win_pct']}%\n"
 		worst_enemy_data += "```"
