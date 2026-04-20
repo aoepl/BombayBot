@@ -63,19 +63,24 @@ async def last_game(ctx, queue: str = None, player: Member = None, match_id: int
 	await ctx.reply(embed=embed)
 
 
-async def stats(ctx, player: Member = None):
+async def stats(ctx, player: Member = None, period: str = None):
+	_period_days = {'1M': 30, '6M': 180, '1Y': 365}
+	days = _period_days.get(period) if period else None
+	ts_from = int(time()) - days * 86400 if days else None
+
 	if player:
 		if (member := await ctx.get_member(player)) is not None:
-			data = await bot.stats.user_stats(ctx.qc.id, member.id)
+			data = await bot.stats.user_stats(ctx.qc.id, member.id, ts_from=ts_from)
 			target = get_nick(member)
 		else:
 			raise bot.Exc.NotFoundError(ctx.qc.gt("Specified user not found."))
 	else:
-		data = await bot.stats.qc_stats(ctx.qc.id)
+		data = await bot.stats.qc_stats(ctx.qc.id, ts_from=ts_from)
 		target = f"#{ctx.channel.name}"
 
+	period_label = f" ({period})" if period else ""
 	embed = Embed(
-		title=ctx.qc.gt("Stats for __{target}__").format(target=target),
+		title=ctx.qc.gt("Stats for __{target}__").format(target=target) + period_label,
 		colour=Colour(0x50e3c2),
 		description=ctx.qc.gt("**Total matches: {count}**").format(count=data['total'])
 	)
@@ -103,25 +108,25 @@ async def stats(ctx, player: Member = None):
 	for ba in data['best_ally'][:5]:
 		best_ally_data += f"{ba['nick']} | {ba['played']} | {ba['wins']} | {ba['losses']} | {ba['win_pct']}%\n"
 	best_ally_data += "```"
-	embed.add_field(name='Best allies', value=best_ally_data, inline=False)
+	embed.add_field(name='Best Ally (Hard carry)', value=best_ally_data, inline=False)
 
 	worst_ally_data = "```markdown\n# Ally | Played | Won | Lost | Win %\n"
 	for wa in data['worst_ally'][:5]:
 		worst_ally_data += f"{wa['nick']} | {wa['played']} | {wa['wins']} | {wa['losses']} | {wa['win_pct']}%\n"
 	worst_ally_data += "```"
-	embed.add_field(name='Worst allies', value=worst_ally_data, inline=False)
+	embed.add_field(name='Worst Ally (Dead weight)', value=worst_ally_data, inline=False)
 
 	best_enemy_data = "```markdown\n# Enemy | Played | Won | Lost | Win %\n"
 	for be in data['best_enemy'][:5]:
 		best_enemy_data += f"{be['nick']} | {be['played']} | {be['wins']} | {be['losses']} | {be['win_pct']}%\n"
 	best_enemy_data += "```"
-	embed.add_field(name='Best enemies', value=best_enemy_data, inline=False)
+	embed.add_field(name='Best Enemy (Eezy Peezy)', value=best_enemy_data, inline=False)
 
 	worst_enemy_data = "```markdown\n# Enemy | Played | Won | Lost | Win %\n"
 	for we in data['worst_enemy'][:5]:
 		worst_enemy_data += f"{we['nick']} | {we['played']} | {we['wins']} | {we['losses']} | {we['win_pct']}%\n"
 	worst_enemy_data += "```"
-	embed.add_field(name='Worst enemies', value=worst_enemy_data, inline=False)
+	embed.add_field(name='Worst Enemy (Kryptonite)', value=worst_enemy_data, inline=False)
 	await ctx.reply(embed=embed)
 
 

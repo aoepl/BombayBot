@@ -383,7 +383,8 @@ async def _rating_snap(
 async def _stats(
 		interaction: Interaction,
 		player: Member = SlashOption(required=False, verify=False),
-): await run_slash(bot.commands.stats, interaction=interaction, player=player)
+		period: str = SlashOption(choices=['1M', '6M', '1Y'], required=False, description ='Stats period')
+): await run_slash(bot.commands.stats, interaction=interaction, player=player, period=period)
 
 
 @groups.admin_stats.subcommand(name='reset', description='Reset all stats data on the channel.')

@@ -295,118 +295,133 @@ async def replace_player(channel_id, user_id1, user_id2, new_nick):
 	await db.update("qc_player_matches", {'user_id': user_id2}, where)
 
 
-async def qc_stats(channel_id):
+async def qc_stats(channel_id, ts_from=None):
+	at_filter = " AND `at` >= %s" if ts_from else ""
+	params = [channel_id] + ([ts_from] if ts_from else [])
+
 	data = await db.fetchall(
-		"SELECT `queue_name`, COUNT(*) as count FROM `qc_matches` WHERE `channel_id`=%s " +
-		"GROUP BY `queue_name` ORDER BY count DESC",
-		(channel_id,)
+		"SELECT `queue_name`, COUNT(*) as count FROM `qc_matches` WHERE `channel_id`=%s" +
+		at_filter + " GROUP BY `queue_name` ORDER BY count DESC",
+		params
 	)
 	stats = dict(total=sum((i['count'] for i in data)))
 	stats['queues'] = data
 	return stats
 
 
-async def user_stats(channel_id, user_id):
-	data = await db.fetchall(
+async def user_stats(channel_id, user_id, ts_from=None):
+	# Build date filter fragments once, reused across all queries
+	def _df(col):
+		return f" AND {col} >= %s" if ts_from else ""
+
+	dp = [ts_from] if ts_from else []  # date params list
+
+	queue_data = await db.fetchall(
 		"SELECT `queue_name`, COUNT(*) as count FROM `qc_player_matches` AS pm " +
 		"JOIN `qc_matches` AS m ON pm.match_id=m.match_id " +
-		"WHERE pm.channel_id=%s AND user_id=%s " +
-		"GROUP BY m.queue_name ORDER BY count DESC",
-		(channel_id, user_id)
+		"WHERE pm.channel_id=%s AND user_id=%s" +
+		_df("m.at") + " GROUP BY m.queue_name ORDER BY count DESC",
+		[channel_id, user_id, *dp]
 	)
+
+	hat_df = _df("h.at")
 	ratings_data = await db.fetchone(
-			"""
-			WITH match_results AS (
-				SELECT at,
-					CASE WHEN rating_change > 0 THEN 1 WHEN rating_change < 0 THEN -1 ELSE 0 END AS result
-				FROM qc_rating_history
-				WHERE channel_id = %s AND user_id = %s AND match_id IS NOT NULL
-			),
-			grouped AS (
-				SELECT at, result,
-					ROW_NUMBER() OVER (ORDER BY at) -
-					ROW_NUMBER() OVER (PARTITION BY result ORDER BY at) AS grp
-				FROM match_results
-			),
-			streaks AS (
-				SELECT result, COUNT(*) AS streak_len
-				FROM grouped
-				GROUP BY result, grp
-			)
-			SELECT
-				h.user_id,
-				MAX(h.rating_before + h.rating_change) AS max_rating,
-				MIN(h.rating_before + h.rating_change) AS min_rating,
-				MAX(CASE WHEN h.rating_before + h.rating_change = (
-					SELECT MAX(rating_before + rating_change)
-					FROM qc_rating_history
-					WHERE channel_id = %s AND user_id = %s
-				) THEN from_unixtime(h.at) END) AS max_rating_at,
-				MAX(CASE WHEN h.rating_before + h.rating_change = (
-					SELECT MIN(rating_before + rating_change)
-					FROM qc_rating_history
-					WHERE channel_id = %s AND user_id = %s
-				) THEN from_unixtime(h.at) END) AS min_rating_at,
-				p.wins,
-				p.losses,
-				ROUND(p.wins / NULLIF(p.wins + p.losses, 0) * 100, 1) AS win_pct,
-				p.streak AS current_streak,
-				COALESCE((SELECT MAX(streak_len) FROM streaks WHERE result = 1), 0) AS max_win_streak,
-				COALESCE((SELECT MAX(streak_len) FROM streaks WHERE result = -1), 0) AS max_loss_streak
+		f"""
+		WITH match_results AS (
+			SELECT at,
+				CASE WHEN rating_change > 0 THEN 1 WHEN rating_change < 0 THEN -1 ELSE 0 END AS result
 			FROM qc_rating_history h
-			JOIN qc_players p ON p.channel_id = h.channel_id AND p.user_id = h.user_id
-			WHERE h.channel_id = %s AND h.user_id = %s
-			GROUP BY h.user_id, p.wins, p.losses, p.draws, p.streak
-			""",
-			[
-				channel_id, user_id,  # match_results CTE
-				channel_id, user_id,  # max_rating_at subquery
-				channel_id, user_id,  # min_rating_at subquery
-				channel_id, user_id,  # outer WHERE
-			]
+			WHERE channel_id = %s AND user_id = %s AND match_id IS NOT NULL{hat_df}
+		),
+		grouped AS (
+			SELECT at, result,
+				ROW_NUMBER() OVER (ORDER BY at) -
+				ROW_NUMBER() OVER (PARTITION BY result ORDER BY at) AS grp
+			FROM match_results
+		),
+		streaks AS (
+			SELECT result, COUNT(*) AS streak_len
+			FROM grouped
+			GROUP BY result, grp
 		)
+		SELECT
+			h.user_id,
+			MAX(h.rating_before + h.rating_change) AS max_rating,
+			MIN(h.rating_before + h.rating_change) AS min_rating,
+			MAX(CASE WHEN h.rating_before + h.rating_change = (
+				SELECT MAX(rating_before + rating_change)
+				FROM qc_rating_history h
+				WHERE channel_id = %s AND user_id = %s{hat_df}
+			) THEN from_unixtime(h.at) END) AS max_rating_at,
+			MAX(CASE WHEN h.rating_before + h.rating_change = (
+				SELECT MIN(rating_before + rating_change)
+				FROM qc_rating_history h
+				WHERE channel_id = %s AND user_id = %s{hat_df}
+			) THEN from_unixtime(h.at) END) AS min_rating_at,
+			p.wins,
+			p.losses,
+			ROUND(p.wins / NULLIF(p.wins + p.losses, 0) * 100, 1) AS win_pct,
+			p.streak AS current_streak,
+			COALESCE((SELECT MAX(streak_len) FROM streaks WHERE result = 1), 0) AS max_win_streak,
+			COALESCE((SELECT MAX(streak_len) FROM streaks WHERE result = -1), 0) AS max_loss_streak
+		FROM qc_rating_history h
+		JOIN qc_players p ON p.channel_id = h.channel_id AND p.user_id = h.user_id
+		WHERE h.channel_id = %s AND h.user_id = %s{hat_df}
+		GROUP BY h.user_id, p.wins, p.losses, p.draws, p.streak
+		""",
+		[
+			channel_id, user_id, *dp,  # match_results CTE
+			channel_id, user_id, *dp,  # max_rating_at subquery
+			channel_id, user_id, *dp,  # min_rating_at subquery
+			channel_id, user_id, *dp,  # outer WHERE
+		]
+	)
+
+	at_df = _df("at")
 	map_data = await db.fetchall(
-			"""
-			WITH RECURSIVE map_split AS (
-				SELECT
-					match_id,
-					channel_id,
-					winner,
-					TRIM(SUBSTRING_INDEX(maps, '\n', 1)) AS map_name,
-					IF(LOCATE('\n', maps) > 0, SUBSTRING(maps, LOCATE('\n', maps) + 1), NULL) AS remaining
-				FROM qc_matches
-				WHERE channel_id = %s AND maps IS NOT NULL AND maps != ''
-
-				UNION ALL
-
-				SELECT
-					match_id,
-					channel_id,
-					winner,
-					TRIM(SUBSTRING_INDEX(remaining, '\n', 1)),
-					IF(LOCATE('\n', remaining) > 0, SUBSTRING(remaining, LOCATE('\n', remaining) + 1), NULL)
-				FROM map_split
-				WHERE remaining IS NOT NULL
-			)
+		f"""
+		WITH RECURSIVE map_split AS (
 			SELECT
-				ms.map_name,
-				COUNT(*) AS played,
-				SUM(CASE WHEN pm.team = ms.winner THEN 1 ELSE 0 END) AS wins,
-				SUM(CASE WHEN ms.winner IS NOT NULL AND pm.team != ms.winner THEN 1 ELSE 0 END) AS losses,
-				ROUND(
-					SUM(CASE WHEN pm.team = ms.winner THEN 1 ELSE 0 END) /
-					NULLIF(SUM(CASE WHEN ms.winner IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1
-				) AS win_pct
-			FROM map_split ms
-			JOIN qc_player_matches pm ON ms.match_id = pm.match_id AND ms.channel_id = pm.channel_id
-			WHERE pm.user_id = %s
-			GROUP BY ms.map_name
-			HAVING played > 10
-			ORDER BY win_pct DESC
-			""",
-			[channel_id, user_id]
+				match_id,
+				channel_id,
+				winner,
+				TRIM(SUBSTRING_INDEX(maps, '\n', 1)) AS map_name,
+				IF(LOCATE('\n', maps) > 0, SUBSTRING(maps, LOCATE('\n', maps) + 1), NULL) AS remaining
+			FROM qc_matches
+			WHERE channel_id = %s AND maps IS NOT NULL AND maps != ''{at_df}
+
+			UNION ALL
+
+			SELECT
+				match_id,
+				channel_id,
+				winner,
+				TRIM(SUBSTRING_INDEX(remaining, '\n', 1)),
+				IF(LOCATE('\n', remaining) > 0, SUBSTRING(remaining, LOCATE('\n', remaining) + 1), NULL)
+			FROM map_split
+			WHERE remaining IS NOT NULL
 		)
-	_ally_cte = """
+		SELECT
+			ms.map_name,
+			COUNT(*) AS played,
+			SUM(CASE WHEN pm.team = ms.winner THEN 1 ELSE 0 END) AS wins,
+			SUM(CASE WHEN ms.winner IS NOT NULL AND pm.team != ms.winner THEN 1 ELSE 0 END) AS losses,
+			ROUND(
+				SUM(CASE WHEN pm.team = ms.winner THEN 1 ELSE 0 END) /
+				NULLIF(SUM(CASE WHEN ms.winner IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1
+			) AS win_pct
+		FROM map_split ms
+		JOIN qc_player_matches pm ON ms.match_id = pm.match_id AND ms.channel_id = pm.channel_id
+		WHERE pm.user_id = %s
+		GROUP BY ms.map_name
+		HAVING played > 10
+		ORDER BY win_pct DESC
+		""",
+		[channel_id, *dp, user_id]
+	)
+
+	mat_df = _df("m.at")
+	_ally_cte = f"""
 		WITH ally_stats AS (
 			SELECT
 				p.nick,
@@ -425,12 +440,12 @@ async def user_stats(channel_id, user_id):
 				AND pm2.user_id != pm1.user_id
 			JOIN qc_matches m ON pm1.match_id = m.match_id AND pm1.channel_id = m.channel_id
 			JOIN qc_players p ON p.user_id = pm2.user_id AND p.channel_id = pm2.channel_id
-			WHERE pm1.channel_id = %s AND pm1.user_id = %s
+			WHERE pm1.channel_id = %s AND pm1.user_id = %s{mat_df}
 			GROUP BY p.nick
 			HAVING played >= 15
 		)
 	"""
-	_enemy_cte = """
+	_enemy_cte = f"""
 		WITH enemy_stats AS (
 			SELECT
 				p.nick,
@@ -448,29 +463,30 @@ async def user_stats(channel_id, user_id):
 				AND pm1.team != pm2.team
 			JOIN qc_matches m ON pm1.match_id = m.match_id AND pm1.channel_id = m.channel_id
 			JOIN qc_players p ON p.user_id = pm2.user_id AND p.channel_id = pm2.channel_id
-			WHERE pm1.channel_id = %s AND pm1.user_id = %s
+			WHERE pm1.channel_id = %s AND pm1.user_id = %s{mat_df}
 			GROUP BY p.nick
 			HAVING played >= 15
 		)
 	"""
+	cte_params = [channel_id, user_id, *dp]
 	best_ally_data = await db.fetchall(
 		_ally_cte + "SELECT nick, played, wins, losses, win_pct FROM ally_stats ORDER BY win_pct DESC LIMIT 5",
-		[channel_id, user_id]
+		cte_params
 	)
 	worst_ally_data = await db.fetchall(
 		_ally_cte + "SELECT nick, played, wins, losses, win_pct FROM ally_stats ORDER BY win_pct ASC LIMIT 5",
-		[channel_id, user_id]
+		cte_params
 	)
 	best_enemy_data = await db.fetchall(
 		_enemy_cte + "SELECT nick, played, wins, losses, win_pct FROM enemy_stats ORDER BY win_pct DESC LIMIT 5",
-		[channel_id, user_id]
+		cte_params
 	)
 	worst_enemy_data = await db.fetchall(
 		_enemy_cte + "SELECT nick, played, wins, losses, win_pct FROM enemy_stats ORDER BY win_pct ASC LIMIT 5",
-		[channel_id, user_id]
+		cte_params
 	)
-	stats = dict(total=sum((i['count'] for i in data)))
-	stats['queues'] = data
+	stats = dict(total=sum((i['count'] for i in queue_data)))
+	stats['queues'] = queue_data
 	stats['ratings'] = ratings_data
 	stats['maps'] = map_data
 	stats['best_ally'] = best_ally_data
