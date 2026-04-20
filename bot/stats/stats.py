@@ -431,7 +431,11 @@ async def user_stats(channel_id, user_id, ts_from=None):
 				ROUND(
 					SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) /
 					NULLIF(SUM(CASE WHEN m.winner IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1
-				) AS win_pct
+				) AS win_pct,
+				ROUND(
+					(SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) + 7.5) /
+					(COUNT(*) + 15) * 100, 1
+				) AS weighted_win_pct
 			FROM qc_player_matches pm1
 			JOIN qc_player_matches pm2
 				ON pm1.match_id = pm2.match_id
@@ -455,7 +459,11 @@ async def user_stats(channel_id, user_id, ts_from=None):
 				ROUND(
 					SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) /
 					NULLIF(SUM(CASE WHEN m.winner IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1
-				) AS win_pct
+				) AS win_pct,
+				ROUND(
+					(SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) + 7.5) /
+					(COUNT(*) + 15) * 100, 1
+				) AS weighted_win_pct
 			FROM qc_player_matches pm1
 			JOIN qc_player_matches pm2
 				ON pm1.match_id = pm2.match_id
@@ -470,19 +478,19 @@ async def user_stats(channel_id, user_id, ts_from=None):
 	"""
 	cte_params = [channel_id, user_id, *dp]
 	best_ally_data = await db.fetchall(
-		_ally_cte + "SELECT nick, played, wins, losses, win_pct FROM ally_stats ORDER BY win_pct DESC LIMIT 5",
+		_ally_cte + "SELECT nick, played, wins, losses, win_pct, weighted_win_pct FROM ally_stats ORDER BY weighted_win_pct DESC LIMIT 5",
 		cte_params
 	)
 	worst_ally_data = await db.fetchall(
-		_ally_cte + "SELECT nick, played, wins, losses, win_pct FROM ally_stats ORDER BY win_pct ASC LIMIT 5",
+		_ally_cte + "SELECT nick, played, wins, losses, win_pct, weighted_win_pct FROM ally_stats ORDER BY weighted_win_pct ASC LIMIT 5",
 		cte_params
 	)
 	best_enemy_data = await db.fetchall(
-		_enemy_cte + "SELECT nick, played, wins, losses, win_pct FROM enemy_stats ORDER BY win_pct DESC LIMIT 5",
+		_enemy_cte + "SELECT nick, played, wins, losses, win_pct, weighted_win_pct FROM enemy_stats ORDER BY weighted_win_pct DESC LIMIT 5",
 		cte_params
 	)
 	worst_enemy_data = await db.fetchall(
-		_enemy_cte + "SELECT nick, played, wins, losses, win_pct FROM enemy_stats ORDER BY win_pct ASC LIMIT 5",
+		_enemy_cte + "SELECT nick, played, wins, losses, win_pct, weighted_win_pct FROM enemy_stats ORDER BY weighted_win_pct ASC LIMIT 5",
 		cte_params
 	)
 	stats = dict(total=sum((i['count'] for i in queue_data)))
