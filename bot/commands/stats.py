@@ -138,7 +138,7 @@ async def stats(ctx, player: Member = None, period: str = None):
 			worst_enemy_data += f"{we['nick']} | {we['played']} | {we['wins']} | {we['losses']} | {we['weighted_win_pct']}%\n"
 		worst_enemy_data += "```"
 		embed.add_field(name='Worst Enemy (Kryptonite)', value=worst_enemy_data, inline=False)
-	await ctx.reply(embed=embed)
+	await ctx.reply_dm(embed=embed)
 
 
 async def top(ctx, period=None):
