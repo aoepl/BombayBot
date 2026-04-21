@@ -346,6 +346,7 @@ async def user_stats(channel_id, user_id, ts_from=None):
 		)
 		SELECT
 			h.user_id,
+			p.rating,
 			MAX(h.rating_before + h.rating_change) AS max_rating,
 			MIN(h.rating_before + h.rating_change) AS min_rating,
 			MAX(CASE WHEN h.rating_before + h.rating_change = (

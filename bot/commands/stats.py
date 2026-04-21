@@ -96,7 +96,7 @@ async def stats(ctx, player: Member = None, period: str = None):
 			return datetime.datetime.fromtimestamp(int(val)).strftime('%Y-%m-%d')
 
 		embed.add_field(name='Result', value=f"Win: {str(ratings['wins'])} | Loss: {str(ratings['losses'])} | Winrate: {str(ratings['win_pct'])}%", inline=False)
-		embed.add_field(name='Rating', value=f"Max: **{ratings['max_rating']}** ({_fmt_at(ratings['max_rating_at'])}) | Min: **{ratings['min_rating']}** ({_fmt_at(ratings['min_rating_at'])})", inline=False)
+		embed.add_field(name='Rating', value=f"Current: **{ratings['rating']}** | Max: **{ratings['max_rating']}** ({_fmt_at(ratings['max_rating_at'])}) | Min: **{ratings['min_rating']}** ({_fmt_at(ratings['min_rating_at'])})", inline=False)
 		embed.add_field(name='Streak', value=f"Current: {str(ratings['current_streak'])} | Max Win: {str(ratings['max_win_streak'])} | Max Loss: {str(ratings['max_loss_streak'])}", inline=False)
 
 	maps = data.get('maps')
