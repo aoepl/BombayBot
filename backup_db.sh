@@ -36,6 +36,12 @@ docker exec "$CONTAINER_NAME" \
   > "$BACKUP_FILE"
 
 # ─────────────────────────────────────────────
+# Export dbdump to milesweb
+# ─────────────────────────────────────────────
+echo "Exporting database to remote..."
+mysql --defaults-group-suffix=remote < $BACKUP_FILE
+
+# ─────────────────────────────────────────────
 # Optional: compress backup
 # ─────────────────────────────────────────────
 gzip "$BACKUP_FILE"
