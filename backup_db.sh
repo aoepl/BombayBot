@@ -40,5 +40,12 @@ docker exec "$CONTAINER_NAME" \
 # ─────────────────────────────────────────────
 gzip "$BACKUP_FILE"
 
-echo "✅ Backup completed:"
+echo "Backup completed:"
 echo "   ${BACKUP_FILE}.gz"
+
+
+# ─────────────────────────────────────────────
+# Purge backups older than 30 days
+# ─────────────────────────────────────────────
+echo "Purging backups older than 30 days..."
+find "$BACKUP_DIR" -type f -mtime +30 -print -delete
