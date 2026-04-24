@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-import mmap
 import random
+from collections import deque  # NEW: store failed map sets in retry order
+
 import bot
 from nextcord.errors import DiscordException
 
@@ -12,7 +13,7 @@ class CheckIn:
 
 	READY_EMOJI = "☑"
 	NOT_READY_EMOJI = "⛔"
-	INT_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6⃣", "7⃣", "8⃣", "9⃣"]
+	INT_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
 
 	def __init__(self, match, timeout):
 		self.m = match
@@ -22,12 +23,13 @@ class CheckIn:
 		self.ready_players = set()
 		self.discarded_players = set()
 		self.message = None
+		self.finished = False
 
 		for p in (p for p in self.m.players if p.id in bot.auto_ready.keys()):
 			self.ready_players.add(p)
 
 		if len(self.m.cfg['maps']) > 1 and self.m.cfg['vote_maps']:
-			self.maps = self.m.random_maps(self.m.cfg['maps'], self.m.cfg['vote_maps'], self.m.queue.last_maps)
+			self.maps = self._take_maps_for_attempt()  # CHANGED: reuse failed maps before generating new ones
 			self.map_votes = [set() for i in self.maps]
 		else:
 			self.maps = []
@@ -36,8 +38,36 @@ class CheckIn:
 		if self.timeout:
 			self.m.states.append(self.m.CHECK_IN)
 
+	# NEW: get queue-level retry storage for failed map sets
+	def _get_failed_map_retries(self):
+		retries = getattr(self.m.queue, 'failed_map_retries', None)
+		if retries is None:
+			retries = deque()
+			setattr(self.m.queue, 'failed_map_retries', retries)
+		return retries
+
+	# NEW: use oldest failed map set first, otherwise generate fresh maps
+	def _take_maps_for_attempt(self):
+		retries = self._get_failed_map_retries()
+		if retries:
+			return list(retries.popleft())
+
+		return self.m.random_maps(
+			self.m.cfg['maps'],
+			self.m.cfg['vote_maps'],
+			self.m.queue.last_maps
+		)
+
+	# NEW: preserve this attempt's maps when match creation fails
+	def _store_maps_for_retry(self):
+		if not self.maps:
+			return
+
+		retries = self._get_failed_map_retries()
+		retries.append(list(self.maps))
+
 	async def think(self, frame_time):
-		if frame_time > self.m.start_time + self.timeout:
+		if not self.finished and frame_time > self.m.start_time + self.timeout:
 			ctx = bot.SystemContext(self.m.qc)
 			if self.allow_discard:
 				await self.abort_timeout(ctx)
@@ -45,8 +75,8 @@ class CheckIn:
 				await self.finish(ctx)
 
 	async def start(self, ctx):
-		text = f"!spawn message {self.m.id}"
-		self.message = await ctx.channel.send(text)
+		not_ready = list(filter(lambda m: m not in self.ready_players, self.m.players))
+		self.message = await ctx.channel.send(embed=self.m.embeds.check_in(not_ready))
 
 		emojis = [self.READY_EMOJI, '🔸', self.NOT_READY_EMOJI] if self.allow_discard else [self.READY_EMOJI]
 		emojis += [self.INT_EMOJIS[n] for n in range(len(self.maps))]
@@ -56,7 +86,6 @@ class CheckIn:
 		except DiscordException:
 			pass
 		bot.waiting_reactions[self.message.id] = self.process_reaction
-		await self.refresh(ctx)
 
 	async def refresh(self, ctx):
 		not_ready = list(filter(lambda m: m not in self.ready_players, self.m.players))
@@ -68,6 +97,8 @@ class CheckIn:
 					await self.message.delete()
 				except DiscordException:
 					pass
+
+			self._store_maps_for_retry()  # NEW: keep same maps for next trigger after failed check-in
 
 			# all not ready players discarded check in
 			await ctx.notice('\n'.join((
@@ -94,14 +125,19 @@ class CheckIn:
 			await self.finish(ctx)
 
 	async def finish(self, ctx):
-		bot.waiting_reactions.pop(self.message.id)
+		self.finished = True
+		if self.message:
+			bot.waiting_reactions.pop(self.message.id, None)
+			try:
+				await self.message.delete()
+			except DiscordException:
+				pass
 		self.ready_players = set()
 		if len(self.maps):
 			order = list(range(len(self.maps)))
 			random.shuffle(order)
 			order.sort(key=lambda n: len(self.map_votes[n]), reverse=True)
 			self.m.maps = [self.maps[n] for n in order[:self.m.cfg['map_count']]]
-		await self.message.delete()
 
 		for p in (p for p in self.m.players if p.id in bot.auto_ready.keys()):
 			bot.auto_ready.pop(p.id)
@@ -114,7 +150,7 @@ class CheckIn:
 
 		if str(reaction) in self.INT_EMOJIS:
 			idx = self.INT_EMOJIS.index(str(reaction))
-			if idx <= len(self.maps):
+			if idx < len(self.maps):  # CHANGED: fix map index bounds check
 				if remove:
 					self.map_votes[idx].discard(user.id)
 					self.ready_players.discard(user)
@@ -122,7 +158,7 @@ class CheckIn:
 					self.map_votes[idx].add(user.id)
 					self.discarded_players.discard(user)
 					self.ready_players.add(user)
-				await self.refresh(bot.SystemContext(self.m.queue.qc))
+				await self.refresh(bot.SystemContext(self.m.qc))
 
 		elif str(reaction) == self.READY_EMOJI:
 			if remove:
@@ -130,12 +166,12 @@ class CheckIn:
 			else:
 				self.discarded_players.discard(user)
 				self.ready_players.add(user)
-			await self.refresh(bot.SystemContext(self.m.queue.qc))
+			await self.refresh(bot.SystemContext(self.m.qc))
 
 		elif str(reaction) == self.NOT_READY_EMOJI and self.allow_discard:
 			if self.discard_immediately:
-				return await self.abort_member(bot.SystemContext(self.m.queue.qc), user)
-			return await self.discard_member(bot.SystemContext(self.m.queue.qc), user)
+				return await self.abort_member(bot.SystemContext(self.m.qc), user)
+			return await self.discard_member(bot.SystemContext(self.m.qc), user)
 
 	async def set_ready(self, ctx, member, ready):
 		if self.m.state != self.m.CHECK_IN:
@@ -157,7 +193,8 @@ class CheckIn:
 		await self.refresh(ctx)
 
 	async def abort_member(self, ctx, member):
-		bot.waiting_reactions.pop(self.message.id)
+		bot.waiting_reactions.pop(self.message.id, None)
+		self._store_maps_for_retry()  # NEW: keep same maps when player abandons
 		await self.message.delete()
 		await ctx.notice("\n".join((
 			self.m.gt("{member} has aborted the check-in.").format(member=f"<@{member.id}>"),
@@ -175,6 +212,8 @@ class CheckIn:
 				await self.message.delete()
 			except DiscordException:
 				pass
+
+		self._store_maps_for_retry()  # NEW: keep same maps when check-in times out
 
 		bot.active_matches.remove(self.m)
 
