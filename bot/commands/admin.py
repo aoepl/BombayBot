@@ -1,14 +1,15 @@
 __all__ = [
 	'noadds', 'noadd', 'forgive', 'rating_seed', 'rating_penality', 'rating_hide',
 	'rating_reset', 'rating_snap', 'stats_reset', 'stats_reset_player', 'stats_replace_player',
-	'phrases_add', 'phrases_clear', 'undo_match', 'douche_add', 'douche_leaderboard', 'douche_summary'
+	'phrases_add', 'phrases_clear', 'undo_match', 'douche_add', 'douche_leaderboard', 'douche_summary',
+	'predictions_leaderboard'
 ]
 
 from time import time
 from datetime import timedelta
 from nextcord import Member
 
-from core.utils import seconds_to_str, get_nick
+from core.utils import seconds_to_str, get_nick, discord_table
 
 import bot
 
@@ -154,17 +155,43 @@ async def douche_summary(ctx, player: Member):
 
 async def douche_leaderboard(ctx):
 	data = await bot.douche.get_leaderboard(ctx)
-	s = "```markdown\n Douche leaderboard:\n"
-	s += " # | Player | Count"
-	s += "\n-----------------------------\n"
-	if data:
-		s += "\n".join((
-			f" {i+1} | {row['name']} | {row['count']}"
+	if not data:
+		await ctx.reply("```No douche data yet.```")
+		return
+	await ctx.reply(discord_table(
+		["#", "Player", "Count"],
+		[[i + 1, row['name'][:16], row['count']] for i, row in enumerate(data)]
+	))
+
+async def predictions_leaderboard(ctx):
+	from core.database import db
+	guild_id = ctx.channel.guild.id
+	data = await db.fetchall(
+		"""
+		SELECT p.user_id, COALESCE(qp.nick, CAST(p.user_id AS CHAR)) AS name,
+			COUNT(*) AS total,
+			SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) AS correct,
+			ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy
+		FROM predictions p
+		JOIN qc_matches m ON p.match_id = m.match_id
+		LEFT JOIN qc_players qp ON qp.user_id = p.user_id AND qp.channel_id = m.channel_id
+		WHERE p.guild_id = %s AND m.winner IS NOT NULL
+		GROUP BY p.user_id, name
+		ORDER BY correct DESC, accuracy DESC
+		LIMIT 10
+		""",
+		[guild_id]
+	)
+	if not data:
+		await ctx.reply("```No prediction data yet.```")
+		return
+	await ctx.reply(discord_table(
+		["#", "Player", "Correct", "Total", "Accuracy"],
+		[
+			[i + 1, row['name'][:16], row['correct'], row['total'], f"{row['accuracy']}%"]
 			for i, row in enumerate(data)
-		))
-	else:
-		s += "No data yet."
-	await ctx.reply(s + "\n```")
+		]
+	))
 
 
 async def undo_match(ctx, match_id: int):

@@ -1,15 +1,32 @@
 # -*- coding: utf-8 -*-
+import time
 import bot
 from nextcord.errors import DiscordException
 
-from bot.match.embeds import Embeds
+from .embeds import Embeds
 from core.console import log
+from core.database import db
 
+db.ensure_table(dict(
+	tname="predictions",
+	columns=[
+		dict(cname="id", ctype=db.types.int, autoincrement=True),
+		dict(cname="guild_id", ctype=db.types.int),
+		dict(cname="user_id", ctype=db.types.int),
+		dict(cname="match_id", ctype=db.types.int),
+		dict(cname="team", ctype=db.types.bool),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["id"]
+))
 
 class Predictions:
 
 	TEAM1_EMOJI = "1️⃣"
 	TEAM2_EMOJI = "2️⃣"
+
+	TEAM1_ID = 0
+	TEAM2_ID = 1
 
 	def __init__(self, match, timeout):
 		self.m = match
@@ -27,7 +44,7 @@ class Predictions:
 	async def start(self, ctx):
 		try:
 			self.message = await ctx.channel.send(embed=self.embeds.start_predictions())
-			emojis = [self.TEAM1_EMOJI, '🔸', self.TEAM2_EMOJI]
+			emojis = [self.TEAM1_EMOJI, self.TEAM2_EMOJI]
 			for emoji in emojis:
 				await self.message.add_reaction(emoji)
 			bot.waiting_reactions[self.message.id] = self.process_reaction
@@ -43,6 +60,17 @@ class Predictions:
 			except DiscordException:
 				pass
 		await ctx.notice(embed=self.embeds.end_predictions())
+		await self._save_predictions()
+
+	async def _save_predictions(self):
+		if not self.predictions:
+			return
+		guild_id = self.m.qc.guild_id
+		now = int(time.time())
+		await db.insert_many('predictions', [
+			dict(guild_id=guild_id, user_id=user.id, match_id=self.m.id, team=team_vote, at=now)
+			for user, team_vote in self.predictions.items()
+		], on_dublicate="ignore")
 
 	async def process_reaction(self, reaction, user):
 		if self.m.state != self.m.WAITING_REPORT or user in self.m.players:
@@ -53,10 +81,10 @@ class Predictions:
 				await self.message.remove_reaction(self.TEAM2_EMOJI, user)
 			except DiscordException:
 				pass
-			self.predictions[user] = 1
+			self.predictions[user] = self.TEAM1_ID
 		elif str(reaction) == self.TEAM2_EMOJI:
 			try:
 				await self.message.remove_reaction(self.TEAM1_EMOJI, user)
 			except DiscordException:
 				pass
-			self.predictions[user] = 2
+			self.predictions[user] = self.TEAM2_ID

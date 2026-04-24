@@ -194,7 +194,7 @@ class Embeds:
 	def start_predictions(self):
 		embed = Embed(
 			colour=Colour(0x27b75e),
-			title=self.m.qc.gt("__Predictions for **Match id {match_id}** has started!__").format(
+			title=self.m.qc.gt("__Predictions for Match id {match_id} has started!__").format(
 				match_id=self.m.id
 			)
 		)
@@ -207,7 +207,7 @@ class Embeds:
 		]
 		embed.add_field(
 			name="—",
-			value=self.m.gt("You can now predict a winner team {team_one} or {team_two}").format(
+			value=self.m.gt("Please show your support for {team_one} or {team_two}").format(
 				team_one=teams_names[0],
 				team_two=teams_names[1]
 			),
@@ -233,7 +233,7 @@ class Embeds:
 	def end_predictions(self):
 		embed = Embed(
 			colour=Colour(0x27b75e),
-			title=self.m.qc.gt("__Predictions ended for **Match id {match_id}**!__").format(
+			title=self.m.qc.gt("__Predictions for Match id {match_id} has ended!__").format(
 				match_id=self.m.id
 			)
 		)
@@ -249,15 +249,17 @@ class Embeds:
 		]
 		# supporters are spectator Users from reactions, not match players
 		votes = self.m.predictions.predictions
+		team1_supporters = [u.mention for u, v in votes.items() if v == self.m.predictions.TEAM1_ID]
+		team2_supporters = [u.mention for u, v in votes.items() if v == self.m.predictions.TEAM2_ID]
 		team_supporters = [
-			" ".join(u.mention for u, v in votes.items() if v == 1) or "—",
-			" ".join(u.mention for u, v in votes.items() if v == 2) or "—",
+			" ".join(team1_supporters) or "—",
+			" ".join(team2_supporters) or "—",
 		]
 		team_players[1] += "\n\u200b"  # Extra empty line
 		embed.add_field(name=teams_names[0], value=team_players[0], inline=False)
-		embed.add_field(name=f"{teams_names[0]} supporters", value=team_supporters[0], inline=False)
+		embed.add_field(name=f"Supporters ({len(team1_supporters)}): ", value=team_supporters[0], inline=False)
 		embed.add_field(name=teams_names[1], value=team_players[1], inline=False)
-		embed.add_field(name=f"{teams_names[1]} supporters", value=team_supporters[1], inline=False)
+		embed.add_field(name=f"Supporters ({len(team2_supporters)}): ", value=team_supporters[1], inline=False)
 		embed.set_footer(**self.footer)
 
 		return embed

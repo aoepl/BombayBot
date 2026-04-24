@@ -241,7 +241,10 @@ class Match:
 		elif self.state == self.CHECK_IN:
 			await self.check_in.think(frame_time)
 
-		elif frame_time > self.lifetime + self.start_time:
+		elif self.state == self.WAITING_REPORT:
+			await self.predictions.think(frame_time)
+
+		if frame_time > self.lifetime + self.start_time:
 			ctx = bot.SystemContext(self.qc)
 			try:
 				await ctx.error(self.gt("Match {queue} ({id}) has timed out.").format(

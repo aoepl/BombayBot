@@ -417,7 +417,7 @@ async def _stats_undo_match(
 
 # douche -> ...
 
-@groups.admin_douche.subcommand(name='add', description='Record a player douched in a match.')
+@groups.douche.subcommand(name='add', description='Record a player douched in a match.')
 async def _douche_add(
 		interaction: Interaction,
 		player: Member = SlashOption(verify=False),
@@ -425,18 +425,22 @@ async def _douche_add(
 ): await run_slash(bot.commands.douche_add, interaction=interaction, player=player, target=target)
 
 
-@groups.admin_douche.subcommand(name='summary', description='Show douche summary for a player.')
+@groups.douche.subcommand(name='summary', description='Show douche summary for a player.')
 async def _douche_summary(
 		interaction: Interaction,
 		player: Member = SlashOption(verify=False)
 ): await run_slash(bot.commands.douche_summary, interaction=interaction, player=player)
 
 
-@groups.admin_douche.subcommand(name='leaderboard', description='Show douche leaderboard.')
+@groups.douche.subcommand(name='leaderboard', description='Show douche leaderboard.')
 async def _douche_leaderboard(
 		interaction: Interaction
 ): await run_slash(bot.commands.douche_leaderboard, interaction=interaction)
 
+@groups.predictions.subcommand(name='leaderboard', description='Show douche leaderboard.')
+async def _predictions_leaderboard(
+		interaction: Interaction
+): await run_slash(bot.commands.predictions_leaderboard, interaction=interaction)
 
 # root commands
 
