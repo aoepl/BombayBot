@@ -12,6 +12,7 @@ from core.client import dc
 from .check_in import CheckIn
 from .draft import Draft
 from .embeds import Embeds
+from .predictions import Predictions
 
 
 class Match:
@@ -174,6 +175,7 @@ class Match:
 
 		# Init self sections
 		self.check_in = CheckIn(self, self.cfg['check_in_timeout'])
+		self.predictions = Predictions(self, self.cfg['check_in_timeout'])
 		self.draft = Draft(self, self.cfg['pick_order'], self.cfg['captains_role_id'])
 		self.embeds = Embeds(self)
 
@@ -377,6 +379,7 @@ class Match:
 			await ctx.notice(embed=self.embeds.final_message())
 		except DiscordException:
 			pass
+		await self.predictions.start(ctx)
 
 	async def finish_match(self, ctx):
 		bot.active_matches.remove(self)

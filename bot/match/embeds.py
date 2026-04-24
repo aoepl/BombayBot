@@ -144,10 +144,7 @@ class Embeds:
 				for t in self.m.teams[:2]
 			]
 			team_players = [
-				" \u200b " +
-				" \u200b ".join([
-					self._ranked_mention(p) for p in t
-				])
+				self.format_players(t)
 				for t in self.m.teams[:2]
 			]
 			team_players[1] += "\n\u200b"  # Extra empty line
@@ -193,3 +190,80 @@ class Embeds:
 		embed.set_footer(**self.footer)
 
 		return embed
+
+	def start_predictions(self):
+		embed = Embed(
+			colour=Colour(0x27b75e),
+			title=self.m.qc.gt("__Predictions for **Match id {match_id}** has started!__").format(
+				match_id=self.m.id
+			)
+		)
+
+		emojis = [self.m.predictions.TEAM1_EMOJI, self.m.predictions.TEAM2_EMOJI]
+		teams_names = [
+			f"{emojis[i]} \u200b **{t.name}**" +
+			(f" \u200b `〈{sum((self.m.ratings[p.id] for p in t))//(len(t) or 1)}〉`" if self.m.ranked else "")
+			for i, t in enumerate(self.m.teams[:2])
+		]
+		embed.add_field(
+			name="—",
+			value=self.m.gt("You can now predict a winner team {team_one} or {team_two}").format(
+				team_one=teams_names[0],
+				team_two=teams_names[1]
+			),
+			inline=False
+		)
+		team_players = [
+			self.format_players(t)
+			for t in self.m.teams[:2]
+		]
+		team_players[1] += "\n\u200b"  # Extra empty line
+		embed.add_field(name=teams_names[0], value=team_players[0], inline=False)
+		embed.add_field(name=teams_names[1], value=team_players[1], inline=False)
+		if len(self.m.maps):
+			embed.add_field(
+				name=self.m.qc.gt("Map" if len(self.m.maps) == 1 else "Maps"),
+				value="\n".join((f"**{i}**" for i in self.m.maps)),
+				inline=True
+			)
+		embed.set_footer(**self.footer)
+
+		return embed
+
+	def end_predictions(self):
+		embed = Embed(
+			colour=Colour(0x27b75e),
+			title=self.m.qc.gt("__Predictions ended for **Match id {match_id}**!__").format(
+				match_id=self.m.id
+			)
+		)
+
+		teams_names = [
+			f"{t.emoji} \u200b **{t.name}**" +
+			(f" \u200b `〈{sum((self.m.ratings[p.id] for p in t))//(len(t) or 1)}〉`" if self.m.ranked else "")
+			for t in self.m.teams[:2]
+		]
+		team_players = [
+			self.format_players(t)
+			for t in self.m.teams[:2]
+		]
+		# supporters are spectator Users from reactions, not match players
+		votes = self.m.predictions.predictions
+		team_supporters = [
+			" ".join(u.mention for u, v in votes.items() if v == 1) or "—",
+			" ".join(u.mention for u, v in votes.items() if v == 2) or "—",
+		]
+		team_players[1] += "\n\u200b"  # Extra empty line
+		embed.add_field(name=teams_names[0], value=team_players[0], inline=False)
+		embed.add_field(name=f"{teams_names[0]} supporters", value=team_supporters[0], inline=False)
+		embed.add_field(name=teams_names[1], value=team_players[1], inline=False)
+		embed.add_field(name=f"{teams_names[1]} supporters", value=team_supporters[1], inline=False)
+		embed.set_footer(**self.footer)
+
+		return embed
+
+	def format_players(self, players) -> str:
+		return (" \u200b " +
+		        " \u200b ".join([
+					self._ranked_mention(p) for p in players
+				]))
