@@ -199,33 +199,19 @@ class Embeds:
 			)
 		)
 
-		emojis = [self.m.predictions.TEAM1_EMOJI, self.m.predictions.TEAM2_EMOJI]
+		team1 = self.m.teams[0]
+		team2 = self.m.teams[1]
 		teams_names = [
-			f"{emojis[i]} \u200b **{t.name}**" +
-			(f" \u200b `〈{sum((self.m.ratings[p.id] for p in t))//(len(t) or 1)}〉`" if self.m.ranked else "")
-			for i, t in enumerate(self.m.teams[:2])
+			f"{team1.emoji} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {self.m.team_odds[0]}`",
+			f"{team1.emoji} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {self.m.team_odds[1]}`",
 		]
 		embed.add_field(
-			name="—",
-			value=self.m.gt("Please show your support for {team_one} or {team_two}").format(
-				team_one=teams_names[0],
-				team_two=teams_names[1]
-			),
-			inline=False
+			name="Express your support for your preferred team",
+			value="\n".join([
+				f"{t}"
+				for t in enumerate(teams_names)
+			]), inline=False
 		)
-		team_players = [
-			self.format_players(t)
-			for t in self.m.teams[:2]
-		]
-		team_players[1] += "\n\u200b"  # Extra empty line
-		embed.add_field(name=teams_names[0], value=team_players[0], inline=False)
-		embed.add_field(name=teams_names[1], value=team_players[1], inline=False)
-		if len(self.m.maps):
-			embed.add_field(
-				name=self.m.qc.gt("Map" if len(self.m.maps) == 1 else "Maps"),
-				value="\n".join((f"**{i}**" for i in self.m.maps)),
-				inline=True
-			)
 		embed.set_footer(**self.footer)
 
 		return embed
@@ -238,28 +224,20 @@ class Embeds:
 			)
 		)
 
-		teams_names = [
-			f"{t.emoji} \u200b **{t.name}**" +
-			(f" \u200b `〈{sum((self.m.ratings[p.id] for p in t))//(len(t) or 1)}〉`" if self.m.ranked else "")
-			for t in self.m.teams[:2]
-		]
-		team_players = [
-			self.format_players(t)
-			for t in self.m.teams[:2]
-		]
-		# supporters are spectator Users from reactions, not match players
+		team1 = self.m.teams[0]
+		team2 = self.m.teams[1]
 		votes = self.m.predictions.predictions
-		team1_supporters = [u.mention for u, v in votes.items() if v == self.m.predictions.TEAM1_ID]
-		team2_supporters = [u.mention for u, v in votes.items() if v == self.m.predictions.TEAM2_ID]
-		team_supporters = [
-			" ".join(team1_supporters) or "—",
-			" ".join(team2_supporters) or "—",
-		]
-		team_players[1] += "\n\u200b"  # Extra empty line
-		embed.add_field(name=teams_names[0], value=team_players[0], inline=False)
-		embed.add_field(name=f"Supporters ({len(team1_supporters)}): ", value=team_supporters[0], inline=False)
-		embed.add_field(name=teams_names[1], value=team_players[1], inline=False)
-		embed.add_field(name=f"Supporters ({len(team2_supporters)}): ", value=team_supporters[1], inline=False)
+		team1_supporters = [u.mention for u, v in votes.items() if v == self.m.teams[0].idx]
+		team2_supporters = [u.mention for u, v in votes.items() if v == self.m.teams[1].idx]
+
+		embed.add_field(
+			name=f"{team1.emoji} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {self.m.team_odds[0]}`",
+			value=(" ".join(team1_supporters) and f"Supporters({len(team1_supporters)}): {chr(32).join(team1_supporters)}") or "Supporters(0): —", inline=False
+		)
+		embed.add_field(
+			name=f"{team2.emoji} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {self.m.team_odds[1]}`",
+			value=(" ".join(team2_supporters) and f"Supporters({len(team2_supporters)}): {chr(32).join(team2_supporters)}") or "Supporters(0): —", inline=False
+		)
 		embed.set_footer(**self.footer)
 
 		return embed

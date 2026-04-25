@@ -171,7 +171,8 @@ async def predictions_leaderboard(ctx):
 		SELECT p.user_id, COALESCE(qp.nick, CAST(p.user_id AS CHAR)) AS name,
 			COUNT(*) AS total,
 			SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) AS correct,
-			ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy
+			ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy,
+			ROUND(SUM(CASE WHEN m.winner = p.team THEN 100.0 / NULLIF(p.win_prob, 0) ELSE 0 END), 1) AS win_prob_score
 		FROM predictions p
 		JOIN qc_matches m ON p.match_id = m.match_id
 		LEFT JOIN qc_players qp ON qp.user_id = p.user_id AND qp.channel_id = m.channel_id
@@ -186,9 +187,9 @@ async def predictions_leaderboard(ctx):
 		await ctx.reply("```No prediction data yet.```")
 		return
 	await ctx.reply(discord_table(
-		["#", "Player", "Correct", "Total", "Accuracy"],
+		["#", "Player", "Record ⬇️", "Accuracy", "Win Probability Score"],
 		[
-			[i + 1, row['name'][:16], row['correct'], row['total'], f"{row['accuracy']}%"]
+			[i + 1, row['name'][:16], f"{row['correct']} / {row['total']}", f"{row['accuracy']}%", row['win_prob_score']]
 			for i, row in enumerate(data)
 		]
 	))

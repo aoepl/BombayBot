@@ -157,6 +157,8 @@ class Match:
 		self.ratings = ratings
 		self.winner = None
 		self.scores = [0, 0]
+		self.team_ratings = [0, 0]
+		self.team_odds = [0.0, 0.0]
 
 		team_names = self.cfg['team_names']
 		team_emojis = self.cfg['team_emojis'] or random.sample(self.TEAM_EMOJIS, 2)
@@ -175,7 +177,7 @@ class Match:
 
 		# Init self sections
 		self.check_in = CheckIn(self, self.cfg['check_in_timeout'])
-		self.predictions = Predictions(self, self.cfg['check_in_timeout'])
+		self.predictions = Predictions(self, 3 * self.cfg['check_in_timeout'])
 		self.draft = Draft(self, self.cfg['pick_order'], self.cfg['captains_role_id'])
 		self.embeds = Embeds(self)
 
@@ -233,6 +235,10 @@ class Match:
 			self.teams[0].set(random.sample(self.players, min(len(self.players)//2, self.cfg['team_size'])))
 			self.teams[1].set([p for p in self.players if p not in self.teams[0]][:self.cfg['team_size']])
 			self.teams[2].set([p for p in self.players if p not in [*self.teams[0], *self.teams[1]]])
+		self.team_ratings[0] = sum((self.ratings[p.id] for p in self.teams[0]))//(len(self.teams[0]) or 1)
+		self.team_ratings[1] = sum((self.ratings[p.id] for p in self.teams[1]))//(len(self.teams[1]) or 1)
+		self.team_odds[0] = 1+10**(-(self.team_ratings[0]-self.team_ratings[1])/400)
+		self.team_odds[1] = 1+10**(-(self.team_ratings[1]-self.team_ratings[0])/400)
 
 	async def think(self, frame_time):
 		if self.state == self.INIT:
