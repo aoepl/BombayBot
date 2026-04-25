@@ -23,6 +23,8 @@ db.ensure_table(dict(
 
 class Predictions:
 
+	TEAM_EMOJIS = ["🔵", "🔴"]
+
 	def __init__(self, match, timeout):
 		self.m = match
 		self.timeout = timeout
@@ -39,9 +41,8 @@ class Predictions:
 	async def start(self, ctx):
 		try:
 			self.message = await ctx.channel.send(embed=self.embeds.start_predictions())
-			emojis = [self.m.teams[0].emoji, self.m.teams[1].emoji]
-			for emoji in emojis:
-				await self.message.add_reaction(emoji)
+			await self.message.add_reaction(self.TEAM_EMOJIS[0])
+			await self.message.add_reaction(self.TEAM_EMOJIS[1])
 			bot.waiting_reactions[self.message.id] = self.process_reaction
 		except DiscordException as e:
 			log.error(f"Predictions.start failed: {e}")
@@ -83,15 +84,15 @@ class Predictions:
 		if self.m.state != self.m.WAITING_REPORT or user in self.m.players:
 			return
 
-		if str(reaction) == self.m.teams[0].emoji:
+		if str(reaction) == self.TEAM_EMOJIS[0]:
 			try:
-				await self.message.remove_reaction(self.m.teams[1].emoji, user)
+				await self.message.remove_reaction(self.TEAM_EMOJIS[1], user)
 			except DiscordException:
 				pass
 			self.predictions[user] = self.m.teams[0].idx
-		elif str(reaction) == self.m.teams[1].emoji:
+		elif str(reaction) == self.TEAM_EMOJIS[1]:
 			try:
-				await self.message.remove_reaction(self.m.teams[0].emoji, user)
+				await self.message.remove_reaction(self.TEAM_EMOJIS[0], user)
 			except DiscordException:
 				pass
 			self.predictions[user] = self.m.teams[1].idx

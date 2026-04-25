@@ -201,16 +201,15 @@ class Embeds:
 
 		team1 = self.m.teams[0]
 		team2 = self.m.teams[1]
+		from .predictions import Predictions as _P
 		teams_names = [
-			f"{team1.emoji} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {self.m.team_odds[0]}`",
-			f"{team1.emoji} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {self.m.team_odds[1]}`",
+			f"{_P.TEAM_EMOJIS[0]} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {round(self.m.team_odds[0], 2)}`",
+			f"{_P.TEAM_EMOJIS[1]} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {round(self.m.team_odds[1], 2)}`",
 		]
 		embed.add_field(
-			name="Express your support for your preferred team",
-			value="\n".join([
-				f"{t}"
-				for t in enumerate(teams_names)
-			]), inline=False
+			name="React to predict the winner",
+			value="\n".join(teams_names),
+			inline=False
 		)
 		embed.set_footer(**self.footer)
 
@@ -231,11 +230,11 @@ class Embeds:
 		team2_supporters = [u.mention for u, v in votes.items() if v == self.m.teams[1].idx]
 
 		embed.add_field(
-			name=f"{team1.emoji} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {self.m.team_odds[0]}`",
+			name=f"{team1.emoji} \u200b **Team {team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {round(self.m.team_odds[0], 2)}`",
 			value=(" ".join(team1_supporters) and f"Supporters({len(team1_supporters)}): {chr(32).join(team1_supporters)}") or "Supporters(0): —", inline=False
 		)
 		embed.add_field(
-			name=f"{team2.emoji} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {self.m.team_odds[1]}`",
+			name=f"{team2.emoji} \u200b **Team {team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {round(self.m.team_odds[1], 2)}`",
 			value=(" ".join(team2_supporters) and f"Supporters({len(team2_supporters)}): {chr(32).join(team2_supporters)}") or "Supporters(0): —", inline=False
 		)
 		embed.set_footer(**self.footer)
