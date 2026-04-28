@@ -439,8 +439,9 @@ async def _douche_leaderboard(
 
 @groups.predictions.subcommand(name='leaderboard', description='Show predictions leaderboard.')
 async def _predictions_leaderboard(
-		interaction: Interaction
-): await run_slash(bot.commands.predictions_leaderboard, interaction=interaction)
+		interaction: Interaction,
+		page: int = SlashOption(required=False),
+): await run_slash(bot.commands.predictions_leaderboard, interaction=interaction, page=page)
 
 # root commands
 

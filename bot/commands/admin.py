@@ -163,14 +163,12 @@ async def douche_leaderboard(ctx):
 		[[i + 1, row['name'][:16], row['count']] for i, row in enumerate(data)]
 	))
 
-async def predictions_leaderboard(ctx):
+async def predictions_leaderboard(ctx, page: int = 1):
 	from core.database import db
 	from time import time as _time
-	import bot as _bot
 
 	PAGE_SIZE = 10
-	PREV = "◀"
-	NEXT = "▶"
+	page = (page or 1) - 1
 
 	guild_id = ctx.channel.guild.id
 	week_ago = int(_time()) - 7 * 86400
@@ -202,48 +200,23 @@ async def predictions_leaderboard(ctx):
 		return
 
 	total_pages = max(1, (len(data) + PAGE_SIZE - 1) // PAGE_SIZE)
+	page = max(0, min(page, total_pages - 1))
+	offset = page * PAGE_SIZE
+	rows = data[offset:offset + PAGE_SIZE]
 
 	def _7d(row):
 		if row['7d_accuracy'] != -1:
 			return f"{row['7d_accuracy']}% ({row['7d_correct']}/{row['7d_total']})"
 		return f"— ({row['7d_total']}/10)"
 
-	def render_page(page):
-		offset = page * PAGE_SIZE
-		rows = data[offset:offset + PAGE_SIZE]
-		return discord_table(
-			["#", "Player", "Accuracy", "7d Accuracy ⬇️", "Bet Score"],
-			[
-				[offset + i + 1, row['name'][:16], f"{row['accuracy']}% ({row['correct']}/{row['total']})", _7d(row), row['win_prob_score']]
-				for i, row in enumerate(rows)
-			]
-		) + (f"\nPage {page + 1}/{total_pages}" if total_pages > 1 else "")
-
-	message = await ctx.reply(render_page(0))
-	if total_pages == 1 or message is None:
-		return
-
-	state = {"page": 0}
-	await message.add_reaction(PREV)
-	await message.add_reaction(NEXT)
-
-	async def handle_reaction(reaction, user, remove=False):
-		if remove:
-			return
-		emoji = str(reaction)
-		if emoji == PREV and state["page"] > 0:
-			state["page"] -= 1
-		elif emoji == NEXT and state["page"] < total_pages - 1:
-			state["page"] += 1
-		else:
-			return
-		try:
-			await message.remove_reaction(emoji, user)
-			await message.edit(content=render_page(state["page"]))
-		except Exception:
-			pass
-
-	_bot.waiting_reactions[message.id] = handle_reaction
+	table = discord_table(
+		["#", "Player", "Accuracy", "7d Accuracy ⬇️", "Bet Score"],
+		[
+			[offset + i + 1, row['name'][:16], f"{row['accuracy']}% ({row['correct']}/{row['total']})", _7d(row), row['win_prob_score']]
+			for i, row in enumerate(rows)
+		]
+	)
+	await ctx.reply(table + (f"\nPage {page + 1}/{total_pages}" if total_pages > 1 else ""))
 
 
 async def undo_match(ctx, match_id: int):
