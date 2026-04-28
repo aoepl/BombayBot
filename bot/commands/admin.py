@@ -166,38 +166,68 @@ async def douche_leaderboard(ctx):
 async def predictions_leaderboard(ctx, page: int = 1):
 	from core.database import db
 	from time import time as _time
+	from asyncio import gather
+	from itertools import groupby
 
 	PAGE_SIZE = 10
 	page = (page or 1) - 1
 
 	guild_id = ctx.channel.guild.id
 	week_ago = int(_time()) - 7 * 86400
-	data = await db.fetchall(
-		"""
-		SELECT p.user_id, COALESCE(qp.nick, CAST(p.user_id AS CHAR)) AS name,
-			COUNT(*) AS total,
-			SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) AS correct,
-			ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy,
-			SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) AS 7d_total,
-			SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END) AS 7d_correct,
-			CASE WHEN SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) >= 10
-				THEN ROUND(SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END)
-				     / SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) * 100, 1)
-				ELSE -1
-			END as 7d_accuracy,
-			ROUND(SUM(CASE WHEN m.winner = p.team THEN 100.0 / NULLIF(p.win_prob, 0) ELSE 0 END), 1) AS win_prob_score
-		FROM predictions p
-		JOIN qc_matches m ON p.match_id = m.match_id
-		LEFT JOIN qc_players qp ON qp.user_id = p.user_id AND qp.channel_id = m.channel_id
-		WHERE p.guild_id = %s AND m.winner IS NOT NULL
-		GROUP BY p.user_id, name
-		ORDER BY 7d_accuracy DESC
-		""",
-		[week_ago, week_ago, week_ago, week_ago, week_ago, guild_id]
+
+	data, streak_rows = await gather(
+		db.fetchall(
+			"""
+			SELECT p.user_id, COALESCE(qp.nick, CAST(p.user_id AS CHAR)) AS name,
+				COUNT(*) AS total,
+				SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) AS correct,
+				ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy,
+				SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) AS 7d_total,
+				SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END) AS 7d_correct,
+				CASE WHEN SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) >= 10
+					THEN ROUND(SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END)
+					     / SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) * 100, 1)
+					ELSE -1
+				END as 7d_accuracy,
+				ROUND(SUM(CASE WHEN m.winner = p.team THEN 100.0 / NULLIF(p.win_prob, 0) ELSE 0 END), 1) AS win_prob_score
+			FROM predictions p
+			JOIN qc_matches m ON p.match_id = m.match_id
+			LEFT JOIN qc_players qp ON qp.user_id = p.user_id AND qp.channel_id = m.channel_id
+			WHERE p.guild_id = %s AND m.winner IS NOT NULL
+			GROUP BY p.user_id, name
+			ORDER BY 7d_accuracy DESC
+			""",
+			[week_ago, week_ago, week_ago, week_ago, week_ago, guild_id]
+		),
+		db.fetchall(
+			"""
+			SELECT p.user_id, CASE WHEN m.winner = p.team THEN 1 ELSE 0 END AS correct
+			FROM predictions p
+			JOIN qc_matches m ON p.match_id = m.match_id
+			WHERE p.guild_id = %s AND m.winner IS NOT NULL
+			ORDER BY p.user_id, p.at DESC
+			""",
+			[guild_id]
+		)
 	)
 	if not data:
 		await ctx.reply("```No prediction data yet.```")
 		return
+
+	streaks = {}
+	for user_id, preds in groupby(streak_rows, key=lambda r: r['user_id']):
+		first = next(preds, None)
+		if first is None:
+			streaks[user_id] = 0
+			continue
+		direction = 1 if first['correct'] else -1
+		streak = direction
+		for p in preds:
+			if (p['correct'] and direction == 1) or (not p['correct'] and direction == -1):
+				streak += direction
+			else:
+				break
+		streaks[user_id] = streak
 
 	total_pages = max(1, (len(data) + PAGE_SIZE - 1) // PAGE_SIZE)
 	page = max(0, min(page, total_pages - 1))
@@ -210,9 +240,9 @@ async def predictions_leaderboard(ctx, page: int = 1):
 		return f"— ({row['7d_total']}/10)"
 
 	table = discord_table(
-		["#", "Player", "Accuracy", "7d Accuracy ⬇️", "Bet Score"],
+		["#", "Player", "Accuracy", "7d Accuracy ⬇️", "Streak", "Bet Score"],
 		[
-			[offset + i + 1, row['name'][:16], f"{row['accuracy']}% ({row['correct']}/{row['total']})", _7d(row), row['win_prob_score']]
+			[offset + i + 1, row['name'][:16], f"{row['accuracy']}% ({row['correct']}/{row['total']})", _7d(row), (lambda s: f"+{s}" if s > 0 else str(s))(streaks.get(row['user_id'], 0)), row['win_prob_score']]
 			for i, row in enumerate(rows)
 		]
 	)
