@@ -166,6 +166,12 @@ async def douche_leaderboard(ctx):
 async def predictions_leaderboard(ctx):
 	from core.database import db
 	from time import time as _time
+	import bot as _bot
+
+	PAGE_SIZE = 10
+	PREV = "◀"
+	NEXT = "▶"
+
 	guild_id = ctx.channel.guild.id
 	week_ago = int(_time()) - 7 * 86400
 	data = await db.fetchall(
@@ -188,21 +194,56 @@ async def predictions_leaderboard(ctx):
 		WHERE p.guild_id = %s AND m.winner IS NOT NULL
 		GROUP BY p.user_id, name
 		ORDER BY 7d_accuracy DESC
-		LIMIT 10
 		""",
-		[week_ago, week_ago, guild_id, week_ago, week_ago, week_ago]
+		[week_ago, week_ago, week_ago, week_ago, week_ago, guild_id]
 	)
 	if not data:
 		await ctx.reply("```No prediction data yet.```")
 		return
 
-	await ctx.reply(discord_table(
-		["#", "Player", "Record", "7 day Record ⬇️", "Bet Score"],
-		[
-			[i + 1, row['name'][:16], f"{row['correct']}/{row['total']} ({row['accuracy']}%)", f"{row['accuracy']}%", f"{row['7d_correct']}/{row['7d_total']} ({row['7d_accuracy']}%)", row['win_prob_score']]
-			for i, row in enumerate(data)
-		]
-	))
+	total_pages = max(1, (len(data) + PAGE_SIZE - 1) // PAGE_SIZE)
+
+	def _7d(row):
+		if row['7d_accuracy'] != -1:
+			return f"{row['7d_accuracy']}% ({row['7d_correct']}/{row['7d_total']})"
+		return f"— ({row['7d_total']}/10)"
+
+	def render_page(page):
+		offset = page * PAGE_SIZE
+		rows = data[offset:offset + PAGE_SIZE]
+		return discord_table(
+			["#", "Player", "Accuracy", "7d Accuracy ⬇️", "Bet Score"],
+			[
+				[offset + i + 1, row['name'][:16], f"{row['accuracy']}% ({row['correct']}/{row['total']})", _7d(row), row['win_prob_score']]
+				for i, row in enumerate(rows)
+			]
+		) + (f"\nPage {page + 1}/{total_pages}" if total_pages > 1 else "")
+
+	message = await ctx.reply(render_page(0))
+	if total_pages == 1 or message is None:
+		return
+
+	state = {"page": 0}
+	await message.add_reaction(PREV)
+	await message.add_reaction(NEXT)
+
+	async def handle_reaction(reaction, user, remove=False):
+		if remove:
+			return
+		emoji = str(reaction)
+		if emoji == PREV and state["page"] > 0:
+			state["page"] -= 1
+		elif emoji == NEXT and state["page"] < total_pages - 1:
+			state["page"] += 1
+		else:
+			return
+		try:
+			await message.remove_reaction(emoji, user)
+			await message.edit(content=render_page(state["page"]))
+		except Exception:
+			pass
+
+	_bot.waiting_reactions[message.id] = handle_reaction
 
 
 async def undo_match(ctx, match_id: int):
