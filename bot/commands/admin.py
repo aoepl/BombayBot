@@ -165,31 +165,41 @@ async def douche_leaderboard(ctx):
 
 async def predictions_leaderboard(ctx):
 	from core.database import db
+	from time import time as _time
 	guild_id = ctx.channel.guild.id
+	week_ago = int(_time()) - 7 * 86400
 	data = await db.fetchall(
 		"""
 		SELECT p.user_id, COALESCE(qp.nick, CAST(p.user_id AS CHAR)) AS name,
 			COUNT(*) AS total,
 			SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) AS correct,
 			ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy,
+			SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) AS 7d_total,
+			SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END) AS 7d_correct,
+			CASE WHEN SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) >= 10
+				THEN ROUND(SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END)
+				     / SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) * 100, 1)
+				ELSE -1
+			END as 7d_accuracy,
 			ROUND(SUM(CASE WHEN m.winner = p.team THEN 100.0 / NULLIF(p.win_prob, 0) ELSE 0 END), 1) AS win_prob_score
 		FROM predictions p
 		JOIN qc_matches m ON p.match_id = m.match_id
 		LEFT JOIN qc_players qp ON qp.user_id = p.user_id AND qp.channel_id = m.channel_id
 		WHERE p.guild_id = %s AND m.winner IS NOT NULL
 		GROUP BY p.user_id, name
-		ORDER BY correct DESC, accuracy DESC
+		ORDER BY 7d_accuracy DESC
 		LIMIT 10
 		""",
-		[guild_id]
+		[week_ago, week_ago, guild_id, week_ago, week_ago, week_ago]
 	)
 	if not data:
 		await ctx.reply("```No prediction data yet.```")
 		return
+
 	await ctx.reply(discord_table(
-		["#", "Player", "Record ⬇️", "Accuracy", "Win Probability Score"],
+		["#", "Player", "Record", "7 day Record ⬇️", "Bet Score"],
 		[
-			[i + 1, row['name'][:16], f"{row['correct']} / {row['total']}", f"{row['accuracy']}%", row['win_prob_score']]
+			[i + 1, row['name'][:16], f"{row['correct']}/{row['total']} ({row['accuracy']}%)", f"{row['accuracy']}%", f"{row['7d_correct']}/{row['7d_total']} ({row['7d_accuracy']}%)", row['win_prob_score']]
 			for i, row in enumerate(data)
 		]
 	))
