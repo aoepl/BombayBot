@@ -188,8 +188,7 @@ async def predictions_leaderboard(ctx, page: int = 1):
 					THEN ROUND(SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END)
 					     / SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) * 100, 1)
 					ELSE -1
-				END as 7d_accuracy,
-				ROUND(SUM(CASE WHEN m.winner = p.team THEN 100.0 / NULLIF(p.win_prob, 0) ELSE 0 END), 1) AS win_prob_score
+				END as 7d_accuracy
 			FROM predictions p
 			JOIN qc_matches m ON p.match_id = m.match_id
 			LEFT JOIN qc_players qp ON qp.user_id = p.user_id AND qp.channel_id = m.channel_id
@@ -237,12 +236,12 @@ async def predictions_leaderboard(ctx, page: int = 1):
 	def _7d(row):
 		if row['7d_accuracy'] != -1:
 			return f"{row['7d_accuracy']}% ({row['7d_correct']}/{row['7d_total']})"
-		return f"— ({row['7d_total']}/10)"
+		return f"— ({row['7d_correct']}/{row['7d_total']})"
 
 	table = discord_table(
-		["#", "Player", "Accuracy", "7d Accuracy ⬇️", "Streak", "Bet Score"],
+		["#", "Player", "Accuracy", "7d Accuracy ⬇️", "Streak"],
 		[
-			[offset + i + 1, row['name'][:16], f"{row['accuracy']}% ({row['correct']}/{row['total']})", _7d(row), (lambda s: f"+{s}" if s > 0 else str(s))(streaks.get(row['user_id'], 0)), row['win_prob_score']]
+			[offset + i + 1, row['name'][:16], f"{row['accuracy']}% ({row['correct']}/{row['total']})", _7d(row), (lambda s: f"+{s}" if s > 0 else str(s))(streaks.get(row['user_id'], 0))]
 			for i, row in enumerate(rows)
 		]
 	)
