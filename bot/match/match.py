@@ -174,6 +174,7 @@ class Match:
 		self.lifetime = self.cfg['match_lifetime']
 		self.start_time = int(time())
 		self.state = self.INIT
+		self.aborted = False  # Track if match was aborted/cancelled
 
 		# Init self sections
 		self.check_in = CheckIn(self, self.cfg['check_in_timeout'])
@@ -392,8 +393,10 @@ class Match:
 
 	async def finish_match(self, ctx):
 		bot.active_matches.remove(self)
-		self.queue.last_maps += self.maps
-		self.queue.last_maps = self.queue.last_maps[-len(self.maps)*self.queue.cfg.map_cooldown:]
+		# Only add maps to cooldown if match completed normally (not aborted)
+		if not self.aborted:
+			self.queue.last_maps += self.maps
+			self.queue.last_maps = self.queue.last_maps[-len(self.maps)*self.queue.cfg.map_cooldown:]
 
 		if self.ranked:
 			await bot.stats.register_match_ranked(ctx, self)
@@ -412,4 +415,8 @@ class Match:
 			)
 		except DiscordException:
 			pass
+		# Mark match as aborted and store maps for retry
+		self.aborted = True
+		if self.maps:
+			self.check_in._store_maps_for_retry()
 		bot.active_matches.remove(self)
