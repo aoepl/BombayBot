@@ -191,24 +191,148 @@ class Embeds:
 
 		return embed
 
-	def start_predictions(self):
+	async def start_predictions(self):
+		from bot.bombay.ai import generate_match_summary
+		from .predictions import Predictions as _P
+		from core.utils import get_nick
+		from core.database import db
+
+		from asyncio import gather
+
+		team1 = self.m.teams[0]
+		team2 = self.m.teams[1]
+		channel_id = self.m.qc.rating.channel_id
+		team1_ids = [p.id for p in team1]
+		team2_ids = [p.id for p in team2]
+		all_ids = team1_ids + team2_ids
+		ph = lambda ids: ','.join(['%s'] * len(ids))  # noqa: E731
+
+		maps = self.m.maps
+		map_filter = " AND (" + " OR ".join(
+			["FIND_IN_SET(%s, REPLACE(m.maps, '\\n', ',')) > 0"] * len(maps)
+		) + ")" if maps else ""
+
+		cords = [
+			db.fetchall(
+				f"SELECT user_id, wins, losses, streak FROM qc_players "
+				f"WHERE channel_id = %s AND user_id IN ({ph(all_ids)})",
+				[channel_id] + all_ids
+			),
+			db.fetchall(
+				f"""
+				SELECT pm1.user_id AS p1, pm2.user_id AS p2,
+					COUNT(*) AS played,
+					SUM(CASE WHEN m.winner = pm1.team THEN 1 ELSE 0 END) AS p1_wins
+				FROM qc_player_matches pm1
+				JOIN qc_player_matches pm2
+					ON pm1.match_id = pm2.match_id
+					AND pm1.channel_id = pm2.channel_id
+					AND pm1.team != pm2.team
+				JOIN qc_matches m ON pm1.match_id = m.match_id AND pm1.channel_id = m.channel_id
+				WHERE pm1.channel_id = %s
+					AND pm1.user_id IN ({ph(team1_ids)})
+					AND pm2.user_id IN ({ph(team2_ids)})
+					AND m.winner IS NOT NULL
+				GROUP BY pm1.user_id, pm2.user_id
+				HAVING played >= 3
+				ORDER BY played DESC
+				""",
+				[channel_id] + team1_ids + team2_ids
+			),
+		]
+		if maps:
+			cords.append(db.fetchall(
+				f"""
+				SELECT pm.user_id,
+					TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(m.maps, CHAR(10),
+						n.n), CHAR(10), -1)) AS map_name,
+					COUNT(*) AS played,
+					SUM(CASE WHEN m.winner = pm.team THEN 1 ELSE 0 END) AS wins,
+					SUM(CASE WHEN m.winner IS NOT NULL AND m.winner != pm.team THEN 1 ELSE 0 END) AS losses
+				FROM qc_player_matches pm
+				JOIN qc_matches m ON pm.match_id = m.match_id AND pm.channel_id = m.channel_id
+				JOIN (SELECT 1 AS n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) n
+					ON n.n <= 1 + LENGTH(m.maps) - LENGTH(REPLACE(m.maps, CHAR(10), ''))
+				WHERE pm.channel_id = %s
+					AND pm.user_id IN ({ph(all_ids)})
+					AND m.winner IS NOT NULL
+					{map_filter}
+				GROUP BY pm.user_id, map_name
+				HAVING played >= 3 AND map_name IN ({ph(maps)})
+				""",
+				[channel_id] + all_ids + maps * 2
+			))
+
+		results = await gather(*cords)
+		player_rows, h2h_rows = results[0], results[1]
+		map_rows = results[2] if maps else []
+
+		player_stats = {r['user_id']: r for r in player_rows}
+		# map_stats[user_id][map_name] = row
+		map_stats: dict = {}
+		for r in map_rows:
+			map_stats.setdefault(r['user_id'], {})[r['map_name']] = r
+		nick = {p.id: get_nick(p) for p in list(team1) + list(team2)}
+
+		def _player_text(p):
+			elo = self.m.ratings.get(p.id, "?")
+			s = player_stats.get(p.id)
+			if s:
+				total = (s['wins'] or 0) + (s['losses'] or 0)
+				wr = round(s['wins'] * 100 / total) if total else 0
+				base = f"  - {get_nick(p)}: Elo {elo}, {s['wins']}W/{s['losses']}L ({wr}% wr), streak {s['streak']:+d}"
+			else:
+				base = f"  - {get_nick(p)}: Elo {elo}"
+			if p.id in map_stats:
+				map_parts = []
+				for mn, mr in map_stats[p.id].items():
+					map_wr = round(mr['wins'] * 100 / mr['played']) if mr['played'] else 0
+					map_parts.append(f"{mn}: {mr['wins']}W/{mr['losses']}L ({map_wr}%)")
+				base += f" | map form: {', '.join(map_parts)}"
+			return base
+
+		def _team_lines(team, avg_elo):
+			lines = [f"Team {team.name} (Avg Elo: {avg_elo}):"]
+			lines += [_player_text(p) for p in team]
+			return "\n".join(lines)
+
+		h2h_lines = []
+		for r in h2h_rows[:5]:
+			p1_wins, p2_wins = r['p1_wins'], r['played'] - r['p1_wins']
+			h2h_lines.append(
+				f"  {nick.get(r['p1'], r['p1'])} vs {nick.get(r['p2'], r['p2'])}: "
+				f"{p1_wins}-{p2_wins} in {r['played']} matches"
+			)
+
+		maps_line = f"Map(s): {', '.join(self.m.maps)}\n" if self.m.maps else ""
+		h2h_section = ("Head-to-head history:\n" + "\n".join(h2h_lines) + "\n") if h2h_lines else ""
+		match_text = (
+			f"{maps_line}"
+			f"{_team_lines(team1, self.m.team_ratings[0])}\n"
+			f"{_team_lines(team2, self.m.team_ratings[1])}\n"
+			f"{h2h_section}"
+		)
+
+		try:
+			ai_summary = await generate_match_summary(match_text)
+		except Exception:
+			ai_summary = None
+
 		embed = Embed(
 			colour=Colour(0x27b75e),
 			title=self.m.qc.gt("__Predictions for Match id {match_id} has started!__").format(
 				match_id=self.m.id
 			)
 		)
-
-		team1 = self.m.teams[0]
-		team2 = self.m.teams[1]
-		from .predictions import Predictions as _P
-		teams_names = [
+		if ai_summary:
+			embed.add_field(name="Match Preview", value=ai_summary, inline=False)
+		teams_display = [
 			f"{_P.TEAM_EMOJIS[0]} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {round(self.m.team_odds[0], 2)}`",
 			f"{_P.TEAM_EMOJIS[1]} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {round(self.m.team_odds[1], 2)}`",
 		]
 		embed.add_field(
 			name="React to predict the winner",
-			value="\n".join(teams_names),
+			value="\n".join(teams_display),
 			inline=False
 		)
 		embed.set_footer(**self.footer)

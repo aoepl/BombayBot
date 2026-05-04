@@ -26,6 +26,7 @@ class _Config:
     WS_ROOT_URL = ""
     WS_SSL_CERT_FILE = ""
     WS_SSL_KEY_FILE = ""
+    OPENAI_API_KEY = ""
 
 
 cfg = _Config()

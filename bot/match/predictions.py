@@ -40,7 +40,7 @@ class Predictions:
 
 	async def start(self, ctx):
 		try:
-			self.message = await ctx.channel.send(embed=self.embeds.start_predictions())
+			self.message = await ctx.channel.send(embed=await self.embeds.start_predictions())
 			await self.message.add_reaction(self.TEAM_EMOJIS[0])
 			await self.message.add_reaction(self.TEAM_EMOJIS[1])
 			bot.waiting_reactions[self.message.id] = self.process_reaction
