@@ -32,10 +32,10 @@ async def generate_player_summary(stats_text: str) -> str | None:
 		model="gemma-3-27b-it",
 		contents=(
 			"You are a sharp, witty esports analyst for a competitive pickup game community. "
-			"Write a punchy 8-10 sentence analysis of the player stats provided. "
+			"Write a punchy 10-15 sentence analysis of the player stats provided. Be ruthless."
 			"Be specific with numbers, call out standout strengths and weaknesses, "
 			"and give it personality — like a post-match breakdown. "
-			"Keep it under 500 characters.\n\n"
+			"Keep it under 1000 characters.\n\n"
 			f"{stats_text}"
 		)
 	)
