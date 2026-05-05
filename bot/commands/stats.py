@@ -142,7 +142,7 @@ async def stats(ctx, player: Member = None, period: str = None):
 	if pred := data.get('predictions'):
 		embed.add_field(
 			name='Predictions',
-			value=f"Correct: {pred['correct']}/{pred['total']} ({pred['accuracy']}%) | Bet Score: {pred['bet_score']}",
+			value=f"Correct: {pred['correct']}/{pred['total']} ({pred['accuracy']}%)",
 			inline=False
 		)
 
@@ -285,7 +285,7 @@ async def bombayai(ctx, player: Member = None):
 		lines.append(f"Toughest opponent: {we['nick']} ({we['weighted_win_pct']}% wr, {we['played']} games)")
 
 	if pred := data.get('predictions'):
-		lines.append(f"Predictions: {pred['correct']}/{pred['total']} correct ({pred['accuracy']}% accuracy), bet score {pred['bet_score']}")
+		lines.append(f"Predictions: {pred['correct']}/{pred['total']} correct ({pred['accuracy']}% accuracy)")
 
 	if d := data.get('douche'):
 		lines.append(f"Douche points: received {d['received']}, given {d['given']}")
