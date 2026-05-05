@@ -309,7 +309,7 @@ async def qc_stats(channel_id, ts_from=None):
 	return stats
 
 
-async def user_stats(channel_id, user_id, ts_from=None):
+async def user_stats(channel_id, user_id, ts_from=None, guild_id=None):
 	# Build date filter fragments once, reused across all queries
 	def _df(col):
 		return f" AND {col} >= %s" if ts_from else ""
@@ -494,6 +494,32 @@ async def user_stats(channel_id, user_id, ts_from=None):
 		_enemy_cte + "SELECT nick, played, wins, losses, win_pct, weighted_win_pct FROM enemy_stats ORDER BY weighted_win_pct ASC LIMIT 5",
 		cte_params
 	)
+	predictions_data = None
+	douche_data = None
+	if guild_id:
+		predictions_data, douche_data = await asyncio.gather(
+			db.fetchone(
+				"""
+				SELECT COUNT(*) AS total,
+					SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) AS correct,
+					ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy,
+					ROUND(SUM(CASE WHEN m.winner = p.team THEN 100.0 / NULLIF(p.win_prob, 0) ELSE 0 END), 1) AS bet_score
+				FROM predictions p
+				JOIN qc_matches m ON p.match_id = m.match_id
+				WHERE p.guild_id = %s AND p.user_id = %s AND m.winner IS NOT NULL
+				""",
+				[guild_id, user_id]
+			),
+			db.fetchone(
+				"""
+				SELECT
+					(SELECT COUNT(*) FROM douche WHERE guild_id = %s AND target_user_id = %s) AS received,
+					(SELECT COUNT(*) FROM douche WHERE guild_id = %s AND user_id = %s) AS given
+				""",
+				[guild_id, user_id, guild_id, user_id]
+			)
+		)
+
 	stats = dict(total=sum((i['count'] for i in queue_data)))
 	stats['queues'] = queue_data
 	stats['ratings'] = ratings_data
@@ -502,6 +528,8 @@ async def user_stats(channel_id, user_id, ts_from=None):
 	stats['best_enemy'] = best_enemy_data
 	stats['worst_ally'] = worst_ally_data
 	stats['worst_enemy'] = worst_enemy_data
+	stats['predictions'] = predictions_data if predictions_data and predictions_data['total'] else None
+	stats['douche'] = douche_data if douche_data and (douche_data['received'] or douche_data['given']) else None
 	return stats
 
 

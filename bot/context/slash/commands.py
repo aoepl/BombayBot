@@ -623,6 +623,13 @@ async def _leaderboard(
 ): await run_slash(bot.commands.leaderboard, interaction=interaction, page=page)
 
 
+@dc.slash_command(name='bombayai', description='AI-generated analysis of a player stats.', **guild_kwargs)
+async def _bombayai(
+		interaction: Interaction,
+		player: Member = SlashOption(required=False, verify=False),
+): await run_slash(bot.commands.bombayai, interaction=interaction, player=player)
+
+
 @groups.admin_rating.subcommand(name='unhide_player', description='Unhide player from the leaderboard.')
 async def _rating_unhide(
 		interaction: Interaction,

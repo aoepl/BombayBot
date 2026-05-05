@@ -1,4 +1,4 @@
-__all__ = ['last_game', 'stats', 'top', 'rank', 'leaderboard']
+__all__ = ['last_game', 'stats', 'bombayai', 'top', 'rank', 'leaderboard']
 
 import datetime
 from time import time
@@ -70,7 +70,7 @@ async def stats(ctx, player: Member = None, period: str = None):
 
 	if player:
 		if (member := await ctx.get_member(player)) is not None:
-			data = await bot.stats.user_stats(ctx.qc.id, member.id, ts_from=ts_from)
+			data = await bot.stats.user_stats(ctx.qc.id, member.id, ts_from=ts_from, guild_id=ctx.qc.guild_id)
 			target = get_nick(member)
 		else:
 			raise bot.Exc.NotFoundError(ctx.qc.gt("Specified user not found."))
@@ -138,6 +138,21 @@ async def stats(ctx, player: Member = None, period: str = None):
 			worst_enemy_data += f"{we['nick']} | {we['played']} | {we['wins']} | {we['losses']} | {we['weighted_win_pct']}%\n"
 		worst_enemy_data += "```"
 		embed.add_field(name='Worst Enemy (Kryptonite)', value=worst_enemy_data, inline=False)
+
+	if pred := data.get('predictions'):
+		embed.add_field(
+			name='Predictions',
+			value=f"Correct: {pred['correct']}/{pred['total']} ({pred['accuracy']}%) | Bet Score: {pred['bet_score']}",
+			inline=False
+		)
+
+	if d := data.get('douche'):
+		embed.add_field(
+			name='Douche',
+			value=f"Received: {d['received']} | Given: {d['given']}",
+			inline=False
+		)
+
 	await ctx.reply_dm(embed=embed)
 
 
@@ -222,6 +237,61 @@ async def rank(ctx, player: Member = None):
 
 	else:
 		raise bot.Exc.ValueError(ctx.qc.gt("No rating data found."))
+
+
+async def bombayai(ctx, player: Member = None):
+	from bot.bombay.ai import generate_player_summary
+
+	if player:
+		if (member := await ctx.get_member(player)) is not None:
+			data = await bot.stats.user_stats(ctx.qc.id, member.id, ts_from=None, guild_id=ctx.qc.guild_id)
+			target = get_nick(member)
+		else:
+			raise bot.Exc.NotFoundError(ctx.qc.gt("Specified user not found."))
+	else:
+		data = await bot.stats.user_stats(ctx.qc.id, ctx.author.id, ts_from=None, guild_id=ctx.qc.guild_id)
+		target = get_nick(ctx.author)
+
+	lines = [f"Player: {target}"]
+	lines.append(f"Total matches: {data['total']}")
+
+	if data.get('queues'):
+		lines.append("Queues: " + ", ".join(f"{q['queue_name']} ({q['count']})" for q in data['queues']))
+
+	if r := data.get('ratings'):
+		lines.append(f"Record: {r['wins']}W/{r['losses']}L — {r['win_pct']}% winrate")
+		lines.append(f"Rating: {r['rating']} (max {r['max_rating']}, min {r['min_rating']})")
+		lines.append(f"Streak: current {r['current_streak']:+d}, best win {r['max_win_streak']}, worst loss {r['max_loss_streak']}")
+
+	if data.get('maps'):
+		lines.append("Top maps: " + ", ".join(
+			f"{m['map_name']} {m['win_pct']}% wr ({m['played']} played)" for m in data['maps'][:3]
+		))
+
+	if data.get('best_ally'):
+		ba = data['best_ally'][0]
+		lines.append(f"Best ally: {ba['nick']} ({ba['weighted_win_pct']}% wr, {ba['played']} games)")
+
+	if data.get('worst_ally'):
+		wa = data['worst_ally'][0]
+		lines.append(f"Worst ally: {wa['nick']} ({wa['weighted_win_pct']}% wr, {wa['played']} games)")
+
+	if data.get('best_enemy'):
+		be = data['best_enemy'][0]
+		lines.append(f"Easiest opponent: {be['nick']} ({be['weighted_win_pct']}% wr, {be['played']} games)")
+
+	if data.get('worst_enemy'):
+		we = data['worst_enemy'][0]
+		lines.append(f"Toughest opponent: {we['nick']} ({we['weighted_win_pct']}% wr, {we['played']} games)")
+
+	if pred := data.get('predictions'):
+		lines.append(f"Predictions: {pred['correct']}/{pred['total']} correct ({pred['accuracy']}% accuracy), bet score {pred['bet_score']}")
+
+	if d := data.get('douche'):
+		lines.append(f"Douche points: received {d['received']}, given {d['given']}")
+
+	summary = await generate_player_summary("\n".join(lines))
+	await ctx.reply(f"**BombayAI analysis for {target}**\n{summary}")
 
 
 async def leaderboard(ctx, page: int = 1):
