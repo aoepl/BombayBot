@@ -503,9 +503,17 @@ async def user_stats(channel_id, user_id, ts_from=None, guild_id=None):
 				SELECT COUNT(*) AS total,
 					SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) AS correct,
 					ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy,
-					ROUND(SUM(CASE WHEN m.winner = p.team THEN 100.0 / NULLIF(p.win_prob, 0) ELSE 0 END), 1) AS bet_score
+					ROUND(SUM(CASE WHEN m.winner = p.team THEN 100.0 / NULLIF(p.win_prob, 0) ELSE 0 END), 1) AS bet_score,
+					ROUND(SUM(CASE WHEN m.winner = p.team THEN COALESCE(wa.avg_change, 0) ELSE 0 END), 0) AS rating_pts
 				FROM predictions p
 				JOIN qc_matches m ON p.match_id = m.match_id
+				LEFT JOIN (
+					SELECT pm.match_id, AVG(rh.rating_change) AS avg_change
+					FROM qc_player_matches pm
+					JOIN qc_rating_history rh ON rh.match_id = pm.match_id AND rh.user_id = pm.user_id
+					JOIN qc_matches m2 ON m2.match_id = pm.match_id AND pm.team = m2.winner
+					GROUP BY pm.match_id
+				) wa ON wa.match_id = p.match_id
 				WHERE p.guild_id = %s AND p.user_id = %s AND m.winner IS NOT NULL
 				""",
 				[guild_id, user_id]

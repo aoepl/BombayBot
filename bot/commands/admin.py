@@ -163,17 +163,31 @@ async def douche_leaderboard(ctx):
 		[[i + 1, row['name'][:16], row['count']] for i, row in enumerate(data)]
 	))
 
-async def predictions_leaderboard(ctx, page: int = 1):
+async def predictions_leaderboard(ctx, page: int = 1, season: int = None):
 	from core.database import db
-	from time import time as _time
 	from asyncio import gather
 	from itertools import groupby
+	from datetime import date, datetime, time as dtime
 
 	PAGE_SIZE = 10
 	page = (page or 1) - 1
 
 	guild_id = ctx.channel.guild.id
-	week_ago = int(_time()) - 7 * 86400
+
+	start = date(2026, 4, 1)
+
+	def add_months(d: date, months: int) -> date:
+		idx = d.year * 12 + (d.month - 1) + months
+		year, month = divmod(idx, 12)
+		return date(year, month + 1, 1)
+
+	today = date.today()
+	current_season = (today.year * 12 + today.month) - (start.year * 12 + start.month) + 1
+	query_season = current_season if season is None else max(1, min(season, current_season))
+	month_start = add_months(start, query_season - 1)
+	month_end = add_months(month_start, 1)
+	from_ts = int(datetime.combine(month_start, dtime.min).timestamp())
+	to_ts = int(datetime.combine(month_end, dtime.min).timestamp())
 
 	data, streak_rows = await gather(
 		db.fetchall(
@@ -182,31 +196,35 @@ async def predictions_leaderboard(ctx, page: int = 1):
 				COUNT(*) AS total,
 				SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) AS correct,
 				ROUND(SUM(CASE WHEN m.winner = p.team THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS accuracy,
-				SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) AS 7d_total,
-				SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END) AS 7d_correct,
-				CASE WHEN SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) >= 10
-					THEN ROUND(SUM(CASE WHEN p.at >= %s AND m.winner = p.team THEN 1 ELSE 0 END)
-					     / SUM(CASE WHEN p.at >= %s THEN 1 ELSE 0 END) * 100, 1)
-					ELSE -1
-				END as 7d_accuracy
+				SUM(CASE WHEN p.at >= %s AND p.at < %s THEN 1 ELSE 0 END) AS season_total,
+				SUM(CASE WHEN p.at >= %s AND p.at < %s AND m.winner = p.team THEN 1 ELSE 0 END) AS season_correct,
+				ROUND(SUM(CASE WHEN p.at >= %s AND p.at < %s AND m.winner = p.team THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN p.at >= %s AND p.at < %s THEN 1 ELSE 0 END), 0) * 100, 1) AS season_accuracy,
+				1000 + ROUND(SUM(CASE WHEN p.at >= %s AND p.at < %s THEN COALESCE(wa.avg_change, 0) ELSE 0 END), 0) AS rating_pts
 			FROM predictions p
 			JOIN qc_matches m ON p.match_id = m.match_id
 			LEFT JOIN qc_players qp ON qp.user_id = p.user_id AND qp.channel_id = m.channel_id
+			LEFT JOIN (
+				SELECT pm.match_id, pm.team, AVG(rh.rating_change) AS avg_change
+				FROM qc_player_matches pm
+				JOIN qc_rating_history rh ON rh.match_id = pm.match_id AND rh.user_id = pm.user_id
+				GROUP BY pm.match_id, pm.team
+			) wa ON wa.match_id = p.match_id AND wa.team = p.team
 			WHERE p.guild_id = %s AND m.winner IS NOT NULL
 			GROUP BY p.user_id, name
-			ORDER BY 7d_accuracy DESC
+			HAVING season_total > 0
+			ORDER BY rating_pts DESC
 			""",
-			[week_ago, week_ago, week_ago, week_ago, week_ago, guild_id]
+			[from_ts, to_ts, from_ts, to_ts, from_ts, to_ts, from_ts, to_ts, from_ts, to_ts, guild_id]
 		),
 		db.fetchall(
 			"""
 			SELECT p.user_id, CASE WHEN m.winner = p.team THEN 1 ELSE 0 END AS correct
 			FROM predictions p
 			JOIN qc_matches m ON p.match_id = m.match_id
-			WHERE p.guild_id = %s AND m.winner IS NOT NULL
+			WHERE p.guild_id = %s AND m.winner IS NOT NULL AND p.at >= %s AND p.at < %s
 			ORDER BY p.user_id, p.at DESC
 			""",
-			[guild_id]
+			[guild_id, from_ts, to_ts]
 		)
 	)
 	if not data:
@@ -233,19 +251,31 @@ async def predictions_leaderboard(ctx, page: int = 1):
 	offset = page * PAGE_SIZE
 	rows = data[offset:offset + PAGE_SIZE]
 
-	def _7d(row):
-		if row['7d_accuracy'] != -1:
-			return f"{row['7d_accuracy']}% ({row['7d_correct']}/{row['7d_total']})"
-		return f"— ({row['7d_correct']}/{row['7d_total']})"
+	def _streak_str(s):
+		return f"+{s}" if s > 0 else str(s)
+
+	def _pct(v):
+		return f"{float(v):g}%" if v is not None else "—"
 
 	table = discord_table(
-		["#", "Player", "Accuracy", "7d Accuracy ⬇️", "Streak"],
+		["#", "Player", "Overall", "Season", "Streak", "Score"],
 		[
-			[offset + i + 1, row['name'][:16], f"{row['accuracy']}% ({row['correct']}/{row['total']})", _7d(row), (lambda s: f"+{s}" if s > 0 else str(s))(streaks.get(row['user_id'], 0))]
+			[
+				offset + i + 1,
+				row['name'][:16],
+				f"{_pct(row['accuracy'])} ({row['correct']}/{row['total']})",
+				f"{_pct(row['season_accuracy'])} ({row['season_correct']}/{row['season_total']})",
+				_streak_str(streaks.get(row['user_id'], 0)),
+				int(row['rating_pts'] or 0),
+			]
 			for i, row in enumerate(rows)
 		]
 	)
-	await ctx.reply(table + (f"\nPage {page + 1}/{total_pages}" if total_pages > 1 else ""))
+	heading = f"# Season {query_season} — {month_start.strftime('%B %Y')}"
+	if total_pages > 1:
+		heading += f"  (page {page + 1}/{total_pages})"
+	table = table.replace("```markdown\n", f"```markdown\n{heading}\n", 1)
+	await ctx.reply(table)
 
 
 async def undo_match(ctx, match_id: int):

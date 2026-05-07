@@ -441,7 +441,8 @@ async def _douche_leaderboard(
 async def _predictions_leaderboard(
 		interaction: Interaction,
 		page: int = SlashOption(required=False),
-): await run_slash(bot.commands.predictions_leaderboard, interaction=interaction, page=page)
+		season: int = SlashOption(required=False, description="Season number"),
+): await run_slash(bot.commands.predictions_leaderboard, interaction=interaction, page=page, season=season)
 
 # root commands
 
