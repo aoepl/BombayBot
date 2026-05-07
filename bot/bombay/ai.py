@@ -17,10 +17,10 @@ async def generate_match_summary(match_text: str) -> str | None:
 		model="gemma-4-31b-it",
 		contents=(
 			"You are a hype commentator for a competitive pickup game community. "
-			"Write a punchy 2-3 sentence pre-match preview based on the matchup provided. "
+			"Write a punchy 5-10 sentence pre-match preview based on the matchup provided. "
 			"Call out key players by name, highlight the Elo gap if significant, head to head and map based win rates, "
 			"and build excitement. Be opinionated — pick a favourite. "
-			"Plain text only, no markdown, keep it under 250 characters.\n\n"
+			"Plain text only, no markdown, keep it under 1000 characters.\n\n"
 			f"{match_text}"
 		)
 	)

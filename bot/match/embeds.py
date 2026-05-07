@@ -196,7 +196,9 @@ class Embeds:
 		from .predictions import Predictions as _P
 		from core.utils import get_nick
 		from core.database import db
+		from core.console import log
 
+		import asyncio
 		from asyncio import gather
 
 		team1 = self.m.teams[0]
@@ -313,7 +315,14 @@ class Embeds:
 			f"{h2h_section}"
 		)
 
-		ai_summary = await generate_match_summary(match_text)
+		try:
+			ai_summary = await asyncio.wait_for(generate_match_summary(match_text), timeout=30)
+		except asyncio.TimeoutError:
+			log.warning(f"generate_match_summary timed out for match {self.m.id}")
+			ai_summary = None
+		except Exception as e:
+			log.error(f"generate_match_summary failed for match {self.m.id}: {e}")
+			ai_summary = None
 
 		embed = Embed(
 			colour=Colour(0x27b75e),
@@ -324,8 +333,8 @@ class Embeds:
 		if ai_summary:
 			embed.add_field(name="Match Preview", value=ai_summary, inline=False)
 		teams_display = [
-			f"{_P.TEAM_EMOJIS[0]} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {round(self.m.team_odds[0], 2)}`",
-			f"{_P.TEAM_EMOJIS[1]} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {round(self.m.team_odds[1], 2)}`",
+			f"{_P.TEAM_EMOJIS[0]} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]}`",
+			f"{_P.TEAM_EMOJIS[1]} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]}`",
 		]
 		embed.add_field(
 			name="React to predict the winner",
