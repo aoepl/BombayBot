@@ -14,7 +14,7 @@ def _get_client() -> genai.Client:
 
 async def generate_match_summary(match_text: str) -> str | None:
 	resp = await _get_client().aio.models.generate_content(
-		model="gemma-3-27b-it",
+		model="gemma-4-31b-it",
 		contents=(
 			"You are a hype commentator for a competitive pickup game community. "
 			"Write a punchy 2-3 sentence pre-match preview based on the matchup provided. "
@@ -29,7 +29,7 @@ async def generate_match_summary(match_text: str) -> str | None:
 
 async def generate_player_summary(stats_text: str) -> str | None:
 	resp = await _get_client().aio.models.generate_content(
-		model="gemma-3-27b-it",
+		model="gemma-4-31b-it",
 		contents=(
 			"You are a sharp, witty esports analyst for a competitive pickup game community. "
 			"Write a punchy 10-15 sentence analysis of the player stats provided. Be ruthless."
