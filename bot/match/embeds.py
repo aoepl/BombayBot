@@ -313,10 +313,7 @@ class Embeds:
 			f"{h2h_section}"
 		)
 
-		try:
-			ai_summary = await generate_match_summary(match_text)
-		except Exception:
-			ai_summary = None
+		ai_summary = await generate_match_summary(match_text)
 
 		embed = Embed(
 			colour=Colour(0x27b75e),
