@@ -318,7 +318,7 @@ class Embeds:
 		try:
 			ai_summary = await asyncio.wait_for(generate_match_summary(match_text), timeout=30)
 		except asyncio.TimeoutError:
-			log.warning(f"generate_match_summary timed out for match {self.m.id}")
+			log.error(f"generate_match_summary timed out for match {self.m.id}")
 			ai_summary = None
 		except Exception as e:
 			log.error(f"generate_match_summary failed for match {self.m.id}: {e}")
