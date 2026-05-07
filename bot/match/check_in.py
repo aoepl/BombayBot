@@ -108,6 +108,7 @@ class CheckIn:
 				self.m.gt("Reverting {queue} to the gathering stage...").format(queue=f"**{self.m.queue.name}**")
 			)))
 
+			self.m.aborted = True  # Mark match as aborted
 			bot.active_matches.remove(self.m)
 			await self.m.queue.revert(
 				ctx,
@@ -201,6 +202,7 @@ class CheckIn:
 			self.m.gt("Reverting {queue} to the gathering stage...").format(queue=f"**{self.m.queue.name}**")
 		)))
 
+		self.m.aborted = True  # Mark match as aborted
 		bot.active_matches.remove(self.m)
 		await self.m.queue.revert(ctx, [member], [m for m in self.m.players if m != member])
 
@@ -215,6 +217,7 @@ class CheckIn:
 
 		self._store_maps_for_retry()  # NEW: keep same maps when check-in times out
 
+		self.m.aborted = True  # Mark match as aborted
 		bot.active_matches.remove(self.m)
 
 		await ctx.notice("\n".join((
