@@ -1,5 +1,5 @@
 from nextcord import abc
-from nextcord import Member, Embed
+from nextcord import Member, Embed, File
 from enum import IntEnum
 import re
 
@@ -64,7 +64,7 @@ class Context:
 			else:
 				raise bot.Exc.PermissionError(self.qc.gt("You must possess moderator permissions."))
 
-	async def reply(self, content: str = None, embed: Embed = None):
+	async def reply(self, content: str = None, embed: Embed = None, file: File = None):
 		""" Reply in public chat """
 		pass
 
@@ -110,8 +110,8 @@ class SystemContext(Context):
 	def access_level(self):
 		return Context.Perms.ADMIN
 
-	async def reply(self, content: str = None, embed: Embed = None):
-		await self.messagable.send(content=content, embed=embed)
+	async def reply(self, content: str = None, embed: Embed = None, file: File = None):
+		await self.messagable.send(content=content, embed=embed, file=file)
 
 	async def notice(self, content: str = None, embed: Embed = None):
 		""" Send message in chat without replying if possible """

@@ -1,4 +1,4 @@
-from nextcord import Message, Embed
+from nextcord import Message, Embed, File
 
 from bot import QueueChannel
 from core.utils import error_embed, ok_embed
@@ -13,8 +13,8 @@ class MessageContext(Context):
 		self.message = message
 		super().__init__(qc, message.channel, message.author)
 
-	async def reply(self, content: str = None, embed: Embed = None):
-		await self.message.reply(content=content, embed=embed)
+	async def reply(self, content: str = None, embed: Embed = None, file: File = None):
+		await self.message.reply(content=content, embed=embed, file=file)
 
 	async def notice(self, content: str = None, embed: Embed = None):
 		await (self.message.thread or self.message.channel).send(content=content, embed=embed)

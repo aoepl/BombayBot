@@ -5,3 +5,4 @@ trueskill>=0.4.5
 emoji>=2.7
 prettytable>=3.8
 google-genai
+matplotlib>=3.7

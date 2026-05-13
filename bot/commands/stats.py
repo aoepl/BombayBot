@@ -1,9 +1,10 @@
 __all__ = ['last_game', 'stats', 'bombayai', 'top', 'rank', 'leaderboard', 'mapstats']
 
 import datetime
+import io
 from time import time
 from math import ceil
-from nextcord import Member, Embed, Colour
+from nextcord import Member, Embed, Colour, File
 
 from core.utils import get, find, seconds_to_str, get_nick, discord_table
 from core.database import db
@@ -294,10 +295,7 @@ async def bombayai(ctx, player: Member = None):
 	await ctx.reply(f"**BombayAI analysis for {target}**\n{summary}")
 
 
-async def mapstats(ctx, period: str = None, page: int = 1):
-	PAGE_SIZE = 10
-	page = (page or 1) - 1
-
+async def mapstats(ctx, period: str = None):
 	_period_days = {'1M': 30, '6M': 180, '1Y': 365}
 	days = _period_days.get(period) if period else None
 	ts_from = int(time()) - days * 86400 if days else None
@@ -335,19 +333,34 @@ async def mapstats(ctx, period: str = None, page: int = 1):
 	if not rows:
 		raise bot.Exc.NotFoundError(ctx.qc.gt("No map data yet."))
 
-	total_pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
-	page = max(0, min(page, total_pages - 1))
-	offset = page * PAGE_SIZE
-	page_rows = rows[offset:offset + PAGE_SIZE]
-
-	table = discord_table(
-		["#", "Map", "Played"],
-		[[offset + i + 1, r['map_name'], r['played']] for i, r in enumerate(page_rows)]
-	)
 	period_label = f" ({period})" if days else ""
-	page_label = f" — page {page + 1}/{total_pages}" if total_pages > 1 else ""
-	header = f"**Map stats{period_label}{page_label}**\n" if period_label or page_label else ""
-	await ctx.reply(header + table)
+	title = f"Map stats{period_label}"
+
+	from matplotlib.figure import Figure
+	from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+	names = [r['map_name'] for r in rows[:15]]
+	counts = [r['played'] for r in rows[:15]]
+	fig = Figure(figsize=(8, max(2, 0.4 * len(names) + 1)), dpi=120)
+	FigureCanvasAgg(fig)
+	ax = fig.add_subplot(111)
+	y_pos = range(len(names))
+	bars = ax.barh(y_pos, counts, color='#5865f2')
+	ax.set_yticks(y_pos)
+	ax.set_yticklabels(names)
+	ax.invert_yaxis()
+	ax.set_xlabel('Matches played')
+	ax.set_title(title)
+	ax.spines['top'].set_visible(False)
+	ax.spines['right'].set_visible(False)
+	for bar, count in zip(bars, counts):
+		ax.text(bar.get_width(), bar.get_y() + bar.get_height() / 2, f' {count}', va='center', fontsize=9)
+	fig.tight_layout()
+
+	buf = io.BytesIO()
+	fig.savefig(buf, format='png')
+	buf.seek(0)
+	await ctx.reply(file=File(fp=buf, filename='mapstats.png'))
 
 
 async def leaderboard(ctx, page: int = 1):
