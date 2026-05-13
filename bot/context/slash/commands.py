@@ -624,6 +624,14 @@ async def _leaderboard(
 ): await run_slash(bot.commands.leaderboard, interaction=interaction, page=page)
 
 
+@dc.slash_command(name='mapstats', description='List maps played ordered by number of games.', **guild_kwargs)
+async def _mapstats(
+		interaction: Interaction,
+		period: str = SlashOption(choices=['1M', '6M', '1Y'], required=False, description='Stats period'),
+		page: int = SlashOption(required=False),
+): await run_slash(bot.commands.mapstats, interaction=interaction, period=period, page=page)
+
+
 @dc.slash_command(name='bombayai', description='AI-generated analysis of a player stats.', **guild_kwargs)
 async def _bombayai(
 		interaction: Interaction,

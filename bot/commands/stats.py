@@ -1,4 +1,4 @@
-__all__ = ['last_game', 'stats', 'bombayai', 'top', 'rank', 'leaderboard']
+__all__ = ['last_game', 'stats', 'bombayai', 'top', 'rank', 'leaderboard', 'mapstats']
 
 import datetime
 from time import time
@@ -292,6 +292,62 @@ async def bombayai(ctx, player: Member = None):
 
 	summary = await generate_player_summary("\n".join(lines))
 	await ctx.reply(f"**BombayAI analysis for {target}**\n{summary}")
+
+
+async def mapstats(ctx, period: str = None, page: int = 1):
+	PAGE_SIZE = 10
+	page = (page or 1) - 1
+
+	_period_days = {'1M': 30, '6M': 180, '1Y': 365}
+	days = _period_days.get(period) if period else None
+	ts_from = int(time()) - days * 86400 if days else None
+
+	at_filter = " AND at >= %s" if ts_from is not None else ""
+	params = [ctx.qc.id]
+	if ts_from is not None:
+		params.append(ts_from)
+
+	rows = await db.fetchall(
+		f"""
+		WITH RECURSIVE map_split AS (
+			SELECT
+				match_id,
+				TRIM(SUBSTRING_INDEX(maps, '\n', 1)) AS map_name,
+				IF(LOCATE('\n', maps) > 0, SUBSTRING(maps, LOCATE('\n', maps) + 1), NULL) AS remaining
+			FROM qc_matches
+			WHERE channel_id = %s AND maps IS NOT NULL AND maps != ''{at_filter}
+			UNION ALL
+			SELECT
+				match_id,
+				TRIM(SUBSTRING_INDEX(remaining, '\n', 1)),
+				IF(LOCATE('\n', remaining) > 0, SUBSTRING(remaining, LOCATE('\n', remaining) + 1), NULL)
+			FROM map_split
+			WHERE remaining IS NOT NULL
+		)
+		SELECT map_name, COUNT(*) AS played
+		FROM map_split
+		WHERE map_name != ''
+		GROUP BY map_name
+		ORDER BY played DESC
+		""",
+		params
+	)
+	if not rows:
+		raise bot.Exc.NotFoundError(ctx.qc.gt("No map data yet."))
+
+	total_pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
+	page = max(0, min(page, total_pages - 1))
+	offset = page * PAGE_SIZE
+	page_rows = rows[offset:offset + PAGE_SIZE]
+
+	table = discord_table(
+		["#", "Map", "Played"],
+		[[offset + i + 1, r['map_name'], r['played']] for i, r in enumerate(page_rows)]
+	)
+	period_label = f" ({period})" if days else ""
+	page_label = f" — page {page + 1}/{total_pages}" if total_pages > 1 else ""
+	header = f"**Map stats{period_label}{page_label}**\n" if period_label or page_label else ""
+	await ctx.reply(header + table)
 
 
 async def leaderboard(ctx, page: int = 1):
