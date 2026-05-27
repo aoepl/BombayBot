@@ -1,4 +1,4 @@
-__all__ = ['last_game', 'stats', 'bombayai', 'top', 'rank', 'leaderboard', 'mapstats']
+__all__ = ['last_game', 'stats', 'bombayai', 'top', 'rank', 'leaderboard', 'mapstats', 'activity']
 
 import datetime
 import io
@@ -450,6 +450,104 @@ async def mapstats(ctx, period: str = None):
 	fig.savefig(buf, format='png')
 	buf.seek(0)
 	await ctx.reply(file=File(fp=buf, filename='mapstats.png'))
+
+
+async def activity(ctx):
+	import asyncio
+	from asyncio import gather
+
+	interaction = getattr(ctx, 'interaction', None)
+	if interaction is not None and not interaction.response.is_done():
+		await interaction.response.defer()
+
+	ts_from = int(time()) - 30 * 86400
+
+	# Day in IST (UTC+5:30), computed in SQL via CONVERT_TZ on fixed offsets
+	# so it doesn't depend on the MySQL server session timezone.
+	match_at_filter = " AND m.at >= %s" if ts_from is not None else ""
+	match_params = [ctx.qc.id] + ([ts_from] if ts_from is not None else [])
+	pred_at_filter = " AND p.at >= %s" if ts_from is not None else ""
+	pred_params = [ctx.qc.guild_id] + ([ts_from] if ts_from is not None else [])
+
+	match_rows, pred_rows = await gather(
+		db.fetchall(
+			f"""
+			SELECT
+				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(m.at), '+00:00', '+05:30'), '%%Y-%%m-%%d %%H:00:00') AS bucket,
+				COUNT(*) AS count
+			FROM qc_player_matches pm
+			JOIN qc_matches m ON m.match_id = pm.match_id AND m.channel_id = pm.channel_id
+			WHERE pm.channel_id = %s{match_at_filter}
+			GROUP BY bucket
+			ORDER BY bucket
+			""",
+			match_params
+		),
+		db.fetchall(
+			f"""
+			SELECT
+				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(p.at), '+00:00', '+05:30'), '%%Y-%%m-%%d %%H:00:00') AS bucket,
+				COUNT(*) AS count
+			FROM predictions p
+			WHERE p.guild_id = %s{pred_at_filter}
+			GROUP BY bucket
+			ORDER BY bucket
+			""",
+			pred_params
+		),
+	)
+
+	if not match_rows and not pred_rows:
+		raise bot.Exc.NotFoundError(ctx.qc.gt("No activity data yet."))
+
+	def _to_hour(v):
+		if isinstance(v, datetime.datetime):
+			return v.replace(minute=0, second=0, microsecond=0)
+		return datetime.datetime.strptime(str(v), '%Y-%m-%d %H:%M:%S')
+
+	match_by_hour = {_to_hour(r['bucket']): int(r['count']) for r in match_rows}
+	pred_by_hour = {_to_hour(r['bucket']): int(r['count']) for r in pred_rows}
+
+	all_hours = sorted(set(match_by_hour) | set(pred_by_hour))
+	start = all_hours[0]
+	end = all_hours[-1]
+	n_hours = int((end - start).total_seconds() // 3600) + 1
+	hours_axis = [start + datetime.timedelta(hours=i) for i in range(n_hours)]
+	match_counts = [match_by_hour.get(h, 0) for h in hours_axis]
+	pred_counts = [pred_by_hour.get(h, 0) for h in hours_axis]
+
+	def _render() -> io.BytesIO:
+		from matplotlib.figure import Figure
+		from matplotlib.backends.backend_agg import FigureCanvasAgg
+		from matplotlib.dates import HourLocator, DateFormatter
+
+		fig = Figure(figsize=(24, 4), dpi=120)
+		FigureCanvasAgg(fig)
+		ax = fig.add_subplot(111)
+		bar_width = 1 / 24  # one hour, in matplotlib date units (days)
+		ax.bar(hours_axis, match_counts, width=bar_width, color='#5865f2', label='Player-matches', align='edge')
+		ax.bar(hours_axis, pred_counts, width=bar_width, bottom=match_counts, color='#ed4245', label='Predictions', align='edge')
+		ax.set_xlabel('Date / hour (IST)')
+		ax.set_ylabel('Count')
+		ax.set_title("Hourly activity (IST, last 30 days)")
+		ax.grid(True, axis='y', linestyle='--', alpha=0.4)
+		ax.spines['top'].set_visible(False)
+		ax.spines['right'].set_visible(False)
+		ax.xaxis.set_major_locator(HourLocator(byhour=[0, 3, 6, 9, 12, 15, 18, 21]))
+		ax.xaxis.set_major_formatter(DateFormatter('%m-%d %H:00'))
+		ax.xaxis.set_minor_locator(HourLocator(interval=1))
+		ax.tick_params(axis='x', which='major', labelrotation=90, labelsize=6)
+		ax.tick_params(axis='x', which='minor', length=2)
+		ax.legend(loc='upper left', frameon=False)
+		fig.tight_layout()
+
+		out = io.BytesIO()
+		fig.savefig(out, format='png')
+		out.seek(0)
+		return out
+
+	buf = await asyncio.to_thread(_render)
+	await ctx.reply(file=File(fp=buf, filename='activity.png'))
 
 
 async def leaderboard(ctx, page: int = 1):

@@ -631,6 +631,12 @@ async def _mapstats(
 ): await run_slash(bot.commands.mapstats, interaction=interaction, period=period)
 
 
+@dc.slash_command(name='activity', description='Plot player activity by hour of day (IST, last 30 days).', **guild_kwargs)
+async def _activity(
+		interaction: Interaction,
+): await run_slash(bot.commands.activity, interaction=interaction)
+
+
 @dc.slash_command(name='bombayai', description='AI-generated analysis of a player stats.', **guild_kwargs)
 async def _bombayai(
 		interaction: Interaction,
