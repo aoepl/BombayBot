@@ -234,7 +234,49 @@ async def rank(ctx, player: Member = None):
 					change=("+" if c['rating_change'] >= 0 else "") + str(c['rating_change'])
 				) for c in changes))
 			)
-		await ctx.reply(embed=embed)
+
+		history = await db.fetchall(
+			"""
+			SELECT at, rating_before, rating_change
+			FROM qc_rating_history
+			WHERE user_id = %s AND channel_id = %s
+			ORDER BY at ASC
+			""",
+			[target.id, ctx.qc.rating.channel_id]
+		)
+		chart_file = None
+		if len(history) >= 2:
+			from matplotlib.figure import Figure
+			from matplotlib.backends.backend_agg import FigureCanvasAgg
+			from matplotlib.dates import DateFormatter, AutoDateLocator
+
+			times = [datetime.datetime.fromtimestamp(h['at']) for h in history]
+			ratings = [h['rating_before'] + h['rating_change'] for h in history]
+			times.insert(0, datetime.datetime.fromtimestamp(history[0]['at']))
+			ratings.insert(0, history[0]['rating_before'])
+
+			fig = Figure(figsize=(8, 3.5), dpi=120)
+			FigureCanvasAgg(fig)
+			ax = fig.add_subplot(111)
+			ax.plot(times, ratings, color='#5865f2', linewidth=1.6)
+			ax.fill_between(times, ratings, min(ratings), color='#5865f2', alpha=0.12)
+			ax.set_title(f"Elo history \u2014 {get_nick(target)}")
+			ax.set_ylabel('Rating')
+			ax.grid(True, axis='y', linestyle='--', alpha=0.4)
+			ax.spines['top'].set_visible(False)
+			ax.spines['right'].set_visible(False)
+			ax.xaxis.set_major_locator(AutoDateLocator())
+			ax.xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+			fig.autofmt_xdate()
+			fig.tight_layout()
+
+			buf = io.BytesIO()
+			fig.savefig(buf, format='png')
+			buf.seek(0)
+			chart_file = File(fp=buf, filename='elo.png')
+			embed.set_image(url='attachment://elo.png')
+
+		await ctx.reply(embed=embed, file=chart_file)
 
 	else:
 		raise bot.Exc.ValueError(ctx.qc.gt("No rating data found."))
@@ -247,17 +289,28 @@ async def bombayai(ctx, player: Member = None):
 		if (member := await ctx.get_member(player)) is not None:
 			data = await bot.stats.user_stats(ctx.qc.id, member.id, ts_from=None, guild_id=ctx.qc.guild_id)
 			target = get_nick(member)
+			target_id = member.id
 		else:
 			raise bot.Exc.NotFoundError(ctx.qc.gt("Specified user not found."))
 	else:
 		data = await bot.stats.user_stats(ctx.qc.id, ctx.author.id, ts_from=None, guild_id=ctx.qc.guild_id)
 		target = get_nick(ctx.author)
+		target_id = ctx.author.id
 
 	lines = [f"Player: {target}"]
 	lines.append(f"Total matches: {data['total']}")
 
 	if data.get('queues'):
 		lines.append("Queues: " + ", ".join(f"{q['queue_name']} ({q['count']})" for q in data['queues']))
+
+	monthly = await _rating_history_buckets(target_id, ctx.qc.rating.channel_id)
+	if monthly:
+		lines.append("Monthly rating history (most recent first):")
+		lines += [
+			f"  {b['period']}: {b['matches']} matches, {int(b['wins'])}W/{int(b['losses'])}L, "
+			f"{int(b['net_change']):+d} pts, ended at {int(b['end_rating'])}"
+			for b in monthly
+		]
 
 	if r := data.get('ratings'):
 		lines.append(f"Record: {r['wins']}W/{r['losses']}L — {r['win_pct']}% winrate")
@@ -293,6 +346,42 @@ async def bombayai(ctx, player: Member = None):
 
 	summary = await generate_player_summary("\n".join(lines))
 	await ctx.reply(f"**BombayAI analysis for {target}**\n{summary}")
+
+
+async def _rating_history_buckets(user_id: int, channel_id: int):
+	async def _bucket(fmt: str, limit: int):
+		return await db.fetchall(
+			f"""
+			WITH ranked AS (
+				SELECT
+					DATE_FORMAT(FROM_UNIXTIME(at), %s) AS period,
+					at,
+					rating_before + rating_change AS rating,
+					rating_change,
+					ROW_NUMBER() OVER (
+						PARTITION BY DATE_FORMAT(FROM_UNIXTIME(at), %s)
+						ORDER BY at DESC
+					) AS rn
+				FROM qc_rating_history
+				WHERE user_id = %s AND channel_id = %s
+			)
+			SELECT
+				period,
+				COUNT(*) AS matches,
+				SUM(CASE WHEN rating_change > 0 THEN 1 ELSE 0 END) AS wins,
+				SUM(CASE WHEN rating_change < 0 THEN 1 ELSE 0 END) AS losses,
+				SUM(rating_change) AS net_change,
+				MAX(CASE WHEN rn = 1 THEN rating END) AS end_rating
+			FROM ranked
+			GROUP BY period
+			ORDER BY period DESC
+			LIMIT %s
+			""",
+			[fmt, fmt, user_id, channel_id, limit]
+		)
+
+	monthly = await _bucket('%Y-%m', 12)
+	return monthly
 
 
 async def mapstats(ctx, period: str = None):

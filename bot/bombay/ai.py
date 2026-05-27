@@ -33,6 +33,7 @@ async def generate_player_summary(stats_text: str) -> str | None:
 		contents=(
 			"You are a sharp, witty esports analyst for a competitive pickup game community. "
 			"Write a punchy 10-15 sentence analysis of the player stats provided. Be ruthless."
+			"Assume 50% winrate is at par"
 			"Be specific with numbers, call out standout strengths and weaknesses, "
 			"and give it personality — like a post-match breakdown. "
 			"Keep it under 1000 characters.\n\n"
