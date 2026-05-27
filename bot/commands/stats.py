@@ -276,7 +276,10 @@ async def rank(ctx, player: Member = None):
 			chart_file = File(fp=buf, filename='elo.png')
 			embed.set_image(url='attachment://elo.png')
 
-		await ctx.reply(embed=embed, file=chart_file)
+		if chart_file is not None:
+			await ctx.reply(embed=embed, file=chart_file)
+		else:
+			await ctx.reply(embed=embed)
 
 	else:
 		raise bot.Exc.ValueError(ctx.qc.gt("No rating data found."))
@@ -452,7 +455,7 @@ async def mapstats(ctx, period: str = None):
 	await ctx.reply(file=File(fp=buf, filename='mapstats.png'))
 
 
-async def activity(ctx):
+async def activity(ctx, player: Member = None):
 	import asyncio
 	from asyncio import gather
 
@@ -460,38 +463,46 @@ async def activity(ctx):
 	if interaction is not None and not interaction.response.is_done():
 		await interaction.response.defer()
 
-	ts_from = int(time()) - 30 * 86400
+	target = None
+	if player is not None:
+		if (target := await ctx.get_member(player)) is None:
+			raise bot.Exc.NotFoundError(ctx.qc.gt("Specified user not found."))
+
+	ts_from = int(time()) - 28 * 86400
 
 	# Day in IST (UTC+5:30), computed in SQL via CONVERT_TZ on fixed offsets
 	# so it doesn't depend on the MySQL server session timezone.
-	match_at_filter = " AND m.at >= %s" if ts_from is not None else ""
-	match_params = [ctx.qc.id] + ([ts_from] if ts_from is not None else [])
-	pred_at_filter = " AND p.at >= %s" if ts_from is not None else ""
-	pred_params = [ctx.qc.guild_id] + ([ts_from] if ts_from is not None else [])
+	match_at_filter = " AND m.at >= %s"
+	match_user_filter = " AND pm.user_id = %s" if target else ""
+	match_params = [ctx.qc.id, ts_from] + ([target.id] if target else [])
+	pred_at_filter = " AND p.at >= %s"
+	pred_user_filter = " AND p.user_id = %s" if target else ""
+	pred_params = [ctx.qc.guild_id, ts_from] + ([target.id] if target else [])
 
+	# MySQL DAYOFWEEK: 1=Sun .. 7=Sat. Remap to 0=Mon .. 6=Sun in Python.
 	match_rows, pred_rows = await gather(
 		db.fetchall(
 			f"""
 			SELECT
-				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(m.at), '+00:00', '+05:30'), '%%Y-%%m-%%d %%H:00:00') AS bucket,
+				DAYOFWEEK(CONVERT_TZ(FROM_UNIXTIME(m.at), '+00:00', '+05:30')) AS dow,
+				HOUR(CONVERT_TZ(FROM_UNIXTIME(m.at), '+00:00', '+05:30')) AS hr,
 				COUNT(*) AS count
 			FROM qc_player_matches pm
 			JOIN qc_matches m ON m.match_id = pm.match_id AND m.channel_id = pm.channel_id
-			WHERE pm.channel_id = %s{match_at_filter}
-			GROUP BY bucket
-			ORDER BY bucket
+			WHERE pm.channel_id = %s{match_at_filter}{match_user_filter}
+			GROUP BY dow, hr
 			""",
 			match_params
 		),
 		db.fetchall(
 			f"""
 			SELECT
-				DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME(p.at), '+00:00', '+05:30'), '%%Y-%%m-%%d %%H:00:00') AS bucket,
+				DAYOFWEEK(CONVERT_TZ(FROM_UNIXTIME(p.at), '+00:00', '+05:30')) AS dow,
+				HOUR(CONVERT_TZ(FROM_UNIXTIME(p.at), '+00:00', '+05:30')) AS hr,
 				COUNT(*) AS count
 			FROM predictions p
-			WHERE p.guild_id = %s{pred_at_filter}
-			GROUP BY bucket
-			ORDER BY bucket
+			WHERE p.guild_id = %s{pred_at_filter}{pred_user_filter}
+			GROUP BY dow, hr
 			""",
 			pred_params
 		),
@@ -500,45 +511,43 @@ async def activity(ctx):
 	if not match_rows and not pred_rows:
 		raise bot.Exc.NotFoundError(ctx.qc.gt("No activity data yet."))
 
-	def _to_hour(v):
-		if isinstance(v, datetime.datetime):
-			return v.replace(minute=0, second=0, microsecond=0)
-		return datetime.datetime.strptime(str(v), '%Y-%m-%d %H:%M:%S')
+	def _to_idx(dow):  # 1=Sun..7=Sat -> 0=Mon..6=Sun
+		return (int(dow) + 5) % 7
 
-	match_by_hour = {_to_hour(r['bucket']): int(r['count']) for r in match_rows}
-	pred_by_hour = {_to_hour(r['bucket']): int(r['count']) for r in pred_rows}
+	# grid[day_idx][hour] = combined count
+	grid = [[0] * 24 for _ in range(7)]
+	for r in match_rows:
+		grid[_to_idx(r['dow'])][int(r['hr'])] += int(r['count'])
+	for r in pred_rows:
+		grid[_to_idx(r['dow'])][int(r['hr'])] += int(r['count'])
 
-	all_hours = sorted(set(match_by_hour) | set(pred_by_hour))
-	start = all_hours[0]
-	end = all_hours[-1]
-	n_hours = int((end - start).total_seconds() // 3600) + 1
-	hours_axis = [start + datetime.timedelta(hours=i) for i in range(n_hours)]
-	match_counts = [match_by_hour.get(h, 0) for h in hours_axis]
-	pred_counts = [pred_by_hour.get(h, 0) for h in hours_axis]
+	day_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 	def _render() -> io.BytesIO:
 		from matplotlib.figure import Figure
 		from matplotlib.backends.backend_agg import FigureCanvasAgg
-		from matplotlib.dates import HourLocator, DateFormatter
 
-		fig = Figure(figsize=(24, 4), dpi=120)
+		fig = Figure(figsize=(12, 4), dpi=120)
 		FigureCanvasAgg(fig)
 		ax = fig.add_subplot(111)
-		bar_width = 1 / 24  # one hour, in matplotlib date units (days)
-		ax.bar(hours_axis, match_counts, width=bar_width, color='#5865f2', label='Player-matches', align='edge')
-		ax.bar(hours_axis, pred_counts, width=bar_width, bottom=match_counts, color='#ed4245', label='Predictions', align='edge')
-		ax.set_xlabel('Date / hour (IST)')
-		ax.set_ylabel('Count')
-		ax.set_title("Hourly activity (IST, last 30 days)")
-		ax.grid(True, axis='y', linestyle='--', alpha=0.4)
-		ax.spines['top'].set_visible(False)
-		ax.spines['right'].set_visible(False)
-		ax.xaxis.set_major_locator(HourLocator(byhour=[0, 3, 6, 9, 12, 15, 18, 21]))
-		ax.xaxis.set_major_formatter(DateFormatter('%m-%d %H:00'))
-		ax.xaxis.set_minor_locator(HourLocator(interval=1))
-		ax.tick_params(axis='x', which='major', labelrotation=90, labelsize=6)
-		ax.tick_params(axis='x', which='minor', length=2)
-		ax.legend(loc='upper left', frameon=False)
+		im = ax.imshow(grid, aspect='auto', cmap='magma', origin='upper')
+		ax.set_xticks(range(24))
+		ax.set_xticklabels([f"{h:02d}" for h in range(24)], fontsize=8)
+		ax.set_yticks(range(7))
+		ax.set_yticklabels(day_labels)
+		ax.set_xlabel('Hour of day (IST)')
+		ax.set_ylabel('Day of week')
+		scope = f" — {get_nick(target)}" if target else ""
+		ax.set_title(f"Activity heatmap by weekday × hour (IST, last 28 days){scope}")
+		max_v = max((max(row) for row in grid), default=0)
+		threshold = max_v * 0.6
+		for d in range(7):
+			for h in range(24):
+				v = grid[d][h]
+				if v:
+					ax.text(h, d, str(v), ha='center', va='center',
+					        color='black' if v >= threshold else 'white', fontsize=6)
+		fig.colorbar(im, ax=ax, label='Count (matches + predictions)')
 		fig.tight_layout()
 
 		out = io.BytesIO()

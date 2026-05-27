@@ -65,7 +65,7 @@ async def run_slash_coro(ctx: SlashContext, coro: Callable, **kwargs):
 		await ctx.error(str(e), title="RuntimeError")
 		log.error("\n".join([
 			f"Error processing /slash command {coro.__name__}.",
-			f"QC: {ctx.channel.guild.name}>#{ctx.channel.name} ({qc.id}).",
+			f"QC: {ctx.channel.guild.name}>#{ctx.channel.name} ({ctx.qc.id}).",
 			f"Member: {ctx.author} ({ctx.author.id}).",
 			f"Kwargs: {kwargs}.",
 			f"Exception: {str(e)}. Traceback:\n{traceback.format_exc()}=========="
@@ -631,10 +631,11 @@ async def _mapstats(
 ): await run_slash(bot.commands.mapstats, interaction=interaction, period=period)
 
 
-@dc.slash_command(name='activity', description='Plot player activity by hour of day (IST, last 30 days).', **guild_kwargs)
+@dc.slash_command(name='activity', description='Plot player activity by hour of day (IST, last 28 days).', **guild_kwargs)
 async def _activity(
 		interaction: Interaction,
-): await run_slash(bot.commands.activity, interaction=interaction)
+		player: Member = SlashOption(required=False, verify=False),
+): await run_slash(bot.commands.activity, interaction=interaction, player=player)
 
 
 @dc.slash_command(name='bombayai', description='AI-generated analysis of a player stats.', **guild_kwargs)
