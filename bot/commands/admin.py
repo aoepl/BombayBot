@@ -163,7 +163,7 @@ async def douche_leaderboard(ctx):
 		[[i + 1, row['name'][:16], row['count']] for i, row in enumerate(data)]
 	))
 
-async def predictions_leaderboard(ctx, page: int = 1, season: int = None):
+async def predictions_leaderboard(ctx, page: int = 1, season: str = None):
 	from core.database import db
 	from asyncio import gather
 	from itertools import groupby
@@ -182,9 +182,27 @@ async def predictions_leaderboard(ctx, page: int = 1, season: int = None):
 		return date(year, month + 1, 1)
 
 	today = date.today()
-	current_season = (today.year * 12 + today.month) - (start.year * 12 + start.month) + 1
-	query_season = current_season if season is None else max(1, min(season, current_season))
-	month_start = add_months(start, query_season - 1)
+	current_month_start = today.replace(day=1)
+
+	if season is None:
+		month_start = current_month_start
+	else:
+		try:
+			parsed = datetime.strptime(season, "%b%y").date().replace(day=1)
+		except ValueError:
+			raise bot.Exc.SyntaxError(ctx.qc.gt(
+				"Invalid season '{season}'. Use format like 'May26', 'Apr26'."
+			).format(season=season))
+		if parsed < start:
+			raise bot.Exc.ValueError(ctx.qc.gt(
+				"Season must be {first} or later."
+			).format(first=start.strftime('%b%y')))
+		if parsed > current_month_start:
+			raise bot.Exc.ValueError(ctx.qc.gt(
+				"Season is in the future. Current season is {current}."
+			).format(current=current_month_start.strftime('%b%y')))
+		month_start = parsed
+
 	month_end = add_months(month_start, 1)
 	from_ts = int(datetime.combine(month_start, dtime.min).timestamp())
 	to_ts = int(datetime.combine(month_end, dtime.min).timestamp())
@@ -271,10 +289,13 @@ async def predictions_leaderboard(ctx, page: int = 1, season: int = None):
 			for i, row in enumerate(rows)
 		]
 	)
-	heading = f"# Season {query_season} — {month_start.strftime('%B %Y')}"
+	total_predictions = sum(int(d['season_total']) for d in data)
+	unique_players = len(data)
+	heading = f"# Season {month_start.strftime('%b%y')}"
+	stats_line = f"# {total_predictions} predictions · {unique_players} players"
 	if total_pages > 1:
-		heading += f"  (page {page + 1}/{total_pages})"
-	table = table.replace("```markdown\n", f"```markdown\n{heading}\n", 1)
+		stats_line += f" · page {page + 1}/{total_pages}"
+	table = table.replace("```markdown\n", f"```markdown\n{heading}\n{stats_line}\n", 1)
 	await ctx.reply(table)
 
 

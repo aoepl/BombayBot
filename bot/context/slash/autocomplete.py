@@ -43,3 +43,19 @@ async def teams_by_match_id(interaction: Interaction, name: str) -> List[str]:
 	if interaction_match and (match := get(bot.active_matches, id=interaction_match['value'])):
 		return [team.name for team in match.teams[:2] if team.name.startswith(name)]
 	return ['incorrect match_id supplied']
+
+
+async def prediction_seasons(interaction: Interaction, season: str) -> List[str]:
+	from datetime import date
+	start = date(2026, 4, 1)
+	today = date.today()
+	# Inclusive count of months from start through current.
+	months_span = (today.year * 12 + today.month) - (start.year * 12 + start.month) + 1
+	options = []
+	for i in range(months_span):
+		idx = start.year * 12 + (start.month - 1) + i
+		year, month = divmod(idx, 12)
+		options.append(date(year, month + 1, 1).strftime('%b%y'))
+	options.reverse()  # most recent first so it tops the autocomplete dropdown
+	prefix = (season or '').lower()
+	return [s for s in options if s.lower().startswith(prefix)][:3]
