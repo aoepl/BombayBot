@@ -332,13 +332,15 @@ class Embeds:
 		)
 		if ai_summary:
 			embed.add_field(name="Match Preview", value=ai_summary, inline=False)
+		team1_roster = ", ".join(get_nick(p) for p in team1) or "\u2014"
+		team2_roster = ", ".join(get_nick(p) for p in team2) or "\u2014"
 		teams_display = [
-			f"{_P.TEAM_EMOJIS[0]} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]}`",
-			f"{_P.TEAM_EMOJIS[1]} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]}`",
+			f"{_P.TEAM_EMOJIS[0]} \u200b **{team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]}`\n`{team1_roster}`",
+			f"{_P.TEAM_EMOJIS[1]} \u200b **{team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]}`\n`{team2_roster}`",
 		]
 		embed.add_field(
 			name="React to predict the winner",
-			value="\n".join(teams_display),
+			value="\n\n".join(teams_display),
 			inline=False
 		)
 		embed.set_footer(**self.footer)
@@ -359,13 +361,23 @@ class Embeds:
 		team1_supporters = [u.mention for u, v in votes.items() if v == self.m.teams[0].idx]
 		team2_supporters = [u.mention for u, v in votes.items() if v == self.m.teams[1].idx]
 
+		team1_roster = ", ".join(get_nick(pl) for pl in team1) or "—"
+		team2_roster = ", ".join(get_nick(pl) for pl in team2) or "—"
+		team1_supporters_str = (
+			f"Supporters({len(team1_supporters)}): {chr(32).join(team1_supporters)}"
+			if team1_supporters else "Supporters(0): —"
+		)
+		team2_supporters_str = (
+			f"Supporters({len(team2_supporters)}): {chr(32).join(team2_supporters)}"
+			if team2_supporters else "Supporters(0): —"
+		)
 		embed.add_field(
 			name=f"{team1.emoji} \u200b **Team {team1.name}** \u200b `Avg elo: {self.m.team_ratings[0]} | Odds: {round(self.m.team_odds[0], 2)}`",
-			value=(" ".join(team1_supporters) and f"Supporters({len(team1_supporters)}): {chr(32).join(team1_supporters)}") or "Supporters(0): —", inline=False
+			value=f"`{team1_roster}`\n{team1_supporters_str}", inline=False
 		)
 		embed.add_field(
 			name=f"{team2.emoji} \u200b **Team {team2.name}** \u200b `Avg elo: {self.m.team_ratings[1]} | Odds: {round(self.m.team_odds[1], 2)}`",
-			value=(" ".join(team2_supporters) and f"Supporters({len(team2_supporters)}): {chr(32).join(team2_supporters)}") or "Supporters(0): —", inline=False
+			value=f"`{team2_roster}`\n{team2_supporters_str}", inline=False
 		)
 		embed.set_footer(**self.footer)
 
