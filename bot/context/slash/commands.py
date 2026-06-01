@@ -164,6 +164,24 @@ async def _split_queue(
 _split_queue.on_autocomplete("queue")(autocomplete.queues)
 
 
+@groups.admin_queue.subcommand(name='add_map', description='Add one or more maps to a queue (comma-separated).')
+async def _add_map(
+	interaction: Interaction,
+	queue: str = SlashOption(description="Queue name."),
+	names: str = SlashOption(description="Map name(s), comma-separated."),
+): await run_slash(bot.commands.add_map, interaction=interaction, queue=queue, names=names)
+_add_map.on_autocomplete("queue")(autocomplete.queues)
+
+
+@groups.admin_queue.subcommand(name='remove_map', description='Remove one or more maps from a queue (comma-separated).')
+async def _remove_map(
+	interaction: Interaction,
+	queue: str = SlashOption(description="Queue name."),
+	names: str = SlashOption(description="Map name(s), comma-separated."),
+): await run_slash(bot.commands.remove_map, interaction=interaction, queue=queue, names=names)
+_remove_map.on_autocomplete("queue")(autocomplete.queues)
+
+
 # channel -> ...
 
 @groups.admin_channel.subcommand(name='enable', description='Enable the bot on this channel.')

@@ -1,6 +1,6 @@
 __all__ = [
 	'create_pickup', 'delete_queue', 'show_queues', 'set_qc', 'set_queue', 'cfg_qc', 'cfg_queue',
-	'set_qc_cfg', 'set_queue_cfg'
+	'set_qc_cfg', 'set_queue_cfg', 'add_map', 'remove_map'
 ]
 
 import json
@@ -118,3 +118,55 @@ async def set_queue_cfg(ctx, queue: str, cfg: str):
 		raise bot.Exc.ValueError(str(e))
 	else:
 		await ctx.success(f"__{q.name}__ queue configuration updated.")
+
+
+async def add_map(ctx, queue: str, names: str):
+	""" Add one or more maps to a queue. Multiple names comma-separated. """
+	ctx.check_perms(ctx.Perms.ADMIN)
+	if (q := find(lambda i: i.name.lower() == queue.lower(), ctx.qc.queues)) is None:
+		raise bot.Exc.SyntaxError(f"Queue '{queue}' not found on the channel.")
+
+	candidates = [n.strip() for n in names.split(',') if n.strip()]
+	if not candidates:
+		raise bot.Exc.SyntaxError(ctx.qc.gt("No map names provided."))
+
+	existing = {m['name'].lower() for m in q.cfg.maps}
+	to_add = [{'name': n} for n in candidates if n.lower() not in existing]
+	if not to_add:
+		raise bot.Exc.ValueError(ctx.qc.gt("All specified maps already exist on **{queue}**.").format(queue=q.name))
+
+	try:
+		await q.cfg.update({"maps": list(q.cfg.maps) + to_add})
+	except Exception as e:
+		raise bot.Exc.ValueError(str(e))
+
+	added = ", ".join(f"`{m['name']}`" for m in to_add)
+	await ctx.success(ctx.qc.gt("Added {count} map(s) to **{queue}**: {maps}").format(
+		count=len(to_add), queue=q.name, maps=added
+	))
+
+
+async def remove_map(ctx, queue: str, names: str):
+	""" Remove one or more maps from a queue. Multiple names comma-separated. """
+	ctx.check_perms(ctx.Perms.ADMIN)
+	if (q := find(lambda i: i.name.lower() == queue.lower(), ctx.qc.queues)) is None:
+		raise bot.Exc.SyntaxError(f"Queue '{queue}' not found on the channel.")
+
+	targets = {n.strip().lower() for n in names.split(',') if n.strip()}
+	if not targets:
+		raise bot.Exc.SyntaxError(ctx.qc.gt("No map names provided."))
+
+	kept = [m for m in q.cfg.maps if m['name'].lower() not in targets]
+	removed = [m for m in q.cfg.maps if m['name'].lower() in targets]
+	if not removed:
+		raise bot.Exc.NotFoundError(ctx.qc.gt("None of the specified maps were found on **{queue}**.").format(queue=q.name))
+
+	try:
+		await q.cfg.update({"maps": kept})
+	except Exception as e:
+		raise bot.Exc.ValueError(str(e))
+
+	removed_names = ", ".join(f"`{m['name']}`" for m in removed)
+	await ctx.success(ctx.qc.gt("Removed {count} map(s) from **{queue}**: {maps}").format(
+		count=len(removed), queue=q.name, maps=removed_names
+	))
