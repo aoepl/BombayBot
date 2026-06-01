@@ -67,7 +67,8 @@ db.ensure_table(dict(
 		dict(cname="winner", ctype=db.types.bool),
 		dict(cname="alpha_score", ctype=db.types.int),
 		dict(cname="beta_score", ctype=db.types.int),
-		dict(cname="maps", ctype=db.types.str)
+		dict(cname="maps", ctype=db.types.str),
+		dict(cname="reason", ctype=db.types.str)
 	],
 	primary_keys=["match_id"]
 ))
@@ -161,7 +162,7 @@ async def register_match_ranked(ctx, m):
 		match_id=m.id, channel_id=m.qc.id, queue_id=m.queue.cfg.p_key, queue_name=m.queue.name,
 		alpha_name=m.teams[0].name, beta_name=m.teams[1].name,
 		at=now, ranked=1, winner=m.winner,
-		alpha_score=m.scores[0], beta_score=m.scores[1], maps="\n".join(m.maps)
+		alpha_score=m.scores[0], beta_score=m.scores[1], maps="\n".join(m.maps), reason = m.reason
 	))
 
 	for channel_id in {m.qc.id, m.qc.rating.channel_id}:

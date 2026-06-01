@@ -265,9 +265,10 @@ async def _report_admin(
 		match_id: int,
 		winner_team: str = SlashOption(required=False),
 		draw: bool = SlashOption(required=False, default=False),
-		abort: bool = SlashOption(required=False, default=False)
+		abort: bool = SlashOption(required=False, default=False),
+		reason: str = SlashOption(required=False, default=None)
 ): await run_slash(
-	bot.commands.report_admin, interaction=interaction, match_id=match_id, winner_team=winner_team, draw=draw, abort=abort
+	bot.commands.report_admin, interaction=interaction, match_id=match_id, winner_team=winner_team, draw=draw, abort=abort, reason=reason
 )
 _report_admin.on_autocomplete('winner_team')(autocomplete.teams_by_match_id)
 _report_admin.on_autocomplete('match_id')(autocomplete.match_ids)
@@ -608,8 +609,9 @@ async def _pick(
 @dc.slash_command(name='report', description='Report match result.', **guild_kwargs)
 async def _report(
 		interaction: Interaction,
-		result: str = SlashOption(choices=['loss', 'draw', 'abort'])
-): await run_slash(bot.commands.report, interaction=interaction, result=result)
+		result: str = SlashOption(choices=['loss', 'draw', 'abort']),
+		reason: str = SlashOption(required=False, default=None)
+): await run_slash(bot.commands.report, interaction=interaction, result=result, reason=reason)
 
 
 @dc.slash_command(name='lastgame', description='Show last game details.', **guild_kwargs)

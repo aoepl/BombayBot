@@ -156,6 +156,7 @@ class Match:
 		self.players = list(players)
 		self.ratings = ratings
 		self.winner = None
+		self.reason = None
 		self.scores = [0, 0]
 		self.team_ratings = [0, 0]
 		self.team_odds = [0.0, 0.0]
@@ -260,7 +261,7 @@ class Match:
 				))
 			except DiscordException:
 				pass
-			await self.cancel(ctx)
+			await self.cancel(ctx, reason=self.gt("match timed out"))
 
 	async def next_state(self, ctx):
 		if len(self.states):
@@ -294,14 +295,14 @@ class Match:
 		else:
 			await self.final_message(ctx)
 
-	async def report_loss(self, ctx, member, draw_flag):
+	async def report_loss(self, ctx, member, reason, draw_flag):
 		if self.state != self.WAITING_REPORT:
 			raise bot.Exc.MatchStateError(self.gt("The match must be on the waiting report stage."))
 
 		team = find(lambda team: member in team[:1], self.teams[:2])
 		if team is None:
 			raise bot.Exc.PermissionError(self.gt("You must be a team captain to report a loss or draw."))
-
+		self.reason = reason
 		enemy_team = self.teams[1-team.idx]
 		if draw_flag and not enemy_team.draw_flag == draw_flag:
 			team.draw_flag = draw_flag
@@ -406,12 +407,18 @@ class Match:
 	def print(self):
 		return f"> *({self.id})* **{self.queue.name}** | `{join_and([get_nick(p) for p in self.players])}`"
 
-	async def cancel(self, ctx):
+	async def cancel(self, ctx, reason=None):
+		if reason:
+			self.reason = reason
 		if self.check_in.message and self.check_in.message.id in bot.waiting_reactions.keys():
 			bot.waiting_reactions.pop(self.check_in.message.id)
 		try:
+			suffix = f" Reason: {self.reason}" if self.reason else ""
 			await ctx.notice(
-				self.gt("{players} your match has been canceled.").format(players=join_and([p.mention for p in self.players]))
+				self.gt("{players} your match has been canceled.{suffix}").format(
+					players=join_and([p.mention for p in self.players]),
+					suffix=suffix,
+				)
 			)
 		except DiscordException:
 			pass

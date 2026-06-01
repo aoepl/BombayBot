@@ -58,4 +58,4 @@ async def prediction_seasons(interaction: Interaction, season: str) -> List[str]
 		options.append(date(year, month + 1, 1).strftime('%b%y'))
 	options.reverse()  # most recent first so it tops the autocomplete dropdown
 	prefix = (season or '').lower()
-	return [s for s in options if s.lower().startswith(prefix)][:3]
+	return [s for s in options if s.lower().startswith(prefix)][:4]

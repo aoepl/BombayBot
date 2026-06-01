@@ -85,7 +85,7 @@ async def put(ctx, match_id: int, player: Member, team_name: str):
 	await match.draft.put(ctx, player, team_name)
 
 
-async def report_admin(ctx, match_id: int, winner_team=None, draw=False, abort=False):
+async def report_admin(ctx, match_id: int, winner_team=None, draw=False, abort=False, reason=None):
 	ctx.check_perms(ctx.Perms.MODERATOR)
 	if (match := find(lambda m: m.qc == ctx.qc and m.id == match_id, bot.active_matches)) is None:
 		raise bot.Exc.NotFoundError(ctx.qc.gt("Could not find match with specified id. Check `/matches`."))
@@ -93,19 +93,23 @@ async def report_admin(ctx, match_id: int, winner_team=None, draw=False, abort=F
 		raise bot.Exc.SyntaxError(ctx.qc.gt("Please specify a team name or draw."))
 
 	if abort:
-		await match.cancel(ctx)
+		if not (reason or '').strip():
+			raise bot.Exc.SyntaxError(ctx.qc.gt("A reason is required when cancelling a match."))
+		await match.cancel(ctx, reason=reason.strip())
 	else:
 		await match.report_win(ctx, winner_team, draw)
 
 
 @author_match
-async def report(ctx, match: bot.Match, result):
+async def report(ctx, match: bot.Match, result, reason):
+	if result == 'abort' and not (reason or '').strip():
+		raise bot.Exc.SyntaxError(ctx.qc.gt("A reason is required when cancelling a match."))
 	if result == 'loss':
-		await match.report_loss(ctx, ctx.author, draw_flag=False)
+		await match.report_loss(ctx, ctx.author, reason, draw_flag=False)
 	elif result == 'draw':
-		await match.report_loss(ctx, ctx.author, draw_flag=1)
+		await match.report_loss(ctx, ctx.author, reason, draw_flag=1)
 	elif result == 'abort':
-		await match.report_loss(ctx, ctx.author, draw_flag=2)
+		await match.report_loss(ctx, ctx.author, reason.strip(), draw_flag=2)
 	else:
 		raise bot.Exc.ValueError("Invalid result value.")
 
