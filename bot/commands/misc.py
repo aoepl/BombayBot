@@ -18,7 +18,7 @@ async def auto_ready(ctx, duration: timedelta = None):
 		duration = timedelta(seconds=min([60*5, ctx.qc.cfg.max_auto_ready]))
 
 	if duration.total_seconds() > ctx.qc.cfg.max_auto_ready:
-		raise ctx.Exc.ValueError(ctx.qc.gt("Maximum auto_ready duration is {duration}.").format(
+		raise bot.Exc.ValueError(ctx.qc.gt("Maximum auto_ready duration is {duration}.").format(
 			duration=seconds_to_str(ctx.qc.cfg.max_auto_ready)
 		))
 
@@ -27,7 +27,7 @@ async def auto_ready(ctx, duration: timedelta = None):
 		await ctx.success(ctx.qc.gt("Your automatic ready confirmation is now turned off."))
 		return
 
-	bot.auto_ready[ctx.author.id] = int(time()) + duration.total_seconds()
+	bot.auto_ready[ctx.author.id] = int(time()) + int(duration.total_seconds())
 	await ctx.success(
 		ctx.qc.gt("During next {duration} your match participation will be confirmed automatically.").format(
 			duration=duration.__str__()
