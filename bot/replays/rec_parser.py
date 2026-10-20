@@ -11,6 +11,7 @@ import gzip
 import zipfile
 import struct
 import json
+import re
 from functools import lru_cache
 from importlib import resources
 
@@ -74,7 +75,7 @@ def _read_players(header, save, extra_string):
 	header.read(4)
 	u('<I')
 	header.read(4)
-	u('<I')
+	rms_map_id, = u('<I')
 	header.read(4)
 	u('<I'); u('<I'); u('<I'); u('<I')
 	header.read(12)
@@ -128,7 +129,15 @@ def _read_players(header, save, extra_string):
 				number=number, name=name, profile_id=profile_id, civ_id=civ_id,
 				team_id=team_id, color_id=color_id, type=ptype
 			))
-	return players
+	return players, rms_map_id
+
+
+def _map_name(header_bytes, rms_map_id):
+	""" Mod maps are named in the lobby strings ("...RANDOM_MAPS:Rage Arena v4.rms..."); built-in maps by id. """
+	if m := re.search(rb'RANDOM_MAPS:([^:\x00]{1,80})\.rms', header_bytes[:300000]):
+		return m.group(1).decode('utf-8', 'replace').strip()
+	maps = reference().get('maps', {})
+	return maps.get(str(rms_map_id)) if isinstance(maps.get(str(rms_map_id)), str) else None
 
 
 def read_players(raw: bytes):
@@ -142,9 +151,9 @@ def read_players(raw: bytes):
 	for extra in (save >= 68.0, save < 68.0):
 		header.seek(start)
 		try:
-			players = _read_players(header, save, extra)
+			players, rms_map_id = _read_players(header, save, extra)
 			if players and all(1 <= p['number'] <= 8 for p in players):
-				return save, players
+				return save, players, _map_name(header.getvalue(), rms_map_id)
 		except Exception as e:  # try the other layout
 			errors.append(str(e))
 	raise RecError(f"Could not read the player list (save {save}): {'; '.join(errors)}")
@@ -168,7 +177,7 @@ def parse(data: bytes) -> dict:
 	Returns dict(save, duration (ms), players [..], actions [{t, a, ...}], syncs [{t, <player>: {...}}], chat [...])
 	"""
 	raw = unwrap(data)
-	save, players = read_players(raw)
+	save, players, map_name = read_players(raw)
 
 	stream = io.BytesIO(raw)
 	header_len, = struct.unpack('<I', stream.read(4))
@@ -199,4 +208,4 @@ def parse(data: bytes) -> dict:
 			except Exception:
 				pass
 
-	return dict(save=save, duration=t, players=players, actions=actions, syncs=syncs, chat=chat)
+	return dict(save=save, map_name=map_name, duration=t, players=players, actions=actions, syncs=syncs, chat=chat)

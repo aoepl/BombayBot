@@ -23,6 +23,8 @@ LINE_NAMES = {
 	'Demolition Raft': 'Demo ships', 'Cannon Galleon': 'Cannon Galleons',
 }
 CASTLES = {'Castle', 'Krepost', 'Donjon', 'Fortress'}
+ECO_BUILDINGS = {'Town Center', 'House', 'Farm', 'Mill', 'Lumber Camp', 'Mining Camp', 'Market', 'Dock',
+	'Folwark', 'Pasture', 'Feitoria', 'Settlement', 'Mule Cart'}
 TOWERS = {'Watch Tower', 'Guard Tower', 'Keep', 'Bombard Tower'}
 ARMY_ORDERS = {'MOVE', 'ORDER', 'DE_ATTACK_MOVE', 'PATROL', 'ATTACK_GROUND'}
 
@@ -73,7 +75,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p in players.values():
 		p['civ'] = civ_name(p['civ_id'])
 		m = meta.get(p['profile_id'], {})
-		p['rating'] = m.get('rating')
+		p['rating'] = m.get('rating')  # World's Edge team rating
+		p['elo'] = m.get('elo')  # BombayBot Elo used to make the match
 		p['won'] = m.get('won')
 		if m.get('alias'):
 			p['name'] = m['alias']
@@ -303,20 +306,38 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	]
 	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up',))
 	press = _minmax({p: press_out[p] + 25 * fwd_up[p] for p in pids})
-	kept = {}
+	# Survival only counts for players whose base was really attacked: did they keep their
+	# economy at home afterwards, or did they have to rebuild somewhere else?
+	max_in = max(press_in.values()) if press_in else 0
+	survival, survival_note = {}, {}
 	for p in pids:
-		c = curve.get(p)
-		if not c:
-			kept[p] = None
+		if not max_in or press_in[p] < max(50, 0.25 * max_in):
+			survival[p] = None
+			survival_note[p] = "base not seriously attacked"
 			continue
-		peak = max(r[1] for r in c)
-		kept[p] = (obj_at(p, 0.95) or 0) / peak if peak else None
-	surv_raw = _minmax(kept)
-	under = _minmax({p: press_in[p] for p in pids})
-	survival = {}
-	for p in pids:
-		v = surv_raw[p] * 0.7 + under[p] * 0.3 - 3 * min(stats[p]['tc_moves'], 1) + (1 if players[p]['won'] else 0)
-		survival[p] = max(1.0, min(10.0, v))
+		tl = timeline_in[p]
+		total, cum, pressure_start = sum(tl.values()), 0, 0
+		for minute in sorted(tl):
+			cum += tl[minute]
+			if cum >= 0.2 * total:
+				pressure_start = minute * 60000
+				break
+		eco = [a for a in A if a['a'] == 'BUILD' and a.get('player_id') == p and a['t'] >= pressure_start
+			and _name('objects', a['building_id']) in ECO_BUILDINGS]
+		if eco:
+			home = sum(1 for a in eco if base_of(a['x'], a['y']) == p) / len(eco)
+		else:
+			home = 0.5
+		moved_tcs = sum(1 for a in eco if _name('objects', a['building_id']) == 'Town Center' and base_of(a['x'], a['y']) != p)
+		held = max(0.0, min(1.0, home - 0.1 * moved_tcs))
+		value = 1 + 9 * held + (press_in[p] / max_in) * held
+		survival[p] = max(1.0, min(10.0, value))
+		survival_note[p] = (
+			f"held the base under pressure ({round(home * 100)}% of new economy buildings at home)" if held >= 0.75 else
+			f"base partly lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere)"
+			if held >= 0.4 else
+			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere)"
+		)
 	team_parts = [
 		_minmax({p: trib_out[p] for p in pids}),
 		_minmax({p: help_out[p] for p in pids}),
@@ -330,10 +351,33 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p in pids:
 		e = sum(part[p] for part in exec_parts) / len(exec_parts)
 		t = team_parts[0][p] * .5 + team_parts[1][p] * .35 + team_parts[2][p] * .15
-		sc = dict(exec=round(e, 1), press=round(press[p], 1), surv=round(survival[p], 1), team=round(t, 1))
-		w = weights[players[p]['seat']]
-		sc['overall'] = round(sum(sc[k] * w[k] for k in w), 1)
+		surv = round(survival[p], 1) if survival[p] is not None else None
+		sc = dict(exec=round(e, 1), press=round(press[p], 1), surv=surv, team=round(t, 1))
+		w = dict(weights[players[p]['seat']])
+		if surv is None:  # survival was not tested: spread its weight over the rest
+			w.pop('surv')
+		total_w = sum(w.values())
+		sc['overall'] = round(sum(sc[k] * w[k] for k in w) / total_w, 1)
 		stats[p]['scores'] = sc
+		stats[p]['survival_note'] = survival_note[p]
+
+	# ---- performance against BombayBot Elo
+	elo_scaled = _minmax({p: players[p]['elo'] for p in pids if players[p]['elo'] is not None})
+	by_elo = sorted((p for p in pids if players[p]['elo'] is not None), key=lambda p: -players[p]['elo'])
+	by_score = sorted(pids, key=lambda p: -stats[p]['scores']['overall'])
+	for p in pids:
+		st = stats[p]
+		st['score_rank'] = by_score.index(p) + 1
+		if p not in elo_scaled:
+			st['elo_rank'], st['elo_delta'], st['elo_verdict'] = None, None, None
+			continue
+		st['elo_rank'] = by_elo.index(p) + 1
+		delta = round(st['scores']['overall'] - elo_scaled[p], 1)
+		st['elo_delta'] = delta
+		st['elo_verdict'] = (
+			'well above their Elo' if delta >= 3 else 'above their Elo' if delta >= 1.5 else
+			'well below their Elo' if delta <= -3 else 'below their Elo' if delta <= -1.5 else 'around their Elo'
+		)
 
 	# ---- strategy names
 	for p in pids:

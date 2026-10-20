@@ -161,30 +161,36 @@ async def _process(qc, info, notify_failure):
 			raise ReplayError("The game was found, but nobody uploaded a recorded game for it.")
 		return False
 
-	# Replay of the highest-rated player on World's Edge (team ladder rating, falling back to the match rating).
+	# BombayBot Elo (the rating used to make the match) for every linked player in the game.
 	meta = worldsedge.match_meta(game)
+	for p in info['players']:
+		if p['user_id'] in links:
+			meta.setdefault(links[p['user_id']], {})['elo'] = p['rating']
 	try:
-		ratings = await worldsedge.lookup_profiles(profile_ids=list(urls))
+		ratings = await worldsedge.lookup_profiles(profile_ids=list(worldsedge.match_profiles(game)))
 	except worldsedge.WorldsEdgeError:
 		ratings = {}
-	def we_rating(pid):
-		return (ratings.get(pid, {}).get('tg_rating') or meta.get(pid, {}).get('rating') or 0)
-	source = max(urls, key=we_rating)
-	raw = await worldsedge.download(urls[source])
-
-	rec = await asyncio.to_thread(rec_parser.parse, raw)
 	for pid, r in ratings.items():
 		meta.setdefault(pid, {})['alias'] = r.get('alias')
 		if r.get('tg_rating'):
 			meta[pid]['rating'] = r['tg_rating']
+
+	# Replay uploaded by the highest-rated player: BombayBot Elo first, World's Edge team rating as a tiebreak.
+	def rating_key(pid):
+		return (meta.get(pid, {}).get('elo') or 0, meta.get(pid, {}).get('rating') or 0)
+	source = max(urls, key=rating_key)
+	raw = await worldsedge.download(urls[source])
+
+	rec = await asyncio.to_thread(rec_parser.parse, raw)
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
 
-	map_name = (game.get('mapname') or '').replace('.rms', '').replace('_', ' ') or (info['maps'][0] if info['maps'] else None)
+	map_name = rec.get('map_name') or (game.get('mapname') or '').replace('.rms', '').replace('_', ' ') \
+		or (info['maps'][0] if info['maps'] else None)
 	source_name = ratings.get(source, {}).get('alias') or str(source)
 	thread = await publish(
 		qc, result, rec_bytes=rec_parser.unwrap(raw), map_name=map_name, lobby=game.get('description'),
-		title=f"({info['match_id']}) {map_name or info['queue']} — {_winner_text(result)}",
-		footer=f"World's Edge game {game['id']} · replay uploaded by {source_name} · scores are 1–10 relative to this lobby",
+		title=post.make_title(result, map_name),
+		footer=f"World's Edge game {game['id']} · replay uploaded by {source_name}",
 		mention_ids=[p['user_id'] for p in info['players']],
 	)
 	await db.insert('aoe_replay_posts', dict(
@@ -270,10 +276,18 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str):
 		for pid, r in (await worldsedge.lookup_profiles(profile_ids=profile_ids)).items():
 			meta[pid] = dict(alias=r.get('alias'), rating=r.get('tg_rating'))
 	except Exception:
-		pass  # ratings are optional
+		pass  # World's Edge names and ratings are optional
+	# BombayBot Elo for players who linked their AoE2 account
+	rows = await db.select(('user_id', 'profile_id'), 'aoe_profiles')
+	user_of = {r['profile_id']: r['user_id'] for r in rows if r['profile_id'] in profile_ids}
+	if user_of:
+		elos = {r['user_id']: r['rating'] for r in await qc.rating.get_players(user_of.values())}
+		for pid, uid in user_of.items():
+			if elos.get(uid) is not None:
+				meta.setdefault(pid, {})['elo'] = elos[uid]
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
-	title = f"{filename.rsplit('.', 1)[0]} — {_winner_text(result)}"
+	title = post.make_title(result, rec.get('map_name'))
 	await publish(
-		qc, result, rec_bytes=rec_parser.unwrap(data), title=title,
-		footer=f"Uploaded by {get_nick(ctx.author)} · scores are 1–10 relative to this lobby", reply_ctx=ctx,
+		qc, result, rec_bytes=rec_parser.unwrap(data), map_name=rec.get('map_name'), title=title,
+		footer=f"Uploaded by {get_nick(ctx.author)}", reply_ctx=ctx,
 	)

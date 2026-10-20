@@ -57,6 +57,13 @@ How it works:
 * Each player gets a strategy name (for example "Fast Castle boom → Scouts/Hussars + Cavalry Archers")
   and four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
   The overall score weighs them by seat (flank or pocket).
+* Survival is only scored for players whose base was seriously attacked: it rewards keeping the economy at
+  home under pressure and marks players whose main base was destroyed. Players who were never attacked get
+  "—" and their overall score uses the other three.
+* Every score is compared with the player's BombayBot Elo (the rating used to make the match), so the post
+  and the recap show who played above or below their Elo.
+* Posts are titled "Map - Top player's Team (Civ) vs Top player's Team (Civ)", where the top player is the
+  highest BombayBot Elo on each team and the winning team comes first.
 * `/replay upload` analyses any recorded game a member attaches.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.

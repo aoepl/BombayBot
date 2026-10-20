@@ -27,17 +27,45 @@ def _team_label(result, members, idx):
 	return f"Team {idx + 1}"
 
 
+VERDICT_MARK = {
+	'well above their Elo': '⏫ well above Elo', 'above their Elo': '🔼 above Elo',
+	'below their Elo': '🔽 below Elo', 'well below their Elo': '⏬ well below Elo',
+}
+
+
+def top_player(result, members):
+	""" Highest BombayBot Elo on the team; best score when nobody has an Elo. """
+	players, stats = result['players'], result['stats']
+	with_elo = [p for p in members if players[p].get('elo') is not None]
+	if with_elo:
+		return max(with_elo, key=lambda p: players[p]['elo'])
+	return max(members, key=lambda p: stats[p]['scores']['overall'])
+
+
+def make_title(result, map_name=None):
+	""" "Map - TopPlayer's Team (Civ) vs TopPlayer's Team (Civ)", Team 1 first. """
+	players = result['players']
+	sides = []
+	for _, members in _teams(result)[:2]:
+		top = players[top_player(result, members)]
+		sides.append(f"{top['name']}'s Team ({top['civ']})")
+	title = f"{map_name or 'Unknown map'} - " + " vs ".join(sides)
+	return title[:100]
+
+
 def player_line(result, pid):
 	p, s = result['players'][pid], result['stats'][pid]
 	sc = s['scores']
 	ages = s['ages']
 	seat = f" · {p['seat']}" if p['seat'] else ""
-	rating = f" · TG {p['rating']}" if p.get('rating') else ""
+	elo = f" · Elo {p['elo']}" if p.get('elo') is not None else ""
+	verdict = f" · {VERDICT_MARK[s['elo_verdict']]}" if s.get('elo_verdict') in VERDICT_MARK else ""
+	surv = sc['surv'] if sc['surv'] is not None else "—"
 	return (
-		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{rating} · **{sc['overall']}**/10\n"
+		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{elo} · **{sc['overall']}**/10{verdict}\n"
 		f"> {s['strategy']}\n"
 		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} APM"
-		f" · Exec {sc['exec']} · Pressure {sc['press']} · Survival {sc['surv']} · Team {sc['team']}"
+		f" · Exec {sc['exec']} · Pressure {sc['press']} · Survival {surv} · Team {sc['team']}"
 	)
 
 
@@ -67,9 +95,11 @@ def build_embed(result, title, narrative=None, footer=None, url=None):
 		players = result['players']
 		value = ", ".join(f"{players[a]['name']} → {players[b]['name']} {v:,}" for a, b, v in result['tributes'][:6])
 		embed.add_field(name="Tributes", value=_clip(value, 1024), inline=False)
-	embed.set_footer(text=_clip(footer or (
-		"Scores are 1–10 relative to this lobby. Times are when age-ups were clicked; unit counts are queue clicks."
-	), 2048))
+	note = (
+		"Scores are 1–10 relative to this lobby. Survival is only scored when a base was seriously attacked (— otherwise). "
+		"Elo arrows compare each score with the player's BombayBot Elo."
+	)
+	embed.set_footer(text=_clip(f"{footer}\n{note}" if footer else note, 2048))
 	return embed
 
 
@@ -93,6 +123,15 @@ def auto_summary(result):
 		)
 	if stats[hit]['press_in']:
 		parts.append(f"Most pressured base: {players[hit]['name']} ({players[hit]['civ']}).")
+	above = [players[p]['name'] for p in players if (stats[p].get('elo_verdict') or '').endswith('above their Elo')]
+	below = [players[p]['name'] for p in players if (stats[p].get('elo_verdict') or '').endswith('below their Elo')]
+	if above:
+		parts.append(f"Played above their Elo: {', '.join(above)}.")
+	if below:
+		parts.append(f"Played below their Elo: {', '.join(below)}.")
+	lost = [players[p]['name'] for p in players if stats[p].get('survival_note', '').startswith('main base lost')]
+	if lost:
+		parts.append(f"Lost their main base: {', '.join(lost)}.")
 	return " ".join(parts)
 
 
@@ -106,14 +145,20 @@ def text_for_ai(result, map_name=None, lobby=None):
 			p, s = players[pid], stats[pid]
 			units = ", ".join(f"{n} x{c}" for n, c in s['units'].most_common(4))
 			target = f", main target {s['top_target'][0]}" if s['top_target'] else ""
+			if p.get('elo') is not None:
+				elo_txt = (f"BombayBot Elo {p['elo']} (Elo rank {s['elo_rank']} of {len(players)}, performance rank "
+					f"{s['score_rank']}, performed {s['elo_verdict']}); ")
+			else:
+				elo_txt = f"no BombayBot Elo (performance rank {s['score_rank']}); "
 			lines.append(
-				f"- {p['name']} ({p['civ']}, {p['seat'] or 'no seat'}): strategy {s['strategy']}; "
+				f"- {p['name']} ({p['civ']}, {p['seat'] or 'no seat'}): {elo_txt}strategy {s['strategy']}; "
 				f"Feudal {mmss(s['ages'].get('Feudal Age'))}, Castle {mmss(s['ages'].get('Castle Age'))}, "
 				f"Imperial {mmss(s['ages'].get('Imperial Age'))}; units queued: {units}; "
 				f"army orders into enemy bases {s['press_out']}{target}; enemy orders into own base {s['press_in']}; "
 				f"tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "
 				f"score {s['scores']['overall']}/10 (exec {s['scores']['exec']}, pressure {s['scores']['press']}, "
-				f"survival {s['scores']['surv']}, team {s['scores']['team']})."
+				f"survival {s['scores']['surv'] if s['scores']['surv'] is not None else 'not scored'}, team {s['scores']['team']}); "
+				f"base: {s['survival_note']}."
 			)
 	lines.append("Key moments: " + "; ".join(f"{t} {txt}" for t, txt in result['moments']))
 	return "\n".join(lines)
