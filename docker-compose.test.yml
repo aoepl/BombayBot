@@ -1,0 +1,36 @@
+# Local test setup: the bot plus its own MySQL database.
+# 1. cp .env.test.example .env and fill in the Discord values.
+# 2. docker compose -f docker-compose.test.yml up --build
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: pubodb
+      MYSQL_USER: pubobot
+      MYSQL_PASSWORD: pubobot-test
+      MYSQL_ROOT_PASSWORD: root-test
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_general_ci"]
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot-test"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  bombaybot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DB_URI: mysql://pubobot:pubobot-test@db/pubodb
+    volumes:
+      - ./logs:/app/logs
+
+volumes:
+  dbdata:
