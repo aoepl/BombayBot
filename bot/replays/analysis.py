@@ -1286,7 +1286,8 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 			elif n == 'Villager':
 				vills += a.get('amount', 1) or 1
 	fish_boom = fish >= FISH_BOOM_SHIPS and fish >= FISH_BOOM_SHARE * (fish + vills)
-	boom_label = " TC + fish boom" if boom and fish_boom else " fish boom" if fish_boom else " boom" if boom else ""
+	# Named by the economy behind it: extra Town Centers on farms, fishing ships, or both.
+	boom_label = "farm + fish boom" if boom and fish_boom else "fish boom" if fish_boom else "farm boom" if boom else ""
 
 	# Castle Age and Imperial Age armies, separately.
 	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
@@ -1297,11 +1298,11 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	tower_creep = st['towers'] >= 8
 
 	parts = []
-	if opening != "Standard" or boom_label:
-		first = opening if opening != "Standard" else "Castle Age"
-		if boom_label and first.startswith("Feudal "):  # "Feudal scouts + spears, fish boom"
-			first += ","
-		parts.append(first + boom_label)
+	# Opening, then the boom as its own stage: "Feudal scouts + spears → farm + fish boom → Knights".
+	if opening != "Standard":
+		parts.append(opening)
+	if boom_label:
+		parts.append(boom_label)
 	if castle_units:
 		parts.append(" + ".join(castle_units))
 	if imperial_units and imperial_units != castle_units:
