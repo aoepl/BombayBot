@@ -650,63 +650,28 @@ VILLAGER_CONFIRM = 3 * 60000  # hits in the last 3 minutes analysed can't be con
 START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
 
 
-FISH_CLICK_RADIUS = 6  # tiles: an attack clicked this close to a fish was on a fishing ship
-
-
 def fishing_ship_hits(A, players, villagers, end):
 	"""
 	Enemy attack orders on fishing ships: {ship id: (time, attacker, victim)} (the last such order).
-	A fishing ship is a unit its owner ordered onto fish, or a unit created during the game that nobody ever gave
-	orders to (it came out of a Dock with a gather point on fish) and that an enemy clicked right next to fish;
-	its owner is then the attacker's enemy with the nearest Dock.
+	Only ships known from their owner's orders count (ordered onto the fish a Dock sends ships to): a ship that
+	never got an order can't be seen alive again, so a hit on it can't be told from a kill.
 	"""
-	# Deep-water fish: what Docks (buildings that trained fishing ships) send ships to. Shore fish that Town
-	# Centers send villagers to are left out, so attacks on those villagers aren't taken for fishing ships.
 	dock_ids = {b for a in A if a['a'] == 'DE_QUEUE' and _name('objects', a['unit_id']) == 'Fishing Ship'
 		for b in a.get('object_ids') or []}
-	fish_ids, fish_pos = set(), []
-	for a in A:
-		if a['a'] in ('GATHER_POINT', 'DE_MULTI_GATHERPOINT') and (a.get('target_id') or 0) > 0 \
-				and set(a.get('object_ids') or []) & dock_ids:
-			fish_ids.add(a['target_id'])
-			if a.get('x'):
-				fish_pos.append((a['x'], a['y']))
-	owner = {}
-	for a in A:
-		for o in a.get('object_ids') or []:
-			owner.setdefault(o, a.get('player_id'))
+	fish_ids = {a['target_id'] for a in A if a['a'] in ('GATHER_POINT', 'DE_MULTI_GATHERPOINT')
+		and (a.get('target_id') or 0) > 0 and set(a.get('object_ids') or []) & dock_ids}
 	ships = {}
 	for a in A:
-		if a['a'] == 'ORDER' and a.get('target_id') in fish_ids:
+		if a['a'] == 'ORDER' and a.get('target_id') in fish_ids and a.get('player_id') in players:
 			for o in a.get('object_ids') or []:
 				if o not in villagers:
-					ships[o] = a.get('player_id')
-	# Units created during the game have higher ids than everything that existed at the start (fish, trees,
-	# starting buildings and units): above the highest id referenced in the first 30 seconds.
-	start_ids = [o for a in A if a['t'] < 30000 for o in (a.get('object_ids') or []) + [a.get('target_id') or 0]]
-	first_unit = max(start_ids) if start_ids else 0
-	docks = defaultdict(list)
-	for a in A:
-		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) == 'Dock':
-			docks[a['player_id']].append((a['x'], a['y']))
+					ships[o] = a['player_id']
 	hits = {}
 	for a in A:
-		t = a.get('target_id') or 0
-		att = a.get('player_id')
-		if a['a'] != 'ORDER' or a['t'] > end or att not in players or t <= 0 or t in villagers:
-			continue
-		if t in ships:
-			victim = ships[t]
-		elif t not in owner and t > first_unit and a.get('x') and fish_pos \
-				and min(math.dist((a['x'], a['y']), f) for f in fish_pos) <= FISH_CLICK_RADIUS:
-			enemies = [p for p in players if players[p]['team_id'] != players[att]['team_id'] and docks[p]]
-			if not enemies:
-				continue
-			victim = min(enemies, key=lambda p: min(math.dist((a['x'], a['y']), d) for d in docks[p]))
-		else:
-			continue
-		if victim in players and players[victim]['team_id'] != players[att]['team_id']:
-			hits[t] = (a['t'], att, victim)
+		t, att = a.get('target_id') or 0, a.get('player_id')
+		if a['a'] == 'ORDER' and a['t'] <= end and t in ships and att in players \
+				and players[ships[t]]['team_id'] != players[att]['team_id']:
+			hits[t] = (a['t'], att, ships[t])
 	return hits
 
 
