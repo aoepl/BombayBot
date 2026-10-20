@@ -644,8 +644,7 @@ REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of a
 
 VILLAGER_TRAIN = 25000     # ms per villager at one Town Center
 WORKER_TRAIN = {'Villager': VILLAGER_TRAIN, 'Fishing Ship': 40000}  # fishing ships are economy workers too
-VILLAGER_KILL_RADIUS = 10  # tiles
-VILLAGER_KILL_ORDERS = 3   # enemy army orders near a villager's last position that mean it was likely killed
+VILLAGER_HIT_GRACE = 20000  # ms: a targeted villager its owner ordered again after this got away
 START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
 
 
@@ -654,8 +653,9 @@ def villager_estimate(A, players, villagers, army_alive, end):
 	Estimated economy workers alive per minute: villagers plus fishing ships. The replay has no unit counts, so:
 	- made: each queue click is 1 villager (5 with Shift); with several Town Centers selected each villager
 	  goes to the TC with the shortest queue, and a TC trains one every 25 s, so over-queueing is not counted;
-	- lost: a villager whose last order was followed, within 3 minutes, by 3+ enemy army orders within
-	  10 tiles of it is counted as killed; deleted villagers are subtracted too;
+	- lost: a villager an enemy attack order targeted, and that its owner never ordered again, is counted as
+	  killed (credited to that attacker); deleted villagers are subtracted too. Villagers killed without being
+	  clicked on (attack-move, towers, castles) are not seen, so losses are a lower bound;
 	- capped by population room: at most 200 minus the army on the map.
 	Returns {pid: dict(made=[times], lost=[times], alive=[per minute])}.
 	"""
@@ -678,12 +678,14 @@ def villager_estimate(A, players, villagers, army_alive, end):
 				last[o] = (a['t'], a['x'], a['y'])
 			elif o in last:
 				last[o] = (a['t'],) + last[o][1:]
-	enemy_orders = defaultdict(list)
+	# Attack orders aimed at a villager: (time, attacker) of the last enemy order that targeted it.
+	hits = {}
 	for a in A:
-		ids = a.get('object_ids') or []
-		if a['a'] in ARMY_ORDERS and a.get('player_id') in players and ids and a.get('x') and a['x'] > 0 \
-				and not all(i in vill for i in ids):
-			enemy_orders[int(a['t'] // 60000)].append(a)
+		target = a.get('target_id') or 0
+		if a['a'] == 'ORDER' and a['t'] <= end and target in vill and a.get('player_id') in players \
+				and owner.get(target) in players and owner[target] != a['player_id'] \
+				and players[owner[target]]['team_id'] != players[a['player_id']]['team_id']:
+			hits[target] = (a['t'], a['player_id'])
 	out = {}
 	minutes = int(end // 60000) + 1
 	for pid, p in players.items():
@@ -706,23 +708,17 @@ def villager_estimate(A, players, villagers, army_alive, end):
 					kinds[kind] += 1
 		made.sort()
 		lost = [t for o, t in deleted.items() if owner.get(o) == pid]
-		killers = Counter()  # enemy player -> villagers of this player they killed (shared by orders nearby)
+		killers = Counter()  # enemy player -> villagers of this player they killed
 		killed = []  # (time, {enemy: share}) for each villager counted as killed
-		for o, (t, x, y) in last.items():
-			if owner.get(o) != pid or o in deleted or t > end - 4 * 60000:
+		# A villager is killed when an enemy attack order targeted it and its owner never ordered it again.
+		for o, (t_hit, attacker) in hits.items():
+			if owner.get(o) != pid or o in deleted:
 				continue
-			m, near = int(t // 60000), Counter()
-			for k in range(m - 1, m + 4):
-				for e in enemy_orders[k]:
-					if players[e['player_id']]['team_id'] != p['team_id'] and t - 60000 <= e['t'] <= t + 180000 \
-							and math.dist((x, y), (e['x'], e['y'])) <= VILLAGER_KILL_RADIUS:
-						near[e['player_id']] += 1
-			if sum(near.values()) >= VILLAGER_KILL_ORDERS:
-				lost.append(t)
-				total = sum(near.values())
-				for e, n in near.items():
-					killers[e] += n / total
-				killed.append((t, {e: n / total for e, n in near.items()}))
+			if last.get(o, (0,))[0] > t_hit + VILLAGER_HIT_GRACE:
+				continue  # it was given orders afterwards: it got away
+			lost.append(t_hit)
+			killers[attacker] += 1
+			killed.append((t_hit, {attacker: 1.0}))
 		lost.sort()
 		start = START_VILLAGERS.get(p.get('civ'), 3)
 		alive = []
@@ -1374,8 +1370,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 
 
 MOMENTS_MAX = 5
-BATTLE_MIN = 1500     # army value lost (both sides) in a 3-minute window that makes a major fight
-RAID_MIN = 6          # villagers of one player killed within 3 minutes that make a big raid
+BATTLE_MIN = 1000     # army value killed (both players) in 3 minutes that makes a major fight between two players
+RAID_MIN = 4          # villagers of one player killed by one raider in one burst that make a big raid
+RAID_GAP = 60000      # kills more than a minute apart are separate raids
+LATE_WINDOW = 3 * 60000  # events this close to the end of the analysis count half when picking moments
 ELIMINATED_GAP = 3 * 60000  # stopped giving orders this long before the end without resigning
 
 
@@ -1390,61 +1388,61 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 	team_of = {p: players[p]['team_id'] for p in players}
 	ev = []  # (size, time, text)
 
-	# Major fights: army value lost by each side over 3 minutes, counting only units lost while fighting.
+	# Major fights, per pair of players (so a sea fight and a land fight at the same time stay apart): army
+	# value each one killed of the other over 3 minutes. A unit lost while its owner was clearly fighting is
+	# credited to the enemies fighting that player then, by their share of orders.
 	if army:
-		lost = defaultdict(Counter)  # minute -> player -> value lost
+		pair = defaultdict(Counter)  # (killer, victim) -> minute -> value
 		for p in players:
 			for t_last, value in army[p]['_gone']:
 				m = int(t_last // 60000)
-				if max(army[p]['_fight_orders'].get(k, 0) for k in (m - 1, m, m + 1, m + 2)) >= FIGHT_MIN_ORDERS:
-					lost[m][p] += value
-		windows = []
-		for m in sorted(lost):
-			total = Counter()
-			for k in (m, m + 1, m + 2):
-				total.update(lost.get(k, {}))
-			windows.append((sum(total.values()), m, total))
-		used = set()
-		for size, m, total in sorted(windows, key=lambda w: -w[0]):
-			if size < BATTLE_MIN or used & {m, m + 1, m + 2}:
+				ks = (m - 1, m, m + 1, m + 2)
+				if max(army[p]['_fight_orders'].get(k, 0) for k in ks) < FIGHT_MIN_ORDERS:
+					continue
+				credit = Counter()
+				for e in players:
+					if team_of[e] != team_of[p]:
+						for k in ks:
+							credit[e] += army[e]['_fights'].get(k, {}).get(p, 0)
+				total = sum(credit.values())
+				for e, n in credit.items():
+					if n:
+						pair[(e, p)][m] += value * n / total
+		fights = []
+		for a, b in {tuple(sorted(k)) for k in pair}:
+			minutes = sorted(set(pair[(a, b)]) | set(pair[(b, a)]))
+			for m in minutes:
+				ka = sum(pair[(a, b)].get(k, 0) for k in (m, m + 1, m + 2))  # a killed of b
+				kb = sum(pair[(b, a)].get(k, 0) for k in (m, m + 1, m + 2))
+				fights.append((ka + kb, m, a, b, ka, kb))
+		used = defaultdict(set)
+		for size, m, a, b, ka, kb in sorted(fights, key=lambda f: -f[0]):
+			if size < BATTLE_MIN or used[(a, b)] & {m, m + 1, m + 2}:
 				continue
-			used.update({m - 2, m - 1, m, m + 1, m + 2})
-			sides = defaultdict(float)
-			for p, v in total.items():
-				sides[team_of[p]] += v
-			if len(sides) < 2:
-				continue
-			# Name the players who did the most fighting on each side in this window.
-			fought = Counter()
-			for p in players:
-				for k in (m, m + 1, m + 2):
-					fought[p] += sum(army[p]['_fights'].get(k, {}).values())
-			def who(tm):
-				ps = sorted((p for p in players if team_of[p] == tm and fought[p] >= 1), key=lambda p: -fought[p])[:2]
-				return " & ".join(name(p) for p in ps) or "their team"
-			(t1, v1), (t2, v2) = sorted(sides.items(), key=lambda kv: kv[1])[:2]  # t1 lost less: won the fight
-			text = f"Major fight: {who(t1)} beat {who(t2)} (lost {round(v1):,} vs {round(v2):,} army value)"
-			ev.append((size, m * 60000, text))
+			used[(a, b)].update(range(m - 2, m + 3))
+			win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
+			ev.append((size, m * 60000, f"Major fight: {name(win)} beat {name(lose)} "
+				f"({round(kw):,} army value killed vs {round(kl):,})"))
 
-	# Big raids: many villagers of one player killed in a few minutes.
+	# Big raids: one player killing many of another player's villagers in one burst (kills under a minute apart).
 	if vest:
 		for p in players:
-			kills = vest[p].get('killed', [])
-			i = 0
-			while i < len(kills):
-				j = i
-				while j + 1 < len(kills) and kills[j + 1][0] - kills[i][0] <= 3 * 60000:
-					j += 1
-				if j - i + 1 >= RAID_MIN:
-					credit = Counter()
-					for _, share in kills[i:j + 1]:
-						credit.update(share)
-					raider = credit.most_common(1)[0][0]
-					ev.append(((j - i + 1) * 100 * 1.5, kills[i][0],
-						f"{name(raider)} raided {name(p)}: about {j - i + 1} villagers killed"))
-					i = j + 1
-				else:
-					i += 1
+			by_raider = defaultdict(list)
+			for t, share in vest[p].get('killed', []):
+				by_raider[max(share, key=share.get)].append(t)
+			for raider, times in by_raider.items():
+				times.sort()
+				bursts, cur = [], []
+				for t in times:
+					if cur and t - cur[-1] > RAID_GAP:
+						bursts.append(cur)
+						cur = []
+					cur.append(t)
+				if cur:
+					bursts.append(cur)
+				for b in bursts:
+					if len(b) >= RAID_MIN:
+						ev.append((len(b) * VILLAGER_KILL_VALUE * 2, b[0], f"{name(raider)} raided {name(p)}: {len(b)} villagers killed"))
 
 	for c in castles:
 		if c['status'] == 'lost':
@@ -1461,6 +1459,9 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 			ev.append((10 ** 6, t, f"{name(p)} ({players[p]['civ']}) was eliminated (stopped playing, e.g. king killed)"))
 
 	first_resign = min(resigns.items(), key=lambda kv: kv[1]) if resigns else None
+	# The last minutes before the game is decided are mostly mop-up: they count half, so turning points win.
+	if end:
+		ev = [(size * (0.5 if t >= end - LATE_WINDOW else 1), t, text) for size, t, text in ev]
 	top = sorted(ev, key=lambda e: -e[0])[:MOMENTS_MAX - (1 if first_resign else 0)]
 	out = [(t, text) for _, t, text in top]
 	if first_resign:

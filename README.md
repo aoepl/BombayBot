@@ -65,10 +65,11 @@ Setup (optional):
 * Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
 What the breakdown shows:
-* Key moments: at most 5 events, the biggest ones, in time order: major fights (1,500+ army value lost in 3
-  minutes; who beat whom and how much each side lost), big raids (6+ villagers of one player killed within 3
-  minutes, credited to the raider), castles destroyed, players eliminated (orders stop well before the end with
-  no resignation, e.g. a regicide king killed) and the resignation that ends the analysis.
+* Key moments: at most 5 events, the biggest ones, in time order: major fights between two players (1,000+
+  army value killed in 3 minutes, so a sea fight and a land fight at the same time stay apart), big raids (4+
+  villagers of one player killed by one raider in one burst, kills under a minute apart; events in the last 3
+  minutes before the game is decided count half when picking), castles destroyed, players eliminated (orders
+  stop well before the end with no resignation, e.g. a regicide king killed) and the resignation that ends the analysis.
 * Each player gets a strategy name: opening → Castle Age army → Imperial Age army → extras, for example
   "Fast Castle → Monks + Temple Guard → Imp: Monks + Spearmen/Halbs → 3 forward castles".
   Openings: "Feudal tower rush" (2+ towers in an enemy base before Castle Age), "Feudal archers + scouts"
@@ -105,6 +106,8 @@ What the breakdown shows:
   minutes after Castle Age, so producing from more Town Centers and Docks at once counts.
   Fishing ships count as economy workers alongside villagers (a Dock trains one every 40 seconds); warships
   count as army, and transport ships as neither.
+  Villagers killed: an enemy attack order targeted the villager and its owner never ordered it again (villagers
+  killed by attack-move, towers or castles are not seen, so it is a lower bound).
   Villagers alive are estimated, since the replay has no unit counts: a queue click is 1 villager (5 with
   Shift); with several Town Centers selected each villager goes to the TC with the shortest queue, and a TC
   trains one every 25 seconds. A villager is counted as killed when its last order is followed within 3
