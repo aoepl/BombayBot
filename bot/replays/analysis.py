@@ -9,6 +9,7 @@ named after its base unit (Archer covers Crossbowmen and Arbalesters, etc.).
 """
 import json
 import math
+import re
 from functools import lru_cache
 import os
 from collections import Counter, defaultdict
@@ -51,7 +52,13 @@ LINE_NAMES = {
 	'Mangonel': 'Mangonels', 'Battering Ram': 'Rams', 'Scorpion': 'Scorpions', 'Bombard Cannon': 'Bombard Cannons',
 	'Trebuchet': 'Trebuchets', 'Monk': 'Monks', 'Galley': 'Galleys', 'Fire Galley': 'Fire ships',
 	'Demolition Raft': 'Demo ships', 'Cannon Galleon': 'Cannon Galleons',
+	'War Galley': 'Galleys', 'Galleon': 'Galleys', 'Fire Ship': 'Fire ships', 'Demolition Ship': 'Demo ships',
+	'Hulk': 'Hulks', 'War Hulk': 'Hulks', 'Carrack': 'Carracks', 'Longboat': 'Longboats', 'Caravel': 'Caravels',
+	'Dromon': 'Dromons', 'Turtle Ship': 'Turtle Ships', 'Thirisadai': 'Thirisadai',
+	'Camel Scout': 'Camels',
 }
+WARSHIPS = {'Galley', 'War Galley', 'Galleon', 'Fire Galley', 'Fire Ship', 'Demolition Raft', 'Demolition Ship',
+	'Cannon Galleon', 'Hulk', 'War Hulk', 'Carrack', 'Longboat', 'Caravel', 'Dromon', 'Turtle Ship', 'Thirisadai'}
 CASTLES = {'Castle', 'Krepost', 'Donjon', 'Fortress'}
 ECO_BUILDINGS = {'Town Center', 'House', 'Farm', 'Mill', 'Lumber Camp', 'Mining Camp', 'Market', 'Dock',
 	'Folwark', 'Pasture', 'Feitoria', 'Settlement', 'Mule Cart'}
@@ -352,42 +359,92 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		{int(c['t'] // 60000) for c in castles if c['forward'] and c['base'] == p} for p in pids}
 	for p in pids:
 		stats[p]['_attacked'] = attacked[p]
+	first_mil = {p: stats[p]['first_military'] for p in pids}
+	exec_raw = [castle_click, imp_click, None, first_mil, None]  # None: always scored
 	exec_parts = [
 		_minmax(castle_click, invert=True),
 		_minmax(imp_click, invert=True),
 		None,  # villager value: filled in once villagers alive are estimated (below)
-		_minmax({p: stats[p]['first_military'] for p in pids}, invert=True),
+		_minmax(first_mil, invert=True),
 	]  # unplanned floating is added once it is known (below)
 	# Pressure: the army a player keeps on the map (units plus castles and towers, valued by cost),
 	# the army value sent into enemy bases, and forward castles and towers.
 	imp_at = {p: stats[p]['ages'].get('Imperial Age') for p in pids}
-	army = army_presence(A, players, base_of, villagers, end, offensive, imp_at)
+	water = water_weight(rec.get('map_name'))
+	army = army_presence(A, players, base_of, villagers, end, offensive, imp_at, water)
 	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up', 'lost', 'deleted'))
 	fwd_towers = Counter()
 	for a in A:
 		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) in TOWERS:
 			if players[base_of(a['x'], a['y'])]['team_id'] != players[a['player_id']]['team_id']:
 				fwd_towers[a['player_id']] += 1
-	on_map = _minmax({p: army[p]['avg_value_on_map'] for p in pids})
 	sent = _minmax({p: army[p]['value_sent'] for p in pids})
-	forward = _minmax({p: fwd_up[p] + 0.25 * fwd_towers[p] for p in pids})
-	press = {p: 0.40 * on_map[p] + 0.45 * sent[p] + 0.15 * forward[p] for p in pids}
+	forward_raw = {p: fwd_up[p] + 0.25 * fwd_towers[p] for p in pids}
+	forward = _minmax(forward_raw)
 	for p in pids:
 		stats[p]['army'] = army[p]
 	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end)
+	vill_killed = Counter()
+	for p in pids:
+		for e, n in vest[p]['killers'].items():
+			vill_killed[e] += n
+	for p in pids:
+		stats[p]['villagers_killed'] = round(vill_killed[p])
+		stats[p]['_vill_kill_value'] = vill_killed[p] * VILLAGER_KILL_VALUE
+	# Castle Age timing: a late click after a Feudal army is fine when production kept running, so those
+	# players score whichever is better, the click time or their Feudal production uptime.
+	for p in pids:
+		feudal, castle = stats[p]['ages'].get('Feudal Age'), stats[p]['ages'].get('Castle Age')
+		mil_times, feudal_units = [], 0
+		for a in A:
+			if a['a'] == 'DE_QUEUE' and a.get('player_id') == p:
+				n = _name('objects', a['unit_id'])
+				if n not in NOT_ARMY and n not in WORKER_TRAIN:
+					mil_times.append(a['t'])
+					if feudal and feudal <= a['t'] < (castle or end):
+						feudal_units += a.get('amount', 1) or 1
+		uptime = production_uptime(vest[p]['busy'], vest[p]['first_use'], mil_times, feudal, castle or end,
+			saving_minutes(A, p, stats[p]['ages']))
+		stats[p]['feudal_units'] = feudal_units
+		stats[p]['feudal_uptime'] = uptime
+		if feudal_units >= FEUDAL_ARMY_MIN and uptime is not None:
+			exec_parts[0][p] = max(exec_parts[0][p], 1 + 9 * uptime)
 	for p in pids:
 		v = vest[p]
 		stats[p]['_vill_made'], stats[p]['_vill_alive'] = v['made'], v['alive']
-		stats[p]['villagers_made'] = len(v['made'])
+		stats[p]['villagers_made'] = v['villagers']
+		stats[p]['fishing_ships_made'] = v['fishing']
 		stats[p]['villagers_lost'] = len(v['lost'])
 		stats[p]['villagers_peak'] = max(v['alive'], default=0)
 		stats[p]['villagers_at'] = {m: v['alive'][m] for m in (20, 30, 40) if m < len(v['alive'])}
-	floating = {p: unplanned_floating(A, p, curve.get(p, []), army[p]['_alive'], stats[p], end) for p in pids}
+	banked = {p: unplanned_floating(A, p, curve.get(p, []), army[p]['_alive'], stats[p], end) for p in pids}
+	# Floating is judged against what the player was spending: 700 banked is fine for someone turning 3000 a
+	# minute into units, bad for someone spending 1000. So the score uses minutes of spending sitting idle.
+	floating = {}
 	for p in pids:
-		stats[p]['floating'] = floating[p]
+		rate = spending_rate(A, p, FLOAT_FROM, end)
+		stats[p]['floating'] = banked[p]
+		stats[p]['spend_per_min'] = round(rate)
+		floating[p] = round(banked[p] / max(rate, 100), 2)
+		stats[p]['float_minutes'] = floating[p]
 	exec_parts[2] = _minmax({p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids})
 	exec_parts.append(_minmax(floating, invert=True))
 	playstyle(A, players, stats, army, floating, end, trib_out)
+	# Pressure: army on the map 35%, army value sent at the enemy 40%, damage done (enemy army value killed in
+	# fights plus enemy villagers killed) 15%, forward castles and towers 10%.
+	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] for p in pids}
+	damage = _minmax(dealt)
+	# Army on the map only matters if it does damage: scale it by damage done per army value, with full
+	# credit at the lobby median or better and nothing for an army that never hurt anyone.
+	per_army = {p: dealt[p] / army[p]['avg_value_on_map'] for p in pids if army[p]['avg_value_on_map']}
+	median = sorted(per_army.values())[len(per_army) // 2] if per_army else 0
+	for p in pids:
+		eff = min(1.0, per_army.get(p, 0) / median) if median else 1.0
+		army[p]['damage_efficiency'] = round(eff, 2)
+	on_map = _minmax({p: army[p]['avg_value_on_map'] * army[p]['damage_efficiency'] for p in pids})
+	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
+	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage), (0.10, forward_raw, forward)], p)
+		for p in pids}
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
 	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
 	# orders into that base from 3 minutes before it was placed to 5 minutes after.
@@ -453,19 +510,16 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if held >= 0.4 else
 			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
-	team_parts = [
-		_minmax({p: trib_out[p] for p in pids}),
-		_minmax({p: help_out[p] for p in pids}),
-		_minmax({p: stats[p]['flares'] for p in pids}),
-	]
+	team_raw = [{p: trib_out[p] for p in pids}, {p: help_out[p] for p in pids}, {p: stats[p]['flares'] for p in pids}]
+	team_parts = [_minmax(raw) for raw in team_raw]  # parts nobody did (no tributes in the game) are left out
 	weights = {
-		'Flank': dict(exec=.25, press=.35, surv=.25, team=.15),
-		'Pocket': dict(exec=.35, press=.20, surv=.20, team=.25),
-		None: dict(exec=.30, press=.30, surv=.20, team=.20),
+		'Flank': dict(exec=.27, press=.36, surv=.27, team=.10),
+		'Pocket': dict(exec=.40, press=.25, surv=.25, team=.10),
+		None: dict(exec=.32, press=.32, surv=.26, team=.10),
 	}
 	for p in pids:
-		e = sum(part[p] for part in exec_parts) / len(exec_parts)
-		t = team_parts[0][p] * .5 + team_parts[1][p] * .35 + team_parts[2][p] * .15
+		e = _combine(list(zip(EXEC_WEIGHTS, exec_raw, exec_parts)), p)
+		t = _combine([(.5, team_raw[0], team_parts[0]), (.35, team_raw[1], team_parts[1]), (.15, team_raw[2], team_parts[2])], p)
 		surv = round(survival[p], 1) if survival[p] is not None else None
 		sc = dict(exec=round(e, 1), press=round(press[p], 1), surv=surv, team=round(t, 1))
 		w = dict(weights[players[p]['seat']])
@@ -506,7 +560,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		)
 
 	return dict(
-		duration=end, players=players, stats=stats, castles=castles,
+		duration=end, players=players, stats=stats, castles=castles, water_weight=water,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
 		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end}),
 	)
@@ -516,23 +570,57 @@ FEUDAL_NAMES = {
 	'Archer': 'archers', 'Skirmisher': 'skirms', 'Scout Cavalry': 'scouts', 'Militia': 'Men-at-Arms',
 	'Spearman': 'spears', 'Eagle Scout': 'Eagles', 'Camel Rider': 'camels', 'Cavalry Archer': 'cavalry archers',
 	'Battle Elephant': 'elephants', 'Steppe Lancer': 'lancers',
+	'Galley': 'galleys', 'Hulk': 'hulks', 'Fire Galley': 'fire ships', 'Demolition Raft': 'demo ships',
 }
 NOT_ARMY = (MILITARY_SKIP - {'Monk'}) | {'Trade Cart', 'Trade Cog'}  # monk pushes are a strategy too
 
 
-def _steady(times, start, end):
-	""" Share of minutes between start and end with at least one unit queued. """
+def _steady(times, start, end, skip=()):
+	""" Share of minutes between start and end with at least one unit queued; minutes in skip don't count. """
 	if start is None or end <= start:
 		return None
-	minutes = range(int(start // 60000), int(end // 60000) + 1)
+	minutes = [m for m in range(int(start // 60000), int(end // 60000) + 1) if m not in skip]
+	if not minutes:
+		return None
 	busy = {int(t // 60000) for t in times}
 	return sum(1 for m in minutes if m in busy) / len(minutes)
+
+
+def saving_minutes(A, pid, ages):
+	"""
+	Minutes spent saving for an age-up or an expensive technology (550+ resources): the 2 minutes before
+	each click. Not a production gap.
+	"""
+	clicks = [t for t in ages.values() if t]
+	clicks += [a['t'] for a in A if a['a'] == 'RESEARCH' and a.get('player_id') == pid
+		and tech_cost(a.get('technology_id')) >= BIG_PURCHASE]
+	out = set()
+	for t in clicks:
+		out.update(range(int((t - SAVE_WINDOW) // 60000), int(t // 60000) + 1))
+	return out
+
+
+def _absolute(share):
+	""" A 0..1 share as a 1..10 score on its own scale (not relative to the lobby). """
+	return 1.0 if share is None else max(1.0, min(10.0, 10 * share))
+
+
+def _did(raw):
+	""" Did anyone in the lobby do this at all? Parts nobody did are left out of a score. """
+	return any(v for v in raw.values() if v is not None)
+
+
+def _combine(parts, p):
+	""" Weighted average of (weight, raw, scaled) parts for player p, skipping parts nobody did. """
+	live = [(w, scaled) for w, raw, scaled in parts if raw is None or _did(raw)]
+	total = sum(w for w, _ in live)
+	return sum(w * scaled[p] for w, scaled in live) / total if total else 5.0
 
 
 VILLAGER_FULL, VILLAGER_STOP = 120, 150
 POP_CAP_NEAR = 190
 SAVE_WINDOW = 120000  # resources spent on a big purchase within 2 minutes were being saved on purpose
-BIG_PURCHASE = 600    # research, age-up or building costing at least this much (all resources)
+BIG_PURCHASE = 550    # research, age-up or building costing at least this much (all resources)
 NORMAL_FLOAT = 400    # a little bank is normal
 
 
@@ -554,6 +642,7 @@ REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of a
 
 
 VILLAGER_TRAIN = 25000     # ms per villager at one Town Center
+WORKER_TRAIN = {'Villager': VILLAGER_TRAIN, 'Fishing Ship': 40000}  # fishing ships are economy workers too
 VILLAGER_KILL_RADIUS = 10  # tiles
 VILLAGER_KILL_ORDERS = 3   # enemy army orders near a villager's last position that mean it was likely killed
 START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
@@ -561,7 +650,7 @@ START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
 
 def villager_estimate(A, players, villagers, army_alive, end):
 	"""
-	Estimated villagers alive per minute. The replay has no unit counts, so:
+	Estimated economy workers alive per minute: villagers plus fishing ships. The replay has no unit counts, so:
 	- made: each queue click is 1 villager (5 with Shift); with several Town Centers selected each villager
 	  goes to the TC with the shortest queue, and a TC trains one every 25 s, so over-queueing is not counted;
 	- lost: a villager whose last order was followed, within 3 minutes, by 3+ enemy army orders within
@@ -597,27 +686,40 @@ def villager_estimate(A, players, villagers, army_alive, end):
 	out = {}
 	minutes = int(end // 60000) + 1
 	for pid, p in players.items():
-		made, free = [], defaultdict(int)
+		made, free, kinds = [], defaultdict(int), Counter()
+		busy, first_use = [], {}  # (building, start, end) of each worker trained; first queue per building
 		for a in A:
-			if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid and a['t'] <= end and _name('objects', a['unit_id']) == 'Villager':
-				ids = a.get('object_ids') or [0]
-				for _ in range(a.get('amount', 1) or 1):
-					tc = min(ids, key=lambda i: free[i])
-					free[tc] = max(a['t'], free[tc]) + VILLAGER_TRAIN
-					made.append(free[tc])
+			if a['a'] != 'DE_QUEUE' or a.get('player_id') != pid or a['t'] > end:
+				continue
+			kind = _name('objects', a['unit_id'])
+			if kind not in WORKER_TRAIN:
+				continue
+			ids = a.get('object_ids') or [0]
+			for _ in range(a.get('amount', 1) or 1):
+				b = min(ids, key=lambda i: free[i])  # the Town Center (or Dock) with the shortest queue
+				first_use.setdefault(b, a['t'])
+				busy.append((b, max(a['t'], free[b]), max(a['t'], free[b]) + WORKER_TRAIN[kind]))
+				free[b] = max(a['t'], free[b]) + WORKER_TRAIN[kind]
+				if free[b] <= end:  # still training when the game was decided: not made
+					made.append(free[b])
+					kinds[kind] += 1
 		made.sort()
 		lost = [t for o, t in deleted.items() if owner.get(o) == pid]
+		killers = Counter()  # enemy player -> villagers of this player they killed (shared by orders nearby)
 		for o, (t, x, y) in last.items():
 			if owner.get(o) != pid or o in deleted or t > end - 4 * 60000:
 				continue
-			m, near = int(t // 60000), 0
+			m, near = int(t // 60000), Counter()
 			for k in range(m - 1, m + 4):
 				for e in enemy_orders[k]:
 					if players[e['player_id']]['team_id'] != p['team_id'] and t - 60000 <= e['t'] <= t + 180000 \
 							and math.dist((x, y), (e['x'], e['y'])) <= VILLAGER_KILL_RADIUS:
-						near += 1
-			if near >= VILLAGER_KILL_ORDERS:
+						near[e['player_id']] += 1
+			if sum(near.values()) >= VILLAGER_KILL_ORDERS:
 				lost.append(t)
+				total = sum(near.values())
+				for e, n in near.items():
+					killers[e] += n / total
 		lost.sort()
 		start = START_VILLAGERS.get(p.get('civ'), 3)
 		alive = []
@@ -626,8 +728,27 @@ def villager_estimate(A, players, villagers, army_alive, end):
 			n = start + sum(1 for x in made if x <= t) - sum(1 for x in lost if x <= t)
 			army = army_alive[pid][min(len(army_alive[pid]) - 1, m)] if army_alive.get(pid) else 0
 			alive.append(max(0, min(n, POP_CAP - army)))
-		out[pid] = dict(made=made, lost=lost, alive=alive)
+		out[pid] = dict(made=made, lost=lost, alive=alive, villagers=kinds['Villager'], fishing=kinds['Fishing Ship'],
+			killers=killers, busy=busy, first_use=first_use)
 	return out
+
+
+VILLAGER_KILL_VALUE = 100  # a villager killed: 50 food plus the gathering it would have done
+FEUDAL_ARMY_MIN = 8          # Feudal military units that make a Feudal army opening
+
+
+def production_uptime(busy, first_use, mil_times, start, end, skip=()):
+	"""
+	How busy a player's production was between start and end (0..1): the average of Town Center and Dock
+	busy time (from the worker simulation) and the share of minutes with a military unit queued.
+	"""
+	if start is None or end <= start:
+		return None
+	available = sum(max(0, end - max(start, t0)) for t0 in first_use.values() if t0 < end)
+	worked = sum(max(0, min(e, end) - max(s, start)) for _, s, e in busy)
+	eco = min(1.0, worked / available) if available else 0.0
+	mil = _steady([t for t in mil_times if start <= t <= end], start, end, skip) or 0.0
+	return round((eco + mil) / 2, 2)
 
 
 def villager_value(times, attacked_minutes=(), alive=None):
@@ -651,6 +772,31 @@ def villager_value(times, attacked_minutes=(), alive=None):
 			if any(k in attacked for k in range(m - REPLACE_WINDOW, m + 1)):
 				value += 1
 	return round(value, 1)
+
+
+FLOAT_FROM = 10 * 60000
+# Execution parts: Castle Age timing, Imperial Age click, villager value, first military unit (quarter weight), floating
+EXEC_WEIGHTS = (1.0, 1.0, 1.0, 0.25, 1.0)
+
+
+def spending_rate(A, pid, start, end):
+	""" Resources spent per minute between start and end: units queued, research, buildings and tributes. """
+	if end <= start:
+		return 0.0
+	costs, techs = _costs(), _costs_all().get('techs', {})
+	spent = 0.0
+	for a in A:
+		if a.get('player_id') != pid or not start <= a['t'] <= end:
+			continue
+		if a['a'] == 'DE_QUEUE':
+			spent += sum(costs.get(str(a['unit_id']), {}).values()) * (a.get('amount', 1) or 1)
+		elif a['a'] == 'RESEARCH':
+			spent += sum(techs.get(str(a.get('technology_id')), {}).values())
+		elif a['a'] == 'BUILD':
+			spent += sum(costs.get(str(a.get('building_id')), {}).values())
+		elif a['a'] == 'DE_TRIBUTE':
+			spent += sum(a.get(k) or 0 for k in ('food', 'wood', 'stone', 'gold'))
+	return spent / ((end - start) / 60000)
 
 
 def unplanned_floating(A, pid, curve, military_alive, st, end):
@@ -748,17 +894,22 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players:
 			p, n = a['player_id'], _name('objects', a['unit_id'])
 			amt = a.get('amount', 1) or 1
-			if n == 'Villager':
+			if n in WORKER_TRAIN:  # villagers and fishing ships are economy production
 				vill_times[p].append(a['t'])
 			elif n in ('Trade Cart', 'Trade Cog'):
 				trade[p] += amt
-			else:
+			elif n not in NOT_ARMY:  # warships count; transport ships do not
 				mil_times[p].append(a['t'])
 	castle_plus = {p: (stats[p]['ages'].get('Castle Age') or end) + 10 * 60000 for p in pids}
 	avg_pop = {p: average_population(A, p, army[p]['_alive'], end, stats[p].get('_vill_alive')) for p in pids}
+	# Steadiness is scored on its own scale (86% of minutes = 8.6), not stretched across the lobby, so a small
+	# gap stays small. Worker production also counts how much was made: more TCs and Docks at once is better.
+	worker_end = {p: min(end, castle_plus[p]) for p in pids}
+	worker_rate = _minmax({p: sum(1 for t in stats[p].get('_vill_made') or [] if t <= worker_end[p]) / max(1, worker_end[p] / 60000)
+		for p in pids})
 	macro_parts = [
-		_minmax({p: _steady(vill_times[p], 0, min(end, castle_plus[p])) for p in pids}),
-		_minmax({p: _steady(mil_times[p], stats[p]['first_military'], end) for p in pids}),
+		{p: 0.5 * _absolute(_steady(vill_times[p], 0, worker_end[p])) + 0.5 * worker_rate[p] for p in pids},
+		{p: _absolute(_steady(mil_times[p], stats[p]['first_military'], end, saving_minutes(A, p, stats[p]['ages']))) for p in pids},
 		_minmax({p: army[p]['avg_units'] for p in pids}),
 		_minmax(avg_pop),
 		_minmax({p: villager_value(stats[p].get('_vill_made') or stats[p]['_vill_times'], stats[p]['_attacked'], stats[p].get('_vill_alive')) for p in pids}),
@@ -803,6 +954,8 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 			for e, n in credit.items():
 				if n:
 					killed[e] += value * n / total
+	for p in pids:
+		killed[p] += stats[p].get('_vill_kill_value', 0)  # enemy villagers killed count as value killed too
 	for p in pids:
 		army[p]['value_lost_in_fights'] = round(lost[p])
 		army[p]['value_killed_in_fights'] = round(killed[p])
@@ -910,19 +1063,39 @@ def find_engagements(A, players, base_of, villagers):
 	return offensive
 
 
-EARLY_MINUTES = 25
+# How much warships count in pressure, by map (names are matched without spaces or symbols). On lake maps
+# water is worth holding but gives no edge on land; on island maps water is the game. Other maps: 0.6.
+WATER_IMPORTANCE = (
+	(('island', 'archipelago', 'waternomad', 'migration', 'pacific'), 1.0),
+	(('baltic', 'mediterranean', 'coastal', 'continental', 'scandinavia', 'rivers', 'nile', 'sea'), 0.7),
+	(('fourlakes', '4lakes', 'goldenlakes', 'kawasan', 'lake'), 0.4),
+)
+WATER_DEFAULT = 0.6
+
+
+def water_weight(map_name):
+	name = re.sub(r'[^0-9a-z]', '', (map_name or '').lower())
+	for keys, weight in WATER_IMPORTANCE:
+		if any(k in name for k in keys):
+			return weight
+	return WATER_DEFAULT
+
+
+EARLY_DOUBLE = 15  # minutes: army counts double before this
+EARLY_HALF = 20    # and 1.5 times before this
+ARMY_FROM = 8  # army on the map is averaged from minute 8
 
 
 def early_weight(minute, imp_at=None):
-	""" Army sent at the enemy early counts more: x2 before 25:00, x1.5 until Imperial Age, x1 after. """
-	if minute < EARLY_MINUTES:
+	""" Early army counts more (on the map and sent at the enemy): x2 before 15:00, x1.5 before 20:00, x1 after. """
+	if minute < EARLY_DOUBLE:
 		return 2.0
-	if imp_at is None or minute * 60000 < imp_at:
+	if minute < EARLY_HALF:
 		return 1.5
 	return 1.0
 
 
-def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
+def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, water=1.0):
 	"""
 	Estimate each player's army on the map over time from the unit ids in their commands.
 	A unit is military if it ever gets an army-only command (formation, stance, patrol, attack-move...)
@@ -950,7 +1123,7 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players:
 			name = _name('objects', a['unit_id'])
 			if name not in NOT_ARMY and name != 'Villager':
-				queued[a['player_id']].append((a['t'], unit_value(a['unit_id']), a.get('amount', 1) or 1))
+				queued[a['player_id']].append((a['t'], unit_value(a['unit_id']), a.get('amount', 1) or 1, name in WARSHIPS))
 
 	out = {}
 	for pid in pids:
@@ -961,13 +1134,18 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 				alive[m] += 1
 		alive = [min(n, POP_CAP) for n in alive]  # an estimate can never beat the population cap
 		value_per_unit, total, count, q = [0.0] * minutes, 0.0, 0, sorted(queued[pid])
+		press_value = [0.0] * minutes  # the same, with warships discounted by how much water matters on this map
+		ships = 0.0
 		j = 0
 		for m in range(minutes):
 			while j < len(q) and q[j][0] <= (m + 1) * 60000:
 				total += q[j][1] * q[j][2]
 				count += q[j][2]
+				if q[j][3]:
+					ships += q[j][1] * q[j][2]
 				j += 1
 			value_per_unit[m] = total / count if count else 0.0
+			press_value[m] = value_per_unit[m] * (1 - (ships / total if total else 0) * (1 - water))
 		structures = [0.0] * minutes
 		for a in A:
 			if a['a'] == 'BUILD' and a.get('player_id') == pid and _name('objects', a['building_id']) in CASTLES | TOWERS:
@@ -979,8 +1157,10 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 				for i in a.get('object_ids') or []:
 					if i in military[pid]:
 						sent.add((i, int(a['t'] // 60000)))  # each unit once per minute
-		window = range(min(15, minutes - 1), minutes)  # from 15 minutes on, when armies matter
-		on_map = [alive[m] * value_per_unit[m] + structures[m] for m in window]
+		window = range(min(ARMY_FROM, minutes - 1), minutes)  # from 8:00 (Feudal armies count)
+		# A small army early is worth a lot: x2 before 15:00, x1.5 before 20:00 (same as army sent)
+		my_imp = imp_at.get(pid) if isinstance(imp_at, dict) else imp_at
+		on_map = [(alive[m] * press_value[m] + structures[m]) * early_weight(m, my_imp) for m in window]
 		# Micro inputs: how much the player controls the army, picks targets, splits groups and keeps units alive.
 		army_cmds = [a for a in A if a.get('player_id') == pid and any(i in military[pid] for i in (a.get('object_ids') or []))]
 		army_minutes = max(1.0, (end - min((seen[(pid, i)][0] for i in military[pid]), default=end)) / 60000)
@@ -1022,7 +1202,7 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 			peak_units=max(alive) if alive else 0,
 			avg_value_on_map=round(sum(on_map) / len(on_map)),
 			unit_value=round(value_per_unit[-1]),
-			value_sent=round(sum(value_per_unit[m] * early_weight(m, (imp_at or {}).get(pid)) for _, m in sent)),
+			value_sent=round(sum(press_value[m] * early_weight(m, (imp_at or {}).get(pid)) for _, m in sent)),
 			units_by_5min=[alive[m] for m in range(0, minutes, 5)],
 		)
 	return out
@@ -1044,7 +1224,10 @@ SIEGE = {'Battering Ram', 'Mangonel', 'Scorpion', 'Bombard Cannon', 'Trebuchet',
 
 
 def _top_lines(counter, minimum, names=LINE_NAMES, limit=2):
-	return [names.get(n, n) for n, c in counter.most_common() if c >= minimum][:limit]
+	merged = Counter()  # upgrades of one line (Galley, War Galley) count together
+	for n, c in counter.items():
+		merged[names.get(n, n)] += c
+	return [label for label, c in merged.most_common() if c >= minimum][:limit]
 
 
 def _army_lines(counter, minimum=5):
@@ -1078,7 +1261,11 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	if forward_towers >= 2:
 		opening = "Feudal tower rush"
 	elif sum(feudal_army.values()) >= 8:
-		opening = "Feudal " + " + ".join(feudal_units or ["army"]) + ("" if feudal_attack else " (defensive)")
+		ships = sum(n for u, n in feudal_army.items() if u in WARSHIPS)
+		if ships * 2 >= sum(feudal_army.values()):  # mostly warships: a water opening (sea fights count as attacks)
+			opening = "Feudal water: " + " + ".join(feudal_units or ["warships"])
+		else:
+			opening = "Feudal " + " + ".join(feudal_units or ["army"]) + ("" if feudal_attack else " (defensive)")
 	elif feudal and castle and castle - feudal <= 4 * 60000:
 		opening = "Fast Castle"
 	else:

@@ -130,12 +130,24 @@ def _read_players(header, save, extra_string):
 	return players, rms_map_id, started_at
 
 
+# Map ids that mean a custom map in DE: random map custom, custom map pool, deathmatch custom.
+CUSTOM_MAP_IDS = {59, 137, 138}
+
+
 def _map_name(header_bytes, rms_map_id):
-	""" Mod maps are named in the lobby strings ("...RANDOM_MAPS:Rage Arena v4.rms..."); built-in maps by id. """
-	if m := re.search(rb'RANDOM_MAPS:([^:\x00]{1,80})\.rms', header_bytes[:300000]):
-		return m.group(1).decode('utf-8', 'replace').strip()
+	"""
+	Built-in maps are named by id (29 = Arena). Only when the id says "custom map" is the name taken from the
+	lobby's mod list ("SUBSCRIBEDMODS:RANDOM_MAPS:nCZ_GoldenLakes_3.2.rms:..."): that list can also hold mods
+	the game did not use, so it is never trusted for a built-in map.
+	"""
 	maps = reference().get('maps', {})
-	return maps.get(str(rms_map_id)) if isinstance(maps.get(str(rms_map_id)), str) else None
+	builtin = maps.get(str(rms_map_id))
+	if rms_map_id not in CUSTOM_MAP_IDS and isinstance(builtin, str):
+		return builtin
+	names = re.findall(rb'RANDOM_MAPS:([^:\x00]{1,80})\.rms', header_bytes[:600000])
+	if names:
+		return names[-1].decode('utf-8', 'replace').strip()
+	return builtin if isinstance(builtin, str) else None
 
 
 def read_players(raw: bytes):
