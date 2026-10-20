@@ -55,9 +55,10 @@ What the breakdown shows:
   enemy army came with them, and clearing them earns a little extra. Players who were never attacked get
   "—" and their overall score uses the other three.
 * Every score is compared with the player's BombayBot Elo, so the post and the recap show who played above
-  or below their Elo. Players are matched to BombayBot members by name: the in-game name is compared with
-  their BombayBot nick and Discord names, ignoring case, spaces, symbols and rating tags. Unmatched players
-  show no Elo.
+  or below their Elo. Players are matched to BombayBot members by name. Names linked with `/aoe link` come
+  first (a member can link several in-game names; moderators can link names for others). Otherwise the
+  in-game name is compared with the member's BombayBot nick and Discord names, ignoring case, spaces,
+  symbols and rating tags. Unmatched players show no Elo.
 * Posts are titled "Map - Top player's Team (Civ) vs Top player's Team (Civ)", where the top player is the
   highest BombayBot Elo on each team and the winning team comes first.
 * The breakdown covers the game up to the first resignation; the result still counts every resignation.

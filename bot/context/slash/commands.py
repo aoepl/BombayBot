@@ -755,6 +755,30 @@ async def _nick(
 
 
 
+# aoe -> ... (in-game names)
+
+@groups.aoe.subcommand(name='link', description='Link an in-game name to your Discord account (moderators: to anyone).')
+async def _aoe_link(
+		interaction: Interaction,
+		name: str = SlashOption(description="Your AoE2 in-game name, exactly as it shows in games."),
+		player: Member = SlashOption(required=False, verify=False, description="Moderators: link the name to this member.")
+): await run_slash(bot.commands.aoe_link, interaction=interaction, name=name, player=player)
+
+
+@groups.aoe.subcommand(name='unlink', description='Remove a linked in-game name.')
+async def _aoe_unlink(
+		interaction: Interaction,
+		name: str = SlashOption(description="The in-game name to unlink.")
+): await run_slash(bot.commands.aoe_unlink, interaction=interaction, name=name)
+
+
+@groups.aoe.subcommand(name='names', description='Show the in-game names linked to a member.')
+async def _aoe_names(
+		interaction: Interaction,
+		player: Member = SlashOption(required=False, verify=False)
+): await run_slash(bot.commands.aoe_names, interaction=interaction, player=player)
+
+
 # replay -> ...
 
 @groups.replay.subcommand(name='upload', description='Analyse a recorded game file (.aoe2record or .zip).')

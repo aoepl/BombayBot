@@ -37,6 +37,19 @@ db.ensure_table(dict(
 ))
 _posting = set()  # game keys / fingerprints being posted right now
 
+# In-game names linked to Discord members by hand (/aoe link). One member can have several names.
+db.ensure_table(dict(
+	tname="aoe_name_links",
+	columns=[
+		dict(cname="name_key", ctype=db.types.str),
+		dict(cname="name", ctype=db.types.str),
+		dict(cname="user_id", ctype=db.types.int),
+		dict(cname="linked_by", ctype=db.types.int),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["name_key"]
+))
+
 
 class ReplayError(Exception):
 	pass
@@ -50,17 +63,50 @@ def _norm(name):
 	return re.sub(r"[^0-9a-z]", "", name.lower())
 
 
+async def link_name(name, user_id, linked_by):
+	""" Link an in-game name to a member. Returns the member it was linked to before, if any. """
+	key = _norm(name)
+	if not key:
+		raise ReplayError("That in-game name has no letters or numbers in it.")
+	old = await db.select_one(('user_id',), 'aoe_name_links', where=dict(name_key=key))
+	await db.insert('aoe_name_links', dict(
+		name_key=key, name=name.strip(), user_id=user_id, linked_by=linked_by, at=int(time.time())
+	), on_dublicate="replace")
+	return old['user_id'] if old and old['user_id'] != user_id else None
+
+
+async def name_owner(name):
+	row = await db.select_one(('user_id',), 'aoe_name_links', where=dict(name_key=_norm(name)))
+	return row['user_id'] if row else None
+
+
+async def unlink_name(name):
+	key = _norm(name)
+	if not await db.select_one(('name_key',), 'aoe_name_links', where=dict(name_key=key)):
+		return False
+	await db.delete('aoe_name_links', where=dict(name_key=key))
+	return True
+
+
+async def linked_names(user_id):
+	return [r['name'] for r in await db.select(('name', 'user_id'), 'aoe_name_links', where=dict(user_id=user_id))]
+
+
 async def bombay_players_by_name(qc, names):
 	"""
-	Match in-game names to members of this channel's rating, using their BombayBot nick and Discord names.
-	Returns {in-game name: dict(user_id, elo)} for names that match exactly one member.
+	Match in-game names to members: names linked with /aoe link first, then the member's BombayBot nick and
+	Discord names. Returns {in-game name: dict(user_id, elo)} for names that match exactly one member.
 	"""
 	wanted = {_norm(n): n for n in names if _norm(n)}
-	candidates = {}  # normalised name -> set(user_id)
+	linked = {}
+	for key in wanted:
+		if row := await db.select_one(('user_id',), 'aoe_name_links', where=dict(name_key=key)):
+			linked[key] = row['user_id']
+	candidates = {key: {uid} for key, uid in linked.items()}  # normalised name -> set(user_id)
 
 	def add(name, user_id):
 		key = _norm(name)
-		if key in wanted:
+		if key in wanted and key not in linked:
 			candidates.setdefault(key, set()).add(user_id)
 
 	for row in await db.select(('user_id', 'nick'), 'qc_players', where=dict(channel_id=qc.rating.channel_id)):
