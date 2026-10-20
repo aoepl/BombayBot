@@ -375,7 +375,10 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 	cancel_pending(rec, found)  # a member uploaded it: the automatic search for this game can stop
 
 	by_elo = _players_by_elo(rec, found)
-	match_id, game = await locate(rec, filename, by_elo)
+	if getattr(qc.cfg, 'replay_lookup', 1):
+		match_id, game = await locate(rec, filename, by_elo)
+	else:  # lookup off: no World's Edge calls and no links in the post
+		match_id, game = None, None
 	meta = worldsedge.match_meta(game) if game else {}
 	for name, info in found.items():
 		for p in rec['players']:

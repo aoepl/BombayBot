@@ -59,6 +59,8 @@ Setup (optional):
   `/channel set variable:replay_forum value:#game-breakdowns`. A text channel works too, without the automatic part.
 * Turn the automatic part off (keeping the forum) with `/replay auto_replay_off`, back on with `/replay auto_replay_on`
   (moderators; stored as the `replay_auto` channel setting).
+* Turn off the World's Edge lookup for uploads with `/replay auto_lookup_off`: uploaded games are then posted
+  without the download and match links. Back on with `/replay auto_lookup_on` (channel setting `replay_lookup`).
 * Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
 What the breakdown shows:

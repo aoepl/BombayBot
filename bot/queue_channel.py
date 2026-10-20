@@ -309,6 +309,15 @@ class QueueChannel:
 				notnull=True
 			),
 			Variables.BoolVar(
+				"replay_lookup",
+				display="Game links on uploads",
+				section="Replays",
+				description="Look up uploaded games on World's Edge to link the official download and match pages. "
+					"Turn off with /replay auto_lookup_off to post without links.",
+				default=1,
+				notnull=True
+			),
+			Variables.BoolVar(
 				"replay_ai",
 				display="AI game recap",
 				section="Replays",

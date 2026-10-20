@@ -1,4 +1,4 @@
-__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on']
+__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on']
 
 from nextcord import Attachment, Member, Embed, ForumChannel
 
@@ -79,3 +79,18 @@ async def replay_auto_on(ctx):
 	note = "" if isinstance(forum, ForumChannel) else (
 		" They only run with a forum channel as the replay forum: `/channel set variable:replay_forum value:#forum`.")
 	await ctx.success("Automatic game breakdowns are on for this channel." + note)
+
+
+async def replay_lookup_off(ctx):
+	""" Stop looking up uploaded games on World's Edge: posts go out without the game links. """
+	ctx.check_perms(ctx.Perms.MODERATOR)
+	await ctx.qc.cfg.update({'replay_lookup': '0'})
+	await ctx.success("Game lookup is off for this channel: uploaded games are posted without links to the recorded "
+		"game and match pages. Turn it back on with `/replay auto_lookup_on`.")
+
+
+async def replay_lookup_on(ctx):
+	""" Look up uploaded games on World's Edge again to link the official download and match pages. """
+	ctx.check_perms(ctx.Perms.MODERATOR)
+	await ctx.qc.cfg.update({'replay_lookup': '1'})
+	await ctx.success("Game lookup is on for this channel: posts link the official download and the match pages.")
