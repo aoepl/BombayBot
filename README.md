@@ -58,7 +58,9 @@ How it works:
   and four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
   The overall score weighs them by seat (flank or pocket).
 * Survival is only scored for players whose base was seriously attacked: it rewards keeping the economy at
-  home under pressure and marks players whose main base was destroyed. Players who were never attacked get
+  home under pressure and marks players whose main base was destroyed. Holding a heavy attack scores higher
+  than holding a light one. Enemy castles and towers built in a base count as pressure, weighted by how much
+  enemy army came with them, and clearing them earns a little extra. Players who were never attacked get
   "—" and their overall score uses the other three.
 * Every score is compared with the player's BombayBot Elo (the rating used to make the match), so the post
   and the recap show who played above or below their Elo.
@@ -67,6 +69,24 @@ How it works:
 * `/replay upload` analyses any recorded game a member attaches.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
+
+### Player insights (saved for later)
+Every analysed recorded game, whether found after a report or uploaded with `/replay upload`, is saved for
+future features such as suggesting civs and seats for a map. Nothing reads it yet; it builds up as games are played.
+
+* `aoe_games`: one row per game (map, map category, team size, length, source, linked pickup match).
+* `aoe_game_players`: one row per player per game: AoE2 profile and linked Discord user, map and map category
+  (Open, Semi Closed, Closed, Hybrid, Nomad or Other), civ, seat (flank or pocket), win or loss, BombayBot Elo,
+  strategy (opening, boom, main units, fast Imperial, forward castles, tower creep), age-up times, APM,
+  the four scores, overall score, rank in the lobby, performance against Elo, pressure dealt and taken, and tributes.
+
+The same game is never counted twice: re-analysing it replaces its rows. Example: best civs for one player on closed maps:
+
+```sql
+SELECT civ, seat, COUNT(*) games, AVG(won) win_rate, AVG(score_overall) avg_score
+FROM aoe_game_players WHERE user_id = 123456789012345678 AND map_category = 'Closed'
+GROUP BY civ, seat HAVING games >= 3 ORDER BY avg_score DESC;
+```
 
 ## Credits
 Developer: **Leshaka**. Contact: leshkajm@ya.ru.  

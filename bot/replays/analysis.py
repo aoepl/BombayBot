@@ -187,6 +187,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	press_out, press_in, help_out = Counter(), Counter(), Counter()
 	press_matrix = Counter()
 	timeline_in = defaultdict(Counter)  # defender -> minute -> orders
+	team_into = defaultdict(Counter)  # (attacking team, defender) -> minute -> orders
 	for a in A:
 		if a['a'] not in ARMY_ORDERS or a.get('x') is None:
 			continue
@@ -204,6 +205,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			press_in[b] += 1
 			press_matrix[(pid, b)] += 1
 			timeline_in[b][int(a['t'] // 60000)] += 1
+			team_into[(players[pid]['team_id'], b)][int(a['t'] // 60000)] += 1
 		else:
 			help_out[pid] += 1
 
@@ -307,13 +309,20 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up',))
 	press = _minmax({p: press_out[p] + 25 * fwd_up[p] for p in pids})
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
+	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
+	# orders into that base from 3 minutes before it was placed to 5 minutes after.
 	siege_in, cleared, siege_times = Counter(), Counter(), defaultdict(list)
 	for c in castles:
-		if c['forward'] and c['status'] != 'unclear':  # only castles that were actually built
-			siege_in[c['base']] += 40
-			siege_times[c['base']].append(c['t'])
-			if c['status'] in ('lost', 'deleted'):
-				cleared[c['base']] += 1
+		if not c['forward'] or c['status'] == 'unclear':  # only castles that were actually built
+			continue
+		m0 = int(c['t'] // 60000)
+		army = sum(n for m, n in team_into[(players[c['player']]['team_id'], c['base'])].items() if m0 - 3 <= m <= m0 + 5)
+		c['army_support'] = army
+		c['threat'] = round(10 + min(40, army * 0.5))
+		siege_in[c['base']] += c['threat']
+		siege_times[c['base']].append(c['t'])
+		if c['status'] in ('lost', 'deleted'):
+			cleared[c['base']] += c['threat'] / 50
 	for a in A:
 		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) in TOWERS:
 			b = base_of(a['x'], a['y'])
@@ -329,7 +338,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p in pids:
 		enemy_castles = sum(1 for c in castles if c['forward'] and c['base'] == p and c['status'] != 'unclear')
 		stats[p]['enemy_castles_in_base'] = enemy_castles
-		stats[p]['enemy_castles_cleared'] = cleared[p]
+		stats[p]['enemy_castles_cleared'] = sum(1 for c in castles if c['forward'] and c['base'] == p
+			and c['status'] in ('lost', 'deleted'))
 		if not max_in or (pressure[p] < max(50, 0.25 * max_in) and enemy_castles == 0):
 			survival[p] = None
 			survival_note[p] = "base not seriously attacked"
@@ -347,12 +357,18 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			and _name('objects', a['building_id']) in ECO_BUILDINGS]
 		home = sum(1 for a in eco if base_of(a['x'], a['y']) == p) / len(eco) if eco else 0.5
 		moved_tcs = sum(1 for a in eco if _name('objects', a['building_id']) == 'Town Center' and base_of(a['x'], a['y']) != p)
-		held = max(0.0, min(1.0, home - 0.1 * moved_tcs))
-		value = 1 + 9 * held + (pressure[p] / max_in) * held + 0.5 * min(cleared[p], 2)
+		# A Town Center next to an ally is an expansion, not a lost base, while the economy stays at home.
+		held = max(0.0, min(1.0, home - (0.1 * moved_tcs if home < 0.85 else 0)))
+		# Holding a light attack is worth less than holding a heavy one.
+		difficulty = min(1.0, pressure[p] / (0.6 * max_in))
+		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0)
 		survival[p] = max(1.0, min(10.0, value))
-		cleared_txt = f", cleared {cleared[p]} enemy castle{'s' if cleared[p] != 1 else ''}" if cleared[p] else ""
+		n_cleared = stats[p]['enemy_castles_cleared']
+		cleared_txt = f", cleared {n_cleared} enemy castle{'s' if n_cleared != 1 else ''}" if n_cleared else ""
+		level = 'heavy' if difficulty >= 0.66 else 'moderate' if difficulty >= 0.33 else 'light'
+		stats[p]['pressure_level'] = level
 		survival_note[p] = (
-			f"held the base under pressure ({round(home * 100)}% of new economy buildings at home{cleared_txt})" if held >= 0.75 else
+			f"held the base under {level} pressure ({round(home * 100)}% of new economy buildings at home{cleared_txt})" if held >= 0.75 else
 			f"base partly lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 			if held >= 0.4 else
 			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
@@ -400,7 +416,9 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 
 	# ---- strategy names
 	for p in pids:
-		stats[p]['strategy'] = strategy_name(stats[p], [c for c in castles if c['player'] == p], A, p)
+		parts = strategy_parts(stats[p], [c for c in castles if c['player'] == p], A, p)
+		stats[p]['strategy'] = parts['name']
+		stats[p]['strategy_parts'] = parts
 		stats[p].update(
 			press_out=press_out[p], press_in=press_in[p], pressure_in=pressure[p], help_out=help_out[p],
 			trib_out=int(trib_out[p]), trib_in=int(trib_in[p]), peak_bank=peak_bank[p],
@@ -414,10 +432,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	)
 
 
-def strategy_name(st, my_castles, A, pid):
+def strategy_parts(st, my_castles, A, pid):
+	""" The strategy as separate parts (for stats later) plus a readable name. """
 	ages = st['ages']
 	feudal, castle, imp = (ages.get(a) for a in AGES)
-	parts = []
 
 	towers_early = 0
 	if castle:
@@ -428,29 +446,40 @@ def strategy_name(st, my_castles, A, pid):
 		feudal_army = sum((a.get('amount', 1) or 1) for a in A if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid
 			and feudal <= a['t'] < castle and _name('objects', a['unit_id']) not in MILITARY_SKIP)
 	if towers_early >= 2:
-		parts.append("Feudal tower rush")
+		opening = "Feudal tower rush"
 	elif feudal_army >= 8:
-		parts.append("Feudal aggression")
+		opening = "Feudal aggression"
 	elif feudal and castle and castle - feudal <= 4 * 60000:
-		parts.append("Fast Castle")
-	if castle and st.get('tc_after_castle', 0) >= 2:
-		parts[-1:] = [(parts[-1] + " boom") if parts else "Castle Age boom"]
+		opening = "Fast Castle"
+	else:
+		opening = "Standard"
+	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)
 
 	army = [(n, c) for n, c in st['units'].most_common() if n not in ('Villager', 'Trade Cart', 'Trade Cog')]
-	main = [LINE_NAMES.get(n, n) for n, c in army[:2] if c >= 5]
-	if main:
-		parts.append(" + ".join(main))
+	main_units = [LINE_NAMES.get(n, n) for n, c in army[:2] if c >= 5]
+	fast_imp = bool(imp and imp < 25 * 60000)
+	forward_castles = sum(1 for c in my_castles if c['forward'])
+	tower_creep = st['towers'] >= 8
+
+	parts = []
+	if opening != "Standard" or boom:
+		parts.append((opening if opening != "Standard" else "Castle Age") + (" boom" if boom else ""))
+	if main_units:
+		parts.append(" + ".join(main_units))
 	extras = []
-	if imp and imp < 25 * 60000:
+	if fast_imp:
 		extras.append("fast Imperial")
-	fwd = [c for c in my_castles if c['forward']]
-	if fwd:
-		extras.append(f"{len(fwd)} forward castle{'s' if len(fwd) > 1 else ''}")
-	if st['towers'] >= 8:
+	if forward_castles:
+		extras.append(f"{forward_castles} forward castle{'s' if forward_castles > 1 else ''}")
+	if tower_creep:
 		extras.append("tower creep")
 	if extras:
 		parts.append(", ".join(extras))
-	return " → ".join(parts) if parts else "Standard play"
+	return dict(
+		name=" → ".join(parts) if parts else "Standard play",
+		opening=opening, boom=boom, main_units=main_units, fast_imp=fast_imp,
+		forward_castles=forward_castles, tower_creep=tower_creep,
+	)
 
 
 def key_moments(players, stats, castles, resigns):

@@ -17,7 +17,7 @@ from core.console import log
 from core.database import db
 from core.utils import get_nick
 
-from . import worldsedge, rec_parser, analysis, post
+from . import worldsedge, rec_parser, analysis, post, insights
 
 db.ensure_table(dict(
 	tname="aoe_profiles",
@@ -186,6 +186,10 @@ async def _process(qc, info, notify_failure):
 
 	map_name = rec.get('map_name') or (game.get('mapname') or '').replace('.rms', '').replace('_', ' ') \
 		or (info['maps'][0] if info['maps'] else None)
+	await insights.save(
+		result, insights.game_key(worldsedge_id=game['id']), map_name=map_name, lobby=game.get('description'),
+		match_id=info['match_id'], channel_id=qc.id, source='auto', rec_profile_id=source
+	)
 	source_name = ratings.get(source, {}).get('alias') or str(source)
 	thread = await publish(
 		qc, result, rec_bytes=rec_parser.unwrap(raw), map_name=map_name, lobby=game.get('description'),
@@ -286,6 +290,10 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str):
 			if elos.get(uid) is not None:
 				meta.setdefault(pid, {})['elo'] = elos[uid]
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
+	await insights.save(
+		result, insights.game_key(filename=filename, rec_bytes=rec_parser.unwrap(data)), map_name=rec.get('map_name'),
+		channel_id=qc.id, source='upload', uploaded_by=ctx.author.id
+	)
 	title = post.make_title(result, rec.get('map_name'))
 	await publish(
 		qc, result, rec_bytes=rec_parser.unwrap(data), map_name=rec.get('map_name'), title=title,
