@@ -453,9 +453,9 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		if not c['forward'] or c['status'] == 'unclear':  # only castles that were actually built
 			continue
 		m0 = int(c['t'] // 60000)
-		army = sum(n for m, n in team_into[(players[c['player']]['team_id'], c['base'])].items() if m0 - 3 <= m <= m0 + 5)
-		c['army_support'] = army
-		c['threat'] = round(10 + min(40, army * 0.5))
+		support = sum(n for m, n in team_into[(players[c['player']]['team_id'], c['base'])].items() if m0 - 3 <= m <= m0 + 5)
+		c['army_support'] = support
+		c['threat'] = round(10 + min(40, support * 0.5))
 		siege_in[c['base']] += c['threat']
 		siege_times[c['base']].append(c['t'])
 		if c['status'] in ('lost', 'deleted'):
@@ -562,7 +562,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	return dict(
 		duration=end, players=players, stats=stats, castles=castles, water_weight=water,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
-		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end}),
+		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end},
+			army, vest, A, end),
 	)
 
 
@@ -706,6 +707,7 @@ def villager_estimate(A, players, villagers, army_alive, end):
 		made.sort()
 		lost = [t for o, t in deleted.items() if owner.get(o) == pid]
 		killers = Counter()  # enemy player -> villagers of this player they killed (shared by orders nearby)
+		killed = []  # (time, {enemy: share}) for each villager counted as killed
 		for o, (t, x, y) in last.items():
 			if owner.get(o) != pid or o in deleted or t > end - 4 * 60000:
 				continue
@@ -720,6 +722,7 @@ def villager_estimate(A, players, villagers, army_alive, end):
 				total = sum(near.values())
 				for e, n in near.items():
 					killers[e] += n / total
+				killed.append((t, {e: n / total for e, n in near.items()}))
 		lost.sort()
 		start = START_VILLAGERS.get(p.get('civ'), 3)
 		alive = []
@@ -729,7 +732,7 @@ def villager_estimate(A, players, villagers, army_alive, end):
 			army = army_alive[pid][min(len(army_alive[pid]) - 1, m)] if army_alive.get(pid) else 0
 			alive.append(max(0, min(n, POP_CAP - army)))
 		out[pid] = dict(made=made, lost=lost, alive=alive, villagers=kinds['Villager'], fishing=kinds['Fishing Ship'],
-			killers=killers, busy=busy, first_use=first_use)
+			killers=killers, killed=sorted(killed, key=lambda k: k[0]), busy=busy, first_use=first_use)
 	return out
 
 
@@ -1370,26 +1373,98 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	)
 
 
-def key_moments(players, stats, castles, resigns):
-	ev = []
-	clicks = [(stats[p]['ages'].get('Castle Age'), p) for p in players if stats[p]['ages'].get('Castle Age')]
-	if clicks:
-		t, p = min(clicks)
-		ev.append((t, f"{players[p]['name']} ({players[p]['civ']}) is first to click Castle Age"))
-	imps = [(stats[p]['ages'].get('Imperial Age'), p) for p in players if stats[p]['ages'].get('Imperial Age')]
-	if imps:
-		t, p = min(imps)
-		ev.append((t, f"{players[p]['name']} ({players[p]['civ']}) is first to click Imperial Age"))
-	first_mil = [(stats[p]['first_military'], p) for p in players if stats[p]['first_military']]
-	if first_mil:
-		t, p = min(first_mil)
-		ev.append((t, f"First military unit queued by {players[p]['name']} ({players[p]['civ']})"))
+MOMENTS_MAX = 5
+BATTLE_MIN = 1500     # army value lost (both sides) in a 3-minute window that makes a major fight
+RAID_MIN = 6          # villagers of one player killed within 3 minutes that make a big raid
+ELIMINATED_GAP = 3 * 60000  # stopped giving orders this long before the end without resigning
+
+
+def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0):
+	"""
+	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
+	big raids on villagers, castles destroyed, players eliminated (a regicide king killed or a defeat: their
+	orders stop well before the end with no resignation) and the resignation that ends the analysis.
+	All estimated from orders: the replay has no kill data.
+	"""
+	name = lambda p: players[p]['name']  # noqa: E731
+	team_of = {p: players[p]['team_id'] for p in players}
+	ev = []  # (size, time, text)
+
+	# Major fights: army value lost by each side over 3 minutes, counting only units lost while fighting.
+	if army:
+		lost = defaultdict(Counter)  # minute -> player -> value lost
+		for p in players:
+			for t_last, value in army[p]['_gone']:
+				m = int(t_last // 60000)
+				if max(army[p]['_fight_orders'].get(k, 0) for k in (m - 1, m, m + 1, m + 2)) >= FIGHT_MIN_ORDERS:
+					lost[m][p] += value
+		windows = []
+		for m in sorted(lost):
+			total = Counter()
+			for k in (m, m + 1, m + 2):
+				total.update(lost.get(k, {}))
+			windows.append((sum(total.values()), m, total))
+		used = set()
+		for size, m, total in sorted(windows, key=lambda w: -w[0]):
+			if size < BATTLE_MIN or used & {m, m + 1, m + 2}:
+				continue
+			used.update({m - 2, m - 1, m, m + 1, m + 2})
+			sides = defaultdict(float)
+			for p, v in total.items():
+				sides[team_of[p]] += v
+			if len(sides) < 2:
+				continue
+			# Name the players who did the most fighting on each side in this window.
+			fought = Counter()
+			for p in players:
+				for k in (m, m + 1, m + 2):
+					fought[p] += sum(army[p]['_fights'].get(k, {}).values())
+			def who(tm):
+				ps = sorted((p for p in players if team_of[p] == tm and fought[p] >= 1), key=lambda p: -fought[p])[:2]
+				return " & ".join(name(p) for p in ps) or "their team"
+			(t1, v1), (t2, v2) = sorted(sides.items(), key=lambda kv: kv[1])[:2]  # t1 lost less: won the fight
+			text = f"Major fight: {who(t1)} beat {who(t2)} (lost {round(v1):,} vs {round(v2):,} army value)"
+			ev.append((size, m * 60000, text))
+
+	# Big raids: many villagers of one player killed in a few minutes.
+	if vest:
+		for p in players:
+			kills = vest[p].get('killed', [])
+			i = 0
+			while i < len(kills):
+				j = i
+				while j + 1 < len(kills) and kills[j + 1][0] - kills[i][0] <= 3 * 60000:
+					j += 1
+				if j - i + 1 >= RAID_MIN:
+					credit = Counter()
+					for _, share in kills[i:j + 1]:
+						credit.update(share)
+					raider = credit.most_common(1)[0][0]
+					ev.append(((j - i + 1) * 100 * 1.5, kills[i][0],
+						f"{name(raider)} raided {name(p)}: about {j - i + 1} villagers killed"))
+					i = j + 1
+				else:
+					i += 1
+
 	for c in castles:
-		if c['forward']:
-			outcome = {'up': 'went up', 'lost': 'went up and was likely destroyed', 'deleted': 'was deleted',
-				'unclear': 'outcome unclear'}[c['status']]
-			ev.append((c['t'], f"{players[c['player']]['civ']} castle in the {players[c['base']]['civ']} base ({outcome})"))
-	for p, t in resigns.items():
-		ev.append((t, f"{players[p]['name']} ({players[p]['civ']}) resigns"))
-	ev.sort(key=lambda e: e[0])
-	return [(mmss(t), txt) for t, txt in ev]
+		if c['status'] == 'lost':
+			where = f" in {name(c['base'])}'s base" if c['base'] != c['player'] else ""
+			ev.append((1500, c['t'], f"{name(c['player'])}'s castle{where} was destroyed"))
+
+	# Eliminated (regicide king killed, or defeated): orders stop well before the end, no resignation.
+	last = {}
+	for a in A:
+		if a.get('player_id') in players:
+			last[a['player_id']] = a['t']
+	for p, t in last.items():
+		if p not in resigns and end and t < end - ELIMINATED_GAP:
+			ev.append((10 ** 6, t, f"{name(p)} ({players[p]['civ']}) was eliminated (stopped playing, e.g. king killed)"))
+
+	first_resign = min(resigns.items(), key=lambda kv: kv[1]) if resigns else None
+	top = sorted(ev, key=lambda e: -e[0])[:MOMENTS_MAX - (1 if first_resign else 0)]
+	out = [(t, text) for _, t, text in top]
+	if first_resign:
+		p, t = first_resign
+		out.append((t, f"{name(p)} ({players[p]['civ']}) resigns"))
+	out.sort(key=lambda e: e[0])
+	return [(mmss(t), text) for t, text in out]
