@@ -69,6 +69,9 @@ How it works:
 * `/replay upload` analyses any recorded game a member attaches. With `summary:False` it only saves the
   player stats (see Player insights) and posts nothing.
 * The breakdown covers the game up to the first resignation; the result still counts every resignation.
+* Each game is posted once. If it was already posted, uploading it again (even a different player's recording
+  or a renamed file) just links the existing post and refreshes the saved stats. If the post was deleted,
+  uploading the game again creates a new post.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
 
@@ -82,7 +85,7 @@ future features such as suggesting civs and seats for a map. Nothing reads it ye
   strategy (opening, boom, main units, fast Imperial, forward castles, tower creep), age-up times, APM,
   the four scores, overall score, rank in the lobby, performance against Elo, pressure dealt and taken, and tributes.
 
-The same game is never counted twice: re-analysing it replaces its rows. Example: best civs for one player on closed maps:
+The same game is never counted twice: re-analysing it replaces its rows. Games are matched by their World's Edge id, or by a fingerprint (start time, players, civs and teams) when the id is unknown. Example: best civs for one player on closed maps:
 
 ```sql
 SELECT civ, seat, COUNT(*) games, AVG(won) win_rate, AVG(score_overall) avg_score

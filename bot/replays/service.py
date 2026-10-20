@@ -9,9 +9,10 @@ import io
 import time
 import zipfile
 
-from nextcord import File, ForumChannel, DiscordException
+from nextcord import File, ForumChannel, DiscordException, NotFound
 
 import bot
+from core.client import dc
 from core.config import cfg
 from core.console import log
 from core.database import db
@@ -41,6 +42,22 @@ db.ensure_table(dict(
 	],
 	primary_keys=["match_id"]
 ))
+
+# One post per game, however it arrived (report or upload). game_key/fingerprint match insights.
+db.ensure_table(dict(
+	tname="aoe_game_posts",
+	columns=[
+		dict(cname="game_key", ctype=db.types.str),
+		dict(cname="fingerprint", ctype=db.types.str),
+		dict(cname="channel_id", ctype=db.types.int),
+		dict(cname="thread_id", ctype=db.types.int),
+		dict(cname="message_id", ctype=db.types.int),
+		dict(cname="post_url", ctype=db.types.str),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["game_key"]
+))
+_posting = set()  # game keys / fingerprints being posted right now
 
 # Replays usually appear a minute or two after the game ends; keep looking for ~20 minutes.
 RETRY_DELAYS = (90, 120, 180, 300, 600)
@@ -135,7 +152,8 @@ async def _run(qc, info):
 # ---------- the work
 
 async def _process(qc, info, notify_failure):
-	if await db.select_one(('thread_id',), 'aoe_replay_posts', where=dict(match_id=info['match_id'])):
+	done = await db.select_one(('game_id',), 'aoe_replay_posts', where=dict(match_id=info['match_id']))
+	if done and done.get('game_id') and await _live_post(key=insights.game_key(worldsedge_id=done['game_id'])):
 		return True
 
 	links = await get_links([p['user_id'] for p in info['players']])
@@ -154,6 +172,11 @@ async def _process(qc, info, notify_failure):
 		if notify_failure:
 			raise ReplayError("Couldn't find this game in the linked players' World's Edge match history.")
 		return False
+
+	key = insights.game_key(worldsedge_id=game['id'])
+	if await _live_post(key=key) or key in _posting:
+		await _link_match(qc, info, game, key)
+		return True
 
 	urls = worldsedge.replay_urls(game)
 	if not urls:
@@ -182,26 +205,89 @@ async def _process(qc, info, notify_failure):
 	raw = await worldsedge.download(urls[source])
 
 	rec = await asyncio.to_thread(rec_parser.parse, raw)
+	fp = insights.fingerprint(rec)
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
 
 	map_name = rec.get('map_name') or (game.get('mapname') or '').replace('.rms', '').replace('_', ' ') \
 		or (info['maps'][0] if info['maps'] else None)
-	await insights.save(
-		result, insights.game_key(worldsedge_id=game['id']), map_name=map_name, lobby=game.get('description'),
-		match_id=info['match_id'], channel_id=qc.id, source='auto', rec_profile_id=source
-	)
+	key = await insights.save(
+		result, key, map_name=map_name, lobby=game.get('description'), match_id=info['match_id'],
+		channel_id=qc.id, source='auto', rec_profile_id=source, fingerprint=fp
+	) or key
 	source_name = ratings.get(source, {}).get('alias') or str(source)
-	thread = await publish(
-		qc, result, rec_bytes=rec_parser.unwrap(raw), map_name=map_name, lobby=game.get('description'),
-		title=post.make_title(result, map_name),
-		footer=f"World's Edge game {game['id']} · replay uploaded by {source_name}",
-		mention_ids=[p['user_id'] for p in info['players']],
-	)
-	await db.insert('aoe_replay_posts', dict(
-		match_id=info['match_id'], channel_id=qc.id, game_id=game['id'], thread_id=thread.id if thread else None,
-		at=int(time.time())
-	), on_dublicate="replace")
+
+	# Someone may have uploaded this game (under a different file name) while we were working.
+	if key in _posting or fp in _posting or await _live_post(key=key, fingerprint=fp):
+		await _link_match(qc, info, game, key)
+		return True
+	_posting.update((key, fp))
+	try:
+		posted = await publish(
+			qc, result, rec_bytes=rec_parser.unwrap(raw), map_name=map_name, lobby=game.get('description'),
+			title=post.make_title(result, map_name),
+			footer=f"World's Edge game {game['id']} · replay uploaded by {source_name}",
+			mention_ids=[p['user_id'] for p in info['players']],
+		)
+		await _record_post(key, fp, posted)
+	finally:
+		_posting.difference_update((key, fp))
+	await _link_match(qc, info, game, key)
 	return True
+
+
+async def _link_match(qc, info, game, key):
+	""" Remember which World's Edge game a pickup match was, so it is not looked up again. """
+	try:
+		await db.update('aoe_games', dict(match_id=info['match_id'], channel_id=qc.id), keys=dict(game_key=key))
+	except Exception:
+		pass
+	await db.insert('aoe_replay_posts', dict(
+		match_id=info['match_id'], channel_id=qc.id, game_id=game['id'], at=int(time.time())
+	), on_dublicate="replace")
+
+
+# ---------- one post per game
+
+async def _live_post(key=None, fingerprint=None):
+	"""
+	The stored post for this game if it still exists in Discord. When someone deleted the post,
+	its record is removed so the game can be posted again.
+	"""
+	rows = []
+	for col, value in (('game_key', key), ('fingerprint', fingerprint)):
+		if value:
+			rows += await db.select(('game_key', 'channel_id', 'thread_id', 'message_id', 'post_url'),
+				'aoe_game_posts', where={col: value})
+	for row in rows:
+		if await _post_exists(row):
+			return row
+		await db.delete('aoe_game_posts', where=dict(game_key=row['game_key']))
+	return None
+
+
+async def _post_exists(row):
+	try:
+		if row.get('message_id'):
+			channel = dc.get_channel(row['channel_id']) or await dc.fetch_channel(row['channel_id'])
+			await channel.fetch_message(row['message_id'])
+			return True
+		if row.get('thread_id'):
+			thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
+			return thread is not None
+		return False  # nothing to check against: allow a fresh post
+	except NotFound:
+		return False
+	except DiscordException:
+		return True  # can't tell (permissions, outage): don't risk a duplicate
+
+
+async def _record_post(key, fp, posted):
+	if not posted:
+		return
+	await db.insert('aoe_game_posts', dict(
+		game_key=key, fingerprint=fp, channel_id=posted['channel_id'], thread_id=posted.get('thread_id'),
+		message_id=posted.get('message_id'), post_url=posted.get('url'), at=int(time.time())
+	), on_dublicate="replace")
 
 
 def _winner_text(result):
@@ -212,7 +298,10 @@ def _winner_text(result):
 
 
 async def publish(qc, result, rec_bytes, map_name=None, lobby=None, title=None, footer=None, mention_ids=(), reply_ctx=None):
-	""" Create the forum post (or reply in chat when no forum is set). Returns the thread or None. """
+	"""
+	Create the forum post (or, with no forum set, a message in the queue channel).
+	Returns dict(channel_id, thread_id, message_id, url) describing the post.
+	"""
 	narrative = None
 	if getattr(qc.cfg, 'replay_ai', True) and cfg.GOOGLE_AI_API_KEY:
 		try:
@@ -226,28 +315,28 @@ async def publish(qc, result, rec_bytes, map_name=None, lobby=None, title=None, 
 	file = _rec_file(rec_bytes, title)
 	mentions = " ".join(f"<@{uid}>" for uid in mention_ids)
 	content = (mentions + "\n" if mentions else "") + "Discuss the game here. The recorded game is attached."
-
 	extra = dict(file=file) if file else {}
 
 	forum = getattr(qc.cfg, 'replay_forum', None)
 	if forum is None:
-		if reply_ctx:
-			await reply_ctx.reply(embed=embed, **extra)
-		return None
-
-	if isinstance(forum, ForumChannel):
+		channel = dc.get_channel(qc.id)
+		msg = await channel.send(embed=embed, **extra)
+		posted = dict(channel_id=channel.id, message_id=msg.id, url=msg.jump_url)
+	elif isinstance(forum, ForumChannel):
 		created = await forum.create_thread(name=title[:100], content=content, embed=embed, **extra)
 		thread = getattr(created, 'thread', created)
+		posted = dict(channel_id=forum.id, thread_id=thread.id, url=getattr(thread, 'jump_url', None))
 	else:
 		msg = await forum.send(content=content, embed=embed, **extra)
 		thread = await msg.create_thread(name=title[:100])
+		posted = dict(channel_id=forum.id, message_id=msg.id, thread_id=thread.id, url=getattr(thread, 'jump_url', None))
 
-	link = getattr(thread, 'jump_url', None) or f"<#{thread.id}>"
+	link = posted['url'] or (f"<#{posted['thread_id']}>" if posted.get('thread_id') else "")
 	if reply_ctx:
 		await reply_ctx.reply(f"Game breakdown posted: {link}")
-	else:
+	elif forum is not None:
 		await _notify(qc, f"Game breakdown for {title}: {link}")
-	return thread
+	return posted
 
 
 def _rec_file(rec_bytes, title):
@@ -274,6 +363,7 @@ async def _notify(qc, text):
 async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = True):
 	""" /replay upload: analyse a recorded game attached by a user; post the breakdown unless summary is off. """
 	rec = await asyncio.to_thread(rec_parser.parse, data)
+	fp = insights.fingerprint(rec)
 	profile_ids = [p['profile_id'] for p in rec['players'] if p['profile_id']]
 	meta = {}
 	try:
@@ -290,17 +380,30 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 			if elos.get(uid) is not None:
 				meta.setdefault(pid, {})['elo'] = elos[uid]
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
+	key = insights.game_key(filename=filename, rec=rec)
 	saved = await insights.save(
-		result, insights.game_key(filename=filename, rec_bytes=rec_parser.unwrap(data)), map_name=rec.get('map_name'),
-		channel_id=qc.id, source='upload', uploaded_by=ctx.author.id
+		result, key, map_name=rec.get('map_name'), channel_id=qc.id, source='upload',
+		uploaded_by=ctx.author.id, fingerprint=fp
 	)
+	key = saved or key
 	title = post.make_title(result, rec.get('map_name'))
 	if not summary:
 		if not saved:
 			raise ReplayError("The recorded game was read, but its stats could not be saved.")
 		await ctx.success(f"Saved player stats from **{title}** ({len(result['players'])} players). No summary posted.")
 		return
-	await publish(
-		qc, result, rec_bytes=rec_parser.unwrap(data), map_name=rec.get('map_name'), title=title,
-		footer=f"Uploaded by {get_nick(ctx.author)}", reply_ctx=ctx,
-	)
+
+	existing = await _live_post(key=key, fingerprint=fp)
+	if existing or key in _posting or fp in _posting:
+		url = existing.get('post_url') if existing else None
+		await ctx.success(f"This game has already been posted{': ' + url if url else '.'} Player stats were refreshed.")
+		return
+	_posting.update((key, fp))
+	try:
+		posted = await publish(
+			qc, result, rec_bytes=rec_parser.unwrap(data), map_name=rec.get('map_name'), title=title,
+			footer=f"Uploaded by {get_nick(ctx.author)}", reply_ctx=ctx,
+		)
+		await _record_post(key, fp, posted)
+	finally:
+		_posting.difference_update((key, fp))

@@ -33,6 +33,7 @@ db.ensure_table(dict(
 	tname="aoe_games",
 	columns=[
 		dict(cname="game_key", ctype=db.types.str),
+		dict(cname="fingerprint", ctype=db.types.str),
 		dict(cname="worldsedge_id", ctype=db.types.int),
 		dict(cname="match_id", ctype=db.types.int),
 		dict(cname="channel_id", ctype=db.types.int),
@@ -107,13 +108,23 @@ def map_category(map_name):
 	return 'Other'
 
 
-def game_key(worldsedge_id=None, filename=None, rec_bytes=None):
-	""" World's Edge id when known (also found in names like AgeIIDE_Replay_514937603), else a hash of the file. """
+def fingerprint(rec):
+	"""
+	Same value for every player's recording of one game: start time plus who played which civ on which team.
+	(Recordings differ byte for byte between players, so a file hash can't spot the same game.)
+	"""
+	players = sorted(f"{p['profile_id']}:{p['civ_id']}:{p['team_id']}" for p in rec['players'])
+	raw = f"{rec.get('started_at') or ''}|{rec.get('map_name') or ''}|" + ",".join(players)
+	return "fp:" + hashlib.sha1(raw.encode()).hexdigest()[:20]
+
+
+def game_key(worldsedge_id=None, filename=None, rec=None):
+	""" World's Edge id when known (also found in names like AgeIIDE_Replay_514937603), else the fingerprint. """
 	if worldsedge_id:
 		return f"we:{worldsedge_id}"
 	if filename and (m := re.search(r"Replay_(\d{6,})", filename)):
 		return f"we:{m.group(1)}"
-	return "sha1:" + hashlib.sha1(rec_bytes or b"").hexdigest()[:20]
+	return fingerprint(rec)
 
 
 def _secs(ms):
@@ -121,9 +132,21 @@ def _secs(ms):
 
 
 async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id=None, source='upload',
-		uploaded_by=None, rec_profile_id=None):
-	""" Store the game and one row per player. Never raises: stats must not break posting. """
+		uploaded_by=None, rec_profile_id=None, fingerprint=None):
+	"""
+	Store the game and one row per player, and return the key it was stored under (None on failure).
+	A game already stored under another key (same fingerprint) is updated in place, never counted twice;
+	a World's Edge id wins over a fingerprint-only key. Never raises: stats must not break posting.
+	"""
 	try:
+		if fingerprint:
+			other = await db.select_one(('game_key',), 'aoe_games', where=dict(fingerprint=fingerprint))
+			if other and other['game_key'] != key:
+				if key.startswith('we:') and not other['game_key'].startswith('we:'):
+					await db.delete('aoe_game_players', where=dict(game_key=other['game_key']))
+					await db.delete('aoe_games', where=dict(game_key=other['game_key']))
+				else:
+					key = other['game_key']
 		players, stats = result['players'], result['stats']
 		teams = {}
 		for p in players.values():
@@ -139,7 +162,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 			channel_id = channel_id or old.get('channel_id')
 
 		await db.insert('aoe_games', dict(
-			game_key=key, worldsedge_id=we_id, match_id=match_id, channel_id=channel_id, map_name=map_name,
+			game_key=key, fingerprint=fingerprint, worldsedge_id=we_id, match_id=match_id, channel_id=channel_id, map_name=map_name,
 			map_category=category, lobby=lobby, team_size=team_size, duration_s=_secs(result['duration']),
 			source=source, uploaded_by=uploaded_by, rec_profile_id=rec_profile_id,
 			analysis_version=ANALYSIS_VERSION, at=now
@@ -170,7 +193,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 		await db.delete('aoe_game_players', where=dict(game_key=key))
 		await db.insert_many('aoe_game_players', rows)
 		log.info(f"Saved replay insights for {key}: {len(rows)} players on {map_name} ({category}).")
-		return True
+		return key
 	except Exception as e:
 		log.error(f"Could not save replay insights for {key}: {e}")
-		return False
+		return None

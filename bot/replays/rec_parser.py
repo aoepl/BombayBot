@@ -65,10 +65,11 @@ def _de_string(data):
 def _read_players(header, save, extra_string):
 	""" Mirror of mgz.fast.header.parse_de up to the player block, with an optional extra per-player string. """
 	u = lambda fmt: struct.unpack(fmt, header.read(struct.calcsize(fmt)))  # noqa: E731
+	started_at = None
 	if save >= 25.22:
 		u('<I')
 	if save >= 26.16:
-		u('<I')
+		started_at, = u('<I')  # unix time the game started
 	header.read(12)
 	for _ in range(u('<I')[0]):
 		u('<I')
@@ -129,7 +130,7 @@ def _read_players(header, save, extra_string):
 				number=number, name=name, profile_id=profile_id, civ_id=civ_id,
 				team_id=team_id, color_id=color_id, type=ptype
 			))
-	return players, rms_map_id
+	return players, rms_map_id, started_at
 
 
 def _map_name(header_bytes, rms_map_id):
@@ -151,9 +152,9 @@ def read_players(raw: bytes):
 	for extra in (save >= 68.0, save < 68.0):
 		header.seek(start)
 		try:
-			players, rms_map_id = _read_players(header, save, extra)
+			players, rms_map_id, started_at = _read_players(header, save, extra)
 			if players and all(1 <= p['number'] <= 8 for p in players):
-				return save, players, _map_name(header.getvalue(), rms_map_id)
+				return save, players, _map_name(header.getvalue(), rms_map_id), started_at
 		except Exception as e:  # try the other layout
 			errors.append(str(e))
 	raise RecError(f"Could not read the player list (save {save}): {'; '.join(errors)}")
@@ -177,7 +178,7 @@ def parse(data: bytes) -> dict:
 	Returns dict(save, duration (ms), players [..], actions [{t, a, ...}], syncs [{t, <player>: {...}}], chat [...])
 	"""
 	raw = unwrap(data)
-	save, players, map_name = read_players(raw)
+	save, players, map_name, started_at = read_players(raw)
 
 	stream = io.BytesIO(raw)
 	header_len, = struct.unpack('<I', stream.read(4))
@@ -208,4 +209,4 @@ def parse(data: bytes) -> dict:
 			except Exception:
 				pass
 
-	return dict(save=save, map_name=map_name, duration=t, players=players, actions=actions, syncs=syncs, chat=chat)
+	return dict(save=save, map_name=map_name, started_at=started_at, duration=t, players=players, actions=actions, syncs=syncs, chat=chat)
