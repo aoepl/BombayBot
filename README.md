@@ -37,9 +37,9 @@ nano config.cfg
   # Rebuild after code changes                                                                                                                                                                                           
   docker compose up -d --build
 ```
-### Player strats and civ statistics
+### Player stats and civ statistics
 Reports over the games analysed in the queue channel (uploads and automatic breakdowns):
-* `/aoe strats [player]`: games and win rate; flank and pocket games with their win rates; average APM; how the player
+* `/aoe stat [player]`: games and win rate; flank and pocket games with their win rates; average APM; how the player
   does against their BombayBot Elo (average difference and how often above or below); their best position, army style
   (Cavalry, Archers, Cavalry archers, Infantry, Gunpowder, Monks, Naval, from their main unit line) and strategy
   (opening plus boom), each by average score over 2+ games; **individual luck**, the share of those bests they got

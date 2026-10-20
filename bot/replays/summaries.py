@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Reports over the saved games (insights.py): a player's strats (/aoe strats) and civ statistics (/aoe civs).
+Reports over the saved games (insights.py): a player's stats (/aoe stat) and civ statistics (/aoe civs).
 Only games analysed in the asking queue channel are used. Everything here is pure functions over rows, so it
 can be tested without Discord; load_rows() is the only database call.
 """
@@ -95,7 +95,7 @@ def _got_best(row, best):
 	return sum(1 for b, v in checks if b == v) / len(checks) if checks else None
 
 
-# ---------- /aoe strats
+# ---------- /aoe stat
 
 def player_summary(all_rows, user_id):
 	mine = [r for r in all_rows if r.get('user_id') == user_id]
@@ -140,7 +140,7 @@ def player_summary(all_rows, user_id):
 
 
 def strats_lines(s):
-	""" The /aoe strats reply as (field name, value) pairs. """
+	""" The /aoe stat reply as (field name, value) pairs. """
 	verdict = "—"
 	if s['avg_delta'] is not None:
 		d = s['avg_delta']

@@ -779,7 +779,7 @@ async def _aoe_names(
 ): await run_slash(bot.commands.aoe_names, interaction=interaction, player=player)
 
 
-@groups.aoe.subcommand(name='strats', description='A player\'s record from analysed games: positions, APM, Elo, luck.')
+@groups.aoe.subcommand(name='stat', description='A player\'s record from analysed games: positions, APM, Elo, luck.')
 async def _aoe_strats(
 		interaction: Interaction,
 		player: Member = SlashOption(required=False, verify=False)
