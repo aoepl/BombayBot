@@ -781,6 +781,14 @@ async def _aoe_names(
 
 # replay -> ...
 
+@groups.replay.subcommand(name='auto_replay_off', description='Moderators: stop automatic game breakdowns of reported matches here.')
+async def _replay_auto_off(interaction: Interaction): await run_slash(bot.commands.replay_auto_off, interaction=interaction)
+
+
+@groups.replay.subcommand(name='auto_replay_on', description='Moderators: turn automatic game breakdowns of reported matches back on.')
+async def _replay_auto_on(interaction: Interaction): await run_slash(bot.commands.replay_auto_on, interaction=interaction)
+
+
 @groups.replay.subcommand(name='upload', description='Analyse a recorded game file (.aoe2record or .zip).')
 async def _replay_upload(
 		interaction: Interaction,

@@ -300,6 +300,15 @@ class QueueChannel:
 					"Leave empty to post /replay upload breakdowns in this queue channel."
 			),
 			Variables.BoolVar(
+				"replay_auto",
+				display="Automatic game breakdowns",
+				section="Replays",
+				description="Look up, analyse and post the recorded game of every reported match (needs a forum channel "
+					"as the replay forum). Turn off with /replay auto_replay_off.",
+				default=1,
+				notnull=True
+			),
+			Variables.BoolVar(
 				"replay_ai",
 				display="AI game recap",
 				section="Replays",

@@ -57,6 +57,8 @@ Setup (optional):
 * Uploading a game that is already posted updates that post in place (new Elo links, latest scoring) instead of posting again.
 * Posts go to the queue channel. To post them in a forum instead (and turn on automatic breakdowns):
   `/channel set variable:replay_forum value:#game-breakdowns`. A text channel works too, without the automatic part.
+* Turn the automatic part off (keeping the forum) with `/replay auto_replay_off`, back on with `/replay auto_replay_on`
+  (moderators; stored as the `replay_auto` channel setting).
 * Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
 What the breakdown shows:

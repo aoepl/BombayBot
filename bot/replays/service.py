@@ -421,8 +421,8 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 # ---------- automatic fetch after a pickup match is reported
 
 def _auto_enabled(qc):
-	""" Only with a dedicated replay forum: a forum channel set as replay_forum. """
-	return isinstance(getattr(qc.cfg, 'replay_forum', None), ForumChannel)
+	""" Only with a dedicated replay forum (a forum channel set as replay_forum) and replay_auto on. """
+	return bool(getattr(qc.cfg, 'replay_auto', 1)) and isinstance(getattr(qc.cfg, 'replay_forum', None), ForumChannel)
 
 
 def schedule(match):
