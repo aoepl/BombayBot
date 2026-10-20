@@ -295,8 +295,9 @@ class QueueChannel:
 				"replay_forum",
 				display="Replay forum",
 				section="Replays",
-				description="Forum channel (or text channel) where /replay upload posts game breakdowns. "
-					"Leave empty to post them in this queue channel."
+				description="Forum channel (or text channel) where game breakdowns are posted. With a forum channel, "
+					"the bot also finds, analyses and posts the recorded game of every reported match automatically. "
+					"Leave empty to post /replay upload breakdowns in this queue channel."
 			),
 			Variables.BoolVar(
 				"replay_ai",

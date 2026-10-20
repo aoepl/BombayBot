@@ -41,9 +41,22 @@ nano config.cfg
 Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).
 BombayBot analyses it, saves every player's performance (see Player insights) and posts a breakdown of the game.
 
+Automatic breakdowns: when a queue channel's `replay_forum` is a **forum channel**, every reported match is looked
+up on World's Edge (the game's own match history, also used by AoE2 Insights and AoE2 Companion) about 90 seconds
+after the report, retrying for about 20 minutes. The bot searches the history of the highest-rated players whose
+AoE2 profile it knows, downloads the highest-rated player's recording and posts the breakdown in the forum,
+mentioning the players. It stops looking as soon as a member uploads that game with `/replay upload`. Profile ids
+are learned from uploaded recordings (each recording lists every player's profile id, saved against the member
+their name matched), so a player needs to appear in one uploaded game first.
+
+Posts never attach the recording, to save the server's Discord storage. They link to the official download
+(`aoe.ms/replay`) and the match pages on AoE2 Insights and AoE2 Companion. The match id comes from the file name
+(`AgeIIDE_Replay_<id>`) or from a World's Edge lookup by players and start time.
+
 Setup (optional):
 * Uploading a game that is already posted updates that post in place (new Elo links, latest scoring) instead of posting again.
-* Posts go to the queue channel. To post them in a forum instead: `/channel set variable:replay_forum value:#game-breakdowns`.
+* Posts go to the queue channel. To post them in a forum instead (and turn on automatic breakdowns):
+  `/channel set variable:replay_forum value:#game-breakdowns`. A text channel works too, without the automatic part.
 * Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
 What the breakdown shows:
