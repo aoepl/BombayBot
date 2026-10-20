@@ -120,8 +120,19 @@ async def bombay_players_by_name(qc, names):
 	matched = {key: next(iter(ids)) for key, ids in candidates.items() if len(ids) == 1}
 	if not matched:
 		return {}
-	elos = {r['user_id']: r['rating'] for r in await qc.rating.get_players(matched.values())}
-	return {wanted[key]: dict(user_id=uid, elo=elos.get(uid)) for key, uid in matched.items()}
+	elos = {r['user_id']: r['rating'] for r in await qc.rating.get_players(list(matched.values()))}
+	return {wanted[key]: dict(user_id=uid, elo=elos.get(uid), via='linked name' if key in linked else 'Discord name')
+		for key, uid in matched.items()}
+
+
+def elo_report(rec, found):
+	""" One line for the uploader: who got a BombayBot Elo (and how), and who could not be matched. """
+	got = [f"{n} {i['elo']} ({i['via']})" for n, i in found.items() if i.get('elo') is not None]
+	missing = [p['name'] for p in rec['players'] if p['name'] not in found or found[p['name']].get('elo') is None]
+	text = f"Elo found: {', '.join(got)}." if got else "No BombayBot Elo found for any player."
+	if missing:
+		text += f" No match: {', '.join(missing)} (link with `/aoe link`)."
+	return text
 
 
 # ---------- one post per game
@@ -175,21 +186,13 @@ def _winner_text(result):
 	return " & ".join(p['civ'] for p in winners) + " win"
 
 
-async def publish(qc, result, rec_bytes, map_name=None, lobby=None, title=None, footer=None, reply_ctx=None):
+async def publish(qc, result, rec_bytes, map_name=None, lobby=None, title=None, footer=None, reply_ctx=None, reply_extra=None):
 	"""
 	Create the forum post (or, with no forum set, a message in the queue channel).
 	Returns dict(channel_id, thread_id, message_id, url) describing the post.
 	"""
-	narrative = None
-	if getattr(qc.cfg, 'replay_ai', True) and cfg.GOOGLE_AI_API_KEY:
-		try:
-			from bot.bombay.ai import generate_replay_summary
-			narrative = await generate_replay_summary(post.text_for_ai(result, map_name, lobby))
-		except Exception as e:
-			log.error(f"Replay AI summary failed: {e}")
-
 	title = title or f"{map_name or 'Game'} — {_winner_text(result)}"
-	embed = post.build_embed(result, title, narrative=narrative, footer=footer)
+	embed = await _render(qc, result, title, map_name, lobby, footer)
 	file = _rec_file(rec_bytes, title)
 	content = "Discuss the game here. The recorded game is attached."
 	extra = dict(file=file) if file else {}
@@ -210,10 +213,45 @@ async def publish(qc, result, rec_bytes, map_name=None, lobby=None, title=None, 
 
 	link = posted['url'] or (f"<#{posted['thread_id']}>" if posted.get('thread_id') else "")
 	if reply_ctx:
-		await reply_ctx.reply(f"Game breakdown posted: {link}")
+		await reply_ctx.reply(f"Game breakdown posted: {link}" + (f"\n{reply_extra}" if reply_extra else ""))
 	elif forum is not None:
 		await _notify(qc, f"Game breakdown for {title}: {link}")
 	return posted
+
+
+async def _render(qc, result, title, map_name=None, lobby=None, footer=None):
+	narrative = None
+	if getattr(qc.cfg, 'replay_ai', True) and cfg.GOOGLE_AI_API_KEY:
+		try:
+			from bot.bombay.ai import generate_replay_summary
+			narrative = await generate_replay_summary(post.text_for_ai(result, map_name, lobby))
+		except Exception as e:
+			log.error(f"Replay AI summary failed: {e}")
+	return post.build_embed(result, title, narrative=narrative, footer=footer)
+
+
+async def update_post(qc, row, result, title, map_name=None, footer=None):
+	"""
+	Re-render an existing post with a fresh analysis (new Elo links, new scoring rules).
+	Forum posts: the starter message has the thread's id. Returns True when the post was edited.
+	"""
+	try:
+		embed = await _render(qc, result, title, map_name, footer=footer)
+		if row.get('message_id'):
+			channel = dc.get_channel(row['channel_id']) or await dc.fetch_channel(row['channel_id'])
+			msg = await channel.fetch_message(row['message_id'])
+		else:
+			thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
+			msg = await thread.fetch_message(row['thread_id'])
+		await msg.edit(embed=embed)
+		if row.get('thread_id'):
+			thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
+			if getattr(thread, 'name', title[:100]) != title[:100]:
+				await thread.edit(name=title[:100])
+		return True
+	except Exception as e:  # never fail the upload because the old post could not be edited
+		log.error(f"Could not update replay post: {e}")
+		return False
 
 
 def _rec_file(rec_bytes, title):
@@ -242,7 +280,10 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 	rec = await asyncio.to_thread(rec_parser.parse, data)
 	fp = insights.fingerprint(rec)
 	meta = {}
-	for name, info in (await bombay_players_by_name(qc, [p['name'] for p in rec['players']])).items():
+	found = await bombay_players_by_name(qc, [p['name'] for p in rec['players']])
+	log.info(f"Replay Elo lookup: {found}")
+	report = elo_report(rec, found)
+	for name, info in found.items():
 		for p in rec['players']:
 			if p['name'] == name:
 				meta[p['profile_id']] = dict(elo=info['elo'], user_id=info['user_id'])
@@ -257,19 +298,23 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 	if not summary:
 		if not saved:
 			raise ReplayError("The recorded game was read, but its stats could not be saved.")
-		await ctx.success(f"Saved player stats from **{title}** ({len(result['players'])} players). No summary posted.")
+		await ctx.success(f"Saved player stats from **{title}** ({len(result['players'])} players). No summary posted.\n{report}")
 		return
 
 	existing = await _live_post(key=key, fingerprint=fp)
 	if existing or key in _posting or fp in _posting:
 		url = existing.get('post_url') if existing else None
-		await ctx.success(f"This game has already been posted{': ' + url if url else '.'} Player stats were refreshed.")
+		where = f": {url}" if url else "."
+		if existing and await update_post(qc, existing, result, title, rec.get('map_name'), footer=f"Uploaded by {get_nick(ctx.author)}"):
+			await ctx.success(f"This game was already posted, so the post was updated with the latest Elo and stats{where}\n{report}")
+		else:
+			await ctx.success(f"This game has already been posted{where} Player stats were refreshed.\n{report}")
 		return
 	_posting.update((key, fp))
 	try:
 		posted = await publish(
 			qc, result, rec_bytes=rec_parser.unwrap(data), map_name=rec.get('map_name'), title=title,
-			footer=f"Uploaded by {get_nick(ctx.author)}", reply_ctx=ctx,
+			footer=f"Uploaded by {get_nick(ctx.author)}", reply_ctx=ctx, reply_extra=report,
 		)
 		await _record_post(key, fp, posted)
 	finally:

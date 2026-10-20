@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 16
+ANALYSIS_VERSION = 30
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -87,6 +87,11 @@ db.ensure_table(dict(
 		dict(cname="villagers", ctype=db.types.int),  # unused since version 9, see villagers_queued
 		dict(cname="villagers_queued", ctype=db.types.int),
 		dict(cname="villagers_made", ctype=db.types.int),
+		dict(cname="villagers_killed", ctype=db.types.int),
+		dict(cname="feudal_uptime", ctype=db.types.float),
+		dict(cname="spend_per_min", ctype=db.types.int),
+		dict(cname="float_minutes", ctype=db.types.float),
+		dict(cname="fishing_ships_made", ctype=db.types.int),
 		dict(cname="villagers_lost", ctype=db.types.int),
 		dict(cname="villagers_peak", ctype=db.types.int),
 		dict(cname="villager_value", ctype=db.types.float),
@@ -217,7 +222,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				imperial_units=", ".join(parts.get('imperial_units', [])),
 				forward_castles=parts.get('forward_castles'), tower_creep=parts.get('tower_creep'),
 				feudal_s=_secs(s['ages'].get('Feudal Age')), castle_s=_secs(s['ages'].get('Castle Age')),
-				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers_queued=s['villagers_queued'], villagers_made=s.get('villagers_made'), villagers_lost=s.get('villagers_lost'), villagers_peak=s.get('villagers_peak'), villager_value=s.get('villager_value'),
+				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers_queued=s['villagers_queued'], villagers_made=s.get('villagers_made'), villagers_killed=s.get('villagers_killed'), feudal_uptime=s.get('feudal_uptime'), spend_per_min=s.get('spend_per_min'), float_minutes=s.get('float_minutes'), fishing_ships_made=s.get('fishing_ships_made'), villagers_lost=s.get('villagers_lost'), villagers_peak=s.get('villagers_peak'), villager_value=s.get('villager_value'),
 				unplanned_floating=s.get('floating'), trade_carts=s.get('trade_carts'),
 				macro_bonus=s.get('macro_bonus'), no_trade_penalty=s.get('no_trade_penalty'), avg_pop=s.get('avg_pop'), gold_starved=int(bool(s.get('gold_starved'))),
 				late_gold_share=s.get('late_gold_share'),

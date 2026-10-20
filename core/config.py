@@ -28,7 +28,7 @@ class _Config:
     WS_SSL_KEY_FILE = ""
     GOOGLE_AI_API_KEY = ""
     GOOGLE_AI_MODEL = "gemma-4-31b-it"
-    GOOGLE_AI_FALLBACK_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite"
+    GOOGLE_AI_FALLBACK_MODELS = "gemini-3.6-flash,gemini-3.5-flash-lite"
 
 
 cfg = _Config()
