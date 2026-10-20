@@ -781,15 +781,17 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 		stats[p]['trade_carts'] = trade[p]
 		stats[p]['macro_bonus'] = round(MACRO_BONUS * extra[p] / top_extra, 1) if top_extra else 0.0
 		stats[p]['villager_value'] = villager_value(stats[p].get('_vill_made') or stats[p]['_vill_times'], stats[p]['_attacked'], stats[p].get('_vill_alive'))
-	# Micro: value traded in fights. A unit that drops out within 2 minutes of its owner fighting counts as
-	# lost in that fight; its value is credited to the enemies who were fighting that player at that moment.
+	# Micro: value traded in fights. A unit that drops out while its owner was clearly fighting counts as lost
+	# in that fight; its value is credited to the enemies fighting that player then, by their share of orders.
+	# Conversions look the same as kills here, and count in full.
 	lost, killed = Counter(), Counter()
 	for p in pids:
 		for t_last, value in army[p]['_gone']:
 			m = int(t_last // 60000)
-			window = [army[p]['_fights'].get(k, {}) for k in (m - 1, m, m + 1, m + 2)]
-			if not any(window):
-				continue  # dropped out away from any fight: not counted
+			# Only counted when the owner was clearly fighting then (10+ army orders at enemies in a minute):
+			# late in the game units also stop being commanded because they sit idle or garrisoned.
+			if max(army[p]['_fight_orders'].get(k, 0) for k in (m - 1, m, m + 1, m + 2)) < FIGHT_MIN_ORDERS:
+				continue
 			lost[p] += value
 			credit = Counter()
 			for e in pids:
@@ -862,6 +864,7 @@ def gold_shortage(A, players, end):
 	return out
 
 
+FIGHT_MIN_ORDERS = 10  # army orders at enemies in a minute that mean a player was clearly fighting
 ENGAGE_RADIUS = 12  # tiles
 ENGAGE_WINDOW = 60000  # ms
 
@@ -999,12 +1002,18 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 			t_gone = seen[(pid, i)][1] + ARMY_ALIVE_GRACE
 			if t_gone < end - ARMY_ALIVE_GRACE:
 				gone.append((seen[(pid, i)][1], value_per_unit[min(minutes - 1, int(seen[(pid, i)][1] // 60000))]))
-		fights = defaultdict(Counter)  # minute -> enemy -> orders
+		# minute -> enemy -> orders. An order that went at several enemies (stacked armies) is split between
+		# them, so it is not counted in full against each one.
+		fights = defaultdict(Counter)
+		fight_orders = Counter()  # minute -> army orders at any enemy
 		for a in army_cmds:
-			for e in offensive.get(id(a), ()):
-				fights[int(a['t'] // 60000)][e] += 1
+			enemies = offensive.get(id(a), ())
+			if enemies:
+				fight_orders[int(a['t'] // 60000)] += 1
+			for e in enemies:
+				fights[int(a['t'] // 60000)][e] += 1 / len(enemies)
 		out[pid] = dict(
-			_gone=gone, _fights=fights, _alive=alive,
+			_gone=gone, _fights=fights, _fight_orders=fight_orders, _alive=alive,
 			army_apm=round(len(army_cmds) / army_minutes, 1),
 			targeted_share=round(targeted / offensive_cmds, 2) if offensive_cmds else 0.0,
 			avg_group=round(sum(group_sizes) / len(group_sizes), 1) if group_sizes else None,

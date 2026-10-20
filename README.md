@@ -75,7 +75,10 @@ What the breakdown shows:
   or building costing 600+ that the player starts within the next 2 minutes. Execution uses the same rules.
   Micro is about fights, not clicks, and is estimated because the replay has no kill data: a unit that stops
   being commanded during or right after a fight counts as lost there, and its value is credited to the enemies
-  fighting that player at the time. Micro weighs value traded (60%), how much fighting the player did (25%)
+  fighting that player at the time, split by how many orders each aimed at that player (an order at
+  stacked armies is split between them). A drop-out only counts when its owner was clearly fighting (10+ army
+  orders at enemies in a minute), since late-game units also go quiet when idle or garrisoned. Conversions
+  look the same as kills and count in full. Micro weighs value traded (60%), how much fighting the player did (25%)
   and target picking (15%). The Micro label also needs more value killed than lost (1.1 times or better).
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
   40% average army value on the map from 15 minutes on (units plus castles, Kreposts, Donjons and towers),
