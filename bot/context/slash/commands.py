@@ -1,7 +1,7 @@
 from typing import Callable
 from asyncio import wait_for, shield
 from asyncio.exceptions import TimeoutError as aTimeoutError
-from nextcord import Interaction, SlashOption, Member, TextChannel
+from nextcord import Interaction, SlashOption, Member, TextChannel, Attachment
 import traceback
 import time
 
@@ -753,3 +753,50 @@ async def _nick(
 		nick: str
 ): await run_slash(bot.commands.set_nick, interaction=interaction, nick=nick)
 
+
+
+# aoe -> ... (AoE2 account links)
+
+@groups.aoe.subcommand(name='link', description='Link your AoE2 account (profile id, Steam id, or AoE2 Insights link).')
+async def _aoe_link(
+		interaction: Interaction,
+		account: str = SlashOption(description="Profile id, Steam id, or a link to your AoE2 Insights / AoE2 Companion profile.")
+): await run_slash(bot.commands.aoe_link, interaction=interaction, identifier=account)
+
+
+@groups.aoe.subcommand(name='set', description='Link an AoE2 account for another member (moderators).')
+async def _aoe_set(
+		interaction: Interaction,
+		player: Member = SlashOption(verify=False),
+		account: str = SlashOption(description="Profile id, Steam id, or a profile link.")
+): await run_slash(bot.commands.aoe_set, interaction=interaction, player=player, identifier=account)
+
+
+@groups.aoe.subcommand(name='unlink', description='Remove an AoE2 account link.')
+async def _aoe_unlink(
+		interaction: Interaction,
+		player: Member = SlashOption(required=False, verify=False)
+): await run_slash(bot.commands.aoe_unlink, interaction=interaction, player=player)
+
+
+@groups.aoe.subcommand(name='profile', description='Show the AoE2 account linked to a member.')
+async def _aoe_profile(
+		interaction: Interaction,
+		player: Member = SlashOption(required=False, verify=False)
+): await run_slash(bot.commands.aoe_profile, interaction=interaction, player=player)
+
+
+# replay -> ...
+
+@groups.replay.subcommand(name='match', description='Find and post the game breakdown for a reported match (moderators).')
+async def _replay_match(
+		interaction: Interaction,
+		match_id: int = SlashOption(description="Bot match id, as shown in the results message.")
+): await run_slash(bot.commands.replay_match, interaction=interaction, match_id=match_id)
+
+
+@groups.replay.subcommand(name='upload', description='Analyse a recorded game file (.aoe2record or .zip).')
+async def _replay_upload(
+		interaction: Interaction,
+		file: Attachment = SlashOption(description="The recorded game.")
+): await run_slash(bot.commands.replay_upload, interaction=interaction, file=file)

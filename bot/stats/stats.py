@@ -154,6 +154,16 @@ async def register_match_unranked(ctx, m):
 			dict(match_id=m.id, channel_id=m.qc.id, user_id=p.id, nick=nick, team=team)
 		)
 
+	_schedule_replay(m)
+
+
+def _schedule_replay(m):
+	""" Look up, analyse and post the recorded game in the background (no-op unless replay_forum is set). """
+	try:
+		bot.replays.schedule(m)
+	except Exception as e:
+		log.error(f"Could not schedule replay analysis for match {m.id}: {e}")
+
 
 async def register_match_ranked(ctx, m):
 	now = int(time.time())
@@ -230,6 +240,7 @@ async def register_match_ranked(ctx, m):
 
 	await m.qc.update_rating_roles(*m.players)
 	await m.print_rating_results(ctx, before, after)
+	_schedule_replay(m)
 
 
 async def undo_match(ctx, match_id):

@@ -3,3 +3,4 @@
 /data/
 /config.cfg
 /.idea/misc.xml
+__pycache__/

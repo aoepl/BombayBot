@@ -37,6 +37,30 @@ nano config.cfg
   # Rebuild after code changes                                                                                                                                                                                           
   docker compose up -d --build
 ```
+### Game breakdowns from recorded games
+When a match is reported, BombayBot can find the game on World's Edge, download the recorded game
+uploaded by the highest-rated player, and open a forum post with a breakdown of the game and every
+player's performance. Players discuss the game in that post, and the recorded game is attached.
+
+Setup:
+1. Create a forum channel, then set it for the queue channel: `/channel set variable:replay_forum value:#game-breakdowns`.
+2. Every player links their AoE2 account once: `/aoe link account:<profile id, Steam id or AoE2 Insights link>`.
+3. Optional: set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
+
+How it works:
+* After `/report`, the bot waits about 90 seconds, then searches the linked players' World's Edge match
+  history for the game that finished closest to the report time. It keeps trying for about 20 minutes,
+  because recorded games take a little while to appear.
+* It downloads the recorded game of the player with the highest team-game rating and analyses it:
+  age-up times, army composition, castles (went up, deleted or likely destroyed), pressure on each base,
+  tributes and key moments.
+* Each player gets a strategy name (for example "Fast Castle boom → Scouts/Hussars + Cavalry Archers")
+  and four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
+  The overall score weighs them by seat (flank or pocket).
+* `/replay upload` analyses any recorded game a member attaches.
+
+The analysis reads player commands, not kills or damage, so treat scores as a guide.
+
 ## Credits
 Developer: **Leshaka**. Contact: leshkajm@ya.ru.  
 Used libraries: [discord.py](https://github.com/Rapptz/discord.py), [aiomysql](https://github.com/aio-libs/aiomysql), [emoji](https://github.com/carpedm20/emoji/), [glicko2](https://github.com/deepy/glicko2), [TrueSkill](https://trueskill.org/), [prettytable](https://github.com/jazzband/prettytable).

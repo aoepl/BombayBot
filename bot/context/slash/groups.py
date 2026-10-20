@@ -48,3 +48,13 @@ async def douche(interaction: Interaction):
 @dc.slash_command(name='predictions', **guild_kwargs)
 async def predictions(interaction: Interaction):
 	pass
+
+
+@dc.slash_command(name='aoe', **guild_kwargs)
+async def aoe(interaction: Interaction):
+	pass
+
+
+@dc.slash_command(name='replay', **guild_kwargs)
+async def replay(interaction: Interaction):
+	pass

@@ -41,3 +41,18 @@ async def generate_player_summary(stats_text: str) -> str | None:
 		)
 	)
 	return resp.text
+
+
+async def generate_replay_summary(game_text: str) -> str | None:
+	resp = await _get_client().aio.models.generate_content(
+		model="gemma-4-31b-it",
+		contents=(
+			"You are a caster recapping a finished Age of Empires II team game for the community that played it. "
+			"Write a 6-10 sentence recap from the data provided: how each side played, the turning point, "
+			"who carried and who struggled. Name players and civs, quote the timings and numbers given, "
+			"and do not invent events, units or kills that are not in the data. "
+			"Plain text only, no markdown, keep it under 1400 characters.\n\n"
+			f"{game_text}"
+		)
+	)
+	return resp.text
