@@ -1369,12 +1369,29 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	)
 
 
-MOMENTS_MAX = 5
-BATTLE_MIN = 1000     # army value killed (both players) in 3 minutes that makes a major fight between two players
-RAID_MIN = 4          # villagers of one player killed by one raider in one burst that make a big raid
+MOMENTS_MAX = 6  # the 5 biggest events plus the resignation that ends the analysis
+BATTLE_MIN = 500      # army value killed (both players) in 3 minutes that makes a fight worth listing
+RAID_MIN = 3          # villagers of one player killed by one raider in one burst that make a raid worth listing
+RAID_VILLAGER_WEIGHT = 300  # a villager killed counts like this much army value when picking moments
 RAID_GAP = 60000      # kills more than a minute apart are separate raids
 LATE_WINDOW = 3 * 60000  # events this close to the end of the analysis count half when picking moments
 ELIMINATED_GAP = 3 * 60000  # stopped giving orders this long before the end without resigning
+
+
+EPISODE_GAP = 5 * 60000  # fights or raids between the same two players less than 5 minutes apart are one moment
+
+
+def _episodes(items, time_of):
+	""" Split time-sorted items into runs whose consecutive starts are less than EPISODE_GAP apart. """
+	out, cur = [], []
+	for it in items:
+		if cur and time_of(it) - time_of(cur[-1]) > EPISODE_GAP:
+			out.append(cur)
+			cur = []
+		cur.append(it)
+	if cur:
+		out.append(cur)
+	return out
 
 
 def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0):
@@ -1415,14 +1432,22 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 				ka = sum(pair[(a, b)].get(k, 0) for k in (m, m + 1, m + 2))  # a killed of b
 				kb = sum(pair[(b, a)].get(k, 0) for k in (m, m + 1, m + 2))
 				fights.append((ka + kb, m, a, b, ka, kb))
-		used = defaultdict(set)
+		# Every fight window of a pair, then one line per pair covering all its fights.
+		used, per_pair = defaultdict(set), defaultdict(list)
 		for size, m, a, b, ka, kb in sorted(fights, key=lambda f: -f[0]):
 			if size < BATTLE_MIN or used[(a, b)] & {m, m + 1, m + 2}:
 				continue
 			used[(a, b)].update(range(m - 2, m + 3))
-			win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
-			ev.append((size, m * 60000, f"Major fight: {name(win)} beat {name(lose)} "
-				f"({round(kw):,} army value killed vs {round(kl):,})"))
+			per_pair[(a, b)].append((m, ka, kb))
+		for (a, b), windows in per_pair.items():
+			for episode in _episodes(sorted(windows), lambda w: w[0] * 60000):
+				ka, kb = sum(w[1] for w in episode), sum(w[2] for w in episode)
+				first, last_m = episode[0][0], episode[-1][0]
+				win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
+				when = f" ({mmss(first * 60000)}–{mmss((last_m + 3) * 60000)})" if len(episode) > 1 else ""
+				late = all(m * 60000 >= end - LATE_WINDOW for m, _, _ in episode) if end else False
+				ev.append(((ka + kb) * (0.5 if late else 1), first * 60000,
+					f"{name(win)} fought {name(lose)}: {round(kw):,} vs {round(kl):,} army value killed{when}"))
 
 	# Big raids: one player killing many of another player's villagers in one burst (kills under a minute apart).
 	if vest:
@@ -1440,9 +1465,12 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 					cur.append(t)
 				if cur:
 					bursts.append(cur)
-				for b in bursts:
-					if len(b) >= RAID_MIN:
-						ev.append((len(b) * VILLAGER_KILL_VALUE * 2, b[0], f"{name(raider)} raided {name(p)}: {len(b)} villagers killed"))
+				raids = [b for b in bursts if len(b) >= RAID_MIN]
+				for episode in _episodes(raids, lambda b: b[0]):  # raids on the same player close together: one line
+					n = sum(len(b) for b in episode)
+					weight = sum(len(b) * RAID_VILLAGER_WEIGHT * (0.5 if end and b[0] >= end - LATE_WINDOW else 1) for b in episode)
+					when = f" ({mmss(episode[0][0])}–{mmss(episode[-1][-1])})" if len(episode) > 1 else ""
+					ev.append((weight, episode[0][0], f"{name(raider)} raided {name(p)}: {n} villagers killed{when}"))
 
 	for c in castles:
 		if c['status'] == 'lost':
@@ -1459,9 +1487,6 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 			ev.append((10 ** 6, t, f"{name(p)} ({players[p]['civ']}) was eliminated (stopped playing, e.g. king killed)"))
 
 	first_resign = min(resigns.items(), key=lambda kv: kv[1]) if resigns else None
-	# The last minutes before the game is decided are mostly mop-up: they count half, so turning points win.
-	if end:
-		ev = [(size * (0.5 if t >= end - LATE_WINDOW else 1), t, text) for size, t, text in ev]
 	top = sorted(ev, key=lambda e: -e[0])[:MOMENTS_MAX - (1 if first_resign else 0)]
 	out = [(t, text) for _, t, text in top]
 	if first_resign:

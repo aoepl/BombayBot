@@ -65,8 +65,9 @@ Setup (optional):
 * Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
 What the breakdown shows:
-* Key moments: at most 5 events, the biggest ones, in time order: major fights between two players (1,000+
-  army value killed in 3 minutes, so a sea fight and a land fight at the same time stay apart), big raids (4+
+* Key moments: the 5 biggest events, in time order, raids or fights between the same two players less than 5
+  minutes apart are merged into one line with the time span: fights between two players (500+
+  army value killed in 3 minutes, so a sea fight and a land fight at the same time stay apart), raids (3+
   villagers of one player killed by one raider in one burst, kills under a minute apart; events in the last 3
   minutes before the game is decided count half when picking), castles destroyed, players eliminated (orders
   stop well before the end with no resignation, e.g. a regicide king killed) and the resignation that ends the analysis.
