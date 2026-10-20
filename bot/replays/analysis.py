@@ -530,6 +530,17 @@ NORMAL_FLOAT = 400    # a little bank is normal
 ATTACK_MINUTE_ORDERS = 10  # enemy army orders into a base in one minute that count as an attack
 TRADE_CART_VALUE = 150  # resources a trade cart stands for in the macro bonus
 MACRO_BONUS = 1.0
+# Gold shortage without trade: checked over the last 15 minutes analysed, in games of 40+ minutes.
+GOLD_CHECK_GAME = 40 * 60000
+GOLD_WINDOW = 15 * 60000
+LOW_GOLD_SHARE = 0.20      # gold under 20% of what the player spent
+MARKET_SOLD_SIGN = 1000    # selling this much at the Market for gold is a sign gold income dried up
+CARTS_ENOUGH = 20          # this many trade carts (any time) means the player answered the shortage
+GOLD_TRIB_ENOUGH = 2000    # gold tributed in by allies over the window covers the shortage too
+NO_TRADE_PENALTY = 1.0
+# Buildings that can take a new gold mine: Mining Camp, the Georgian Mule Cart, and the Muisca drop site
+# (object 2556, not yet named in the reference data).
+MINING_SITES = {'Mining Camp', 'Mule Cart', '2556'}
 REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of an attack on the base are replacements
 
 
@@ -598,8 +609,10 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 	"""
 	Macro: steady villager and military production, a big army on the map, villagers queued (full value up to
 	120, less after, none after 150 unless replacing villagers after an attack), and little unplanned floating
-	(not counted near 200 population or when saving for a big purchase). Bonus of up to 1 point, never a
-	penalty: trade carts made and resources tributed to allies.
+	(not counted near 200 population or when saving for a big purchase). Bonus of up to 1 point: trade carts
+	made and resources tributed to allies. Not trading only costs points (up to 1) when the player ran out of
+	gold income late in the game (little gold spent, Market selling or no new Mining Camps) and made no trade
+	carts and got no gold from allies; a player still mining gold is never penalised for not trading.
 	Micro (estimated; the replay has no kill data): value traded in fights (enemy army value that dropped out
 	while fighting this player vs own army value that dropped out while fighting), how much fighting the player
 	did, and target picking. Lots of clicking without fighting, or fights that lose the army, score low.
@@ -629,7 +642,16 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 	# Bonus only (never a penalty): trade carts and tributes sent to allies add up to MACRO_BONUS points.
 	extra = {p: trade[p] * TRADE_CART_VALUE + trib_out[p] for p in pids}
 	top_extra = max(extra.values(), default=0)
+	gold_short = gold_shortage(A, players, end)
 	for p in pids:
+		g = gold_short[p]
+		penalty = 0.0
+		if g['starved']:
+			penalty = NO_TRADE_PENALTY * (1 - min(1.0, trade[p] / CARTS_ENOUGH)) * (1 - min(1.0, g['gold_in'] / GOLD_TRIB_ENOUGH))
+		stats[p]['gold_starved'] = g['starved']
+		stats[p]['late_gold_share'] = g['share']
+		stats[p]['late_market_sold'] = g['sold']
+		stats[p]['no_trade_penalty'] = round(penalty, 1)
 		stats[p]['trade_carts'] = trade[p]
 		stats[p]['macro_bonus'] = round(MACRO_BONUS * extra[p] / top_extra, 1) if top_extra else 0.0
 		stats[p]['villager_value'] = villager_value(stats[p]['_vill_times'], stats[p]['_attacked'])
@@ -664,12 +686,54 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 		(0.15, _minmax({p: army[p]['targeted_share'] for p in pids})),
 	]
 	for p in pids:
-		macro = round(min(10.0, sum(part[p] for part in macro_parts) / len(macro_parts) + stats[p]['macro_bonus']), 1)
+		macro = sum(part[p] for part in macro_parts) / len(macro_parts) + stats[p]['macro_bonus'] - stats[p]['no_trade_penalty']
+		macro = round(max(1.0, min(10.0, macro)), 1)
 		micro = round(sum(w * part[p] for w, part in micro_parts), 1)
 		good_micro = micro >= 6.0 and (army[p]['trade_ratio'] or 0) >= 1.1  # must win its fights on value
 		label = ("Macro + Micro" if macro >= 6.0 and good_micro else "Macro" if macro >= 6.0
 			else "Micro" if good_micro else "Neither stood out")
 		stats[p]['macro'], stats[p]['micro'], stats[p]['playstyle'] = macro, micro, label
+
+
+def gold_shortage(A, players, end):
+	"""
+	Did each player run out of gold income late in the game? The replay has no per-resource bank, so this uses
+	what the player spent: over the last 15 minutes analysed (games of 40+ minutes only), gold under 20% of
+	spending, plus either selling 1000+ at the Market or building no new Mining Camp (or Mule Cart / Muisca
+	drop site) in that window.
+	"""
+	out = {p: dict(starved=False, share=None, sold=0, gold_in=0) for p in players}
+	if end < GOLD_CHECK_GAME:
+		return out
+	t0 = end - GOLD_WINDOW
+	costs, techs = _costs(), _costs_all().get('techs', {})
+	gold, total, sold, gold_in, camps = Counter(), Counter(), Counter(), Counter(), Counter()
+	for a in A:
+		if a['t'] < t0 or a['t'] > end:
+			continue
+		p = a.get('player_id')
+		if a['a'] == 'DE_QUEUE' and p in players:
+			c, n = costs.get(str(a['unit_id']), {}), a.get('amount', 1) or 1
+			gold[p] += c.get('gold', 0) * n
+			total[p] += sum(c.values()) * n
+		elif a['a'] == 'RESEARCH' and p in players:
+			c = techs.get(str(a.get('technology_id')), {})
+			gold[p] += c.get('gold', 0)
+			total[p] += sum(c.values())
+		elif a['a'] == 'BUILD' and p in players:
+			c = costs.get(str(a['building_id']), {})
+			total[p] += sum(c.values())
+			if _name('objects', a['building_id']) in MINING_SITES:
+				camps[p] += 1
+		elif a['a'] == 'SELL' and p in players:
+			sold[p] += 100 * (a.get('amount') or 1)
+		elif a['a'] == 'DE_TRIBUTE' and a.get('target_player_id') in players:
+			gold_in[a['target_player_id']] += a.get('gold') or 0
+	for p in players:
+		share = gold[p] / total[p] if total[p] else None
+		starved = share is not None and share < LOW_GOLD_SHARE and (sold[p] >= MARKET_SOLD_SIGN or not camps[p])
+		out[p] = dict(starved=starved, share=round(share, 2) if share is not None else None, sold=sold[p], gold_in=round(gold_in[p]))
+	return out
 
 
 ENGAGE_RADIUS = 12  # tiles

@@ -184,6 +184,7 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"villagers queued {s['villagers_queued']} (includes replacements for killed villagers, not villagers alive); "
 				f"unplanned floating resources {s['floating']} on average (not counting near 200 population or saving "
 				f"for a big purchase); trade carts {s['trade_carts']}; "
+				f"{'ran out of gold income late (little gold spent, Market selling) and macro reduced ' + str(s['no_trade_penalty']) + ' for not making trade carts; ' if s.get('no_trade_penalty') else ''}"
 				f"playstyle {s['playstyle']} (macro {s['macro']}/10: steady villager and military production, army size, "
 				f"economy; micro {s['micro']}/10 from fights: estimated enemy army value killed "
 				f"{s['army']['value_killed_in_fights']} vs own army value lost {s['army']['value_lost_in_fights']}, "

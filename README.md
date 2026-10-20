@@ -57,7 +57,10 @@ What the breakdown shows:
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
   a label). Macro: steady villager and military production, army size, villagers and little unplanned
   floating, plus a bonus of up to 1 point for trade carts made and resources tributed to allies. Not trading
-  or tributing never lowers the score.
+  only costs points (up to 1) when a player ran out of gold income late in a 40+ minute game: in the last
+  15 minutes analysed, gold was under 20% of their spending and they sold 1000+ at the Market or built no new
+  Mining Camp (or Mule Cart / Muisca drop site), with no trade carts (20 remove the penalty) and no gold tributed in by allies. A player still
+  mining gold is never penalised for not trading.
   Villagers: each one queued counts in full up to 120, then less and less until 150, and nothing after that,
   unless the player's base was attacked in the previous 10 minutes (10+ enemy army orders into it in a minute,
   or an enemy castle built there): those are replacements for villagers that were killed and count in full.
