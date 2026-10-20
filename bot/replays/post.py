@@ -181,6 +181,7 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"Imperial {mmss(s['ages'].get('Imperial Age'))}; units queued: {units}; "
 				f"army orders into enemy bases {s['press_out']}{target}; enemy orders into own base {s['press_in']}, "
 				f"enemy castles built in own base {s['enemy_castles_in_base']} (cleared {s['enemy_castles_cleared']}); "
+				f"villagers queued {s['villagers_queued']} (includes replacements for killed villagers, not villagers alive); "
 				f"playstyle {s['playstyle']} (macro {s['macro']}/10: steady villager and military production, army size, "
 				f"economy; micro {s['micro']}/10 from fights: estimated enemy army value killed "
 				f"{s['army']['value_killed_in_fights']} vs own army value lost {s['army']['value_lost_in_fights']}, "

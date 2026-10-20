@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 8
+ANALYSIS_VERSION = 9
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -84,7 +84,8 @@ db.ensure_table(dict(
 		dict(cname="castle_s", ctype=db.types.int),
 		dict(cname="imperial_s", ctype=db.types.int),
 		dict(cname="apm", ctype=db.types.int),
-		dict(cname="villagers", ctype=db.types.int),
+		dict(cname="villagers", ctype=db.types.int),  # unused since version 9, see villagers_queued
+		dict(cname="villagers_queued", ctype=db.types.int),
 		dict(cname="score_exec", ctype=db.types.float),
 		dict(cname="score_pressure", ctype=db.types.float),
 		dict(cname="score_survival", ctype=db.types.float),
@@ -205,7 +206,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				imperial_units=", ".join(parts.get('imperial_units', [])),
 				forward_castles=parts.get('forward_castles'), tower_creep=parts.get('tower_creep'),
 				feudal_s=_secs(s['ages'].get('Feudal Age')), castle_s=_secs(s['ages'].get('Castle Age')),
-				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers=s['villagers'],
+				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers_queued=s['villagers_queued'],
 				score_exec=sc['exec'], score_pressure=sc['press'], score_survival=sc['surv'], score_team=sc['team'],
 				score_overall=sc['overall'], score_rank=s.get('score_rank'), elo_delta=s.get('elo_delta'),
 				elo_verdict=s.get('elo_verdict'), pressure_dealt=s.get('press_out'),

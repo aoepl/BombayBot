@@ -55,7 +55,8 @@ What the breakdown shows:
 * When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
-  a label). Macro: steady villager and military production, army size, villager count and little floating.
+  a label). Macro: steady villager and military production, army size, villagers queued (which includes
+  replacements for villagers that were killed, so it is not the number of villagers alive) and little floating.
   Micro is about fights, not clicks, and is estimated because the replay has no kill data: a unit that stops
   being commanded during or right after a fight counts as lost there, and its value is credited to the enemies
   fighting that player at the time. Micro weighs value traded (60%), how much fighting the player did (25%)
@@ -98,7 +99,7 @@ future features such as suggesting civs and seats for a map. Nothing reads it ye
 * `aoe_game_players`: one row per player per game: AoE2 profile and the Discord member matched by name, map and map category
   (Open, Semi Closed, Closed, Hybrid, Nomad or Other), civ, seat (flank or pocket), win or loss, BombayBot Elo,
   strategy (opening, Feudal units and whether they attacked, forward towers, boom, Castle Age and Imperial Age
-  armies, fast Imperial, forward castles, tower creep), age-up times, APM,
+  armies, fast Imperial, forward castles, tower creep), age-up times, villagers queued, APM,
   the four scores, overall score, rank in the lobby, performance against Elo, pressure dealt and taken, and tributes.
 
 The same game is never counted twice: re-analysing it replaces its rows. Games are matched by the game id in the file name (AgeIIDE_Replay_<id>), or by a fingerprint (start time, players, civs and teams). Example: best civs for one player on closed maps:

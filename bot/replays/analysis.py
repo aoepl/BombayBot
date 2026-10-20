@@ -193,7 +193,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			and base_of(a['x'], a['y']) != pid)
 		minutes = max(end / 60000, 1)
 		stats[pid] = dict(
-			ages=ages, units=units, villagers=vills, first_military=first_military, builds=bcount,
+			ages=ages, units=units, villagers_queued=vills, first_military=first_military, builds=bcount,
 			apm=round(len(mine) / minutes),
 			tc_built=bcount.get('Town Center', 0), tc_after_castle=tc_after_castle, tc_moves=tc_moves,
 			towers=sum(bcount.get(t, 0) for t in TOWERS),
@@ -339,7 +339,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	exec_parts = [
 		_minmax(castle_click, invert=True),
 		_minmax(imp_click, invert=True),
-		_minmax({p: stats[p]['villagers'] for p in pids}),
+		_minmax({p: stats[p]['villagers_queued'] for p in pids}),
 		_minmax({p: stats[p]['first_military'] for p in pids}, invert=True),
 		_minmax(peak_bank, invert=True),
 	]
@@ -503,7 +503,8 @@ def _steady(times, start, end):
 
 def playstyle(A, players, stats, army, peak_bank, end):
 	"""
-	Macro: steady villager and military production, a big army on the map, many villagers, little floating.
+	Macro: steady villager and military production, a big army on the map, many villagers queued (includes
+	replacements for villagers that were killed), little floating.
 	Micro (estimated; the replay has no kill data): value traded in fights (enemy army value that dropped out
 	while fighting this player vs own army value that dropped out while fighting), how much fighting the player
 	did, and target picking. Lots of clicking without fighting, or fights that lose the army, score low.
@@ -520,7 +521,7 @@ def playstyle(A, players, stats, army, peak_bank, end):
 		_minmax({p: _steady(vill_times[p], 0, min(end, castle_plus[p])) for p in pids}),
 		_minmax({p: _steady(mil_times[p], stats[p]['first_military'], end) for p in pids}),
 		_minmax({p: army[p]['avg_units'] for p in pids}),
-		_minmax({p: stats[p]['villagers'] for p in pids}),
+		_minmax({p: stats[p]['villagers_queued'] for p in pids}),
 		_minmax(peak_bank, invert=True),
 	]
 	# Micro: value traded in fights. A unit that drops out within 2 minutes of its owner fighting counts as
