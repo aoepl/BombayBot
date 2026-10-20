@@ -365,7 +365,11 @@ def _players_by_elo(rec, found):
 
 
 async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = True):
-	""" /replay upload: analyse a recorded game; post the breakdown unless summary is off. """
+	"""
+	/replay upload: analyse a recorded game and post the breakdown right away (unless summary is off).
+	The World's Edge lookup for the game links runs afterwards and adds them to the post when it finds the game,
+	so it never delays the post. A match id in the file name gives the links straight away.
+	"""
 	rec = await asyncio.to_thread(rec_parser.parse, data)
 	fp = insights.fingerprint(rec)
 	found = await bombay_players_by_name(qc, [p['name'] for p in rec['players']])
@@ -375,50 +379,99 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 	cancel_pending(rec, found)  # a member uploaded it: the automatic search for this game can stop
 
 	by_elo = _players_by_elo(rec, found)
-	if getattr(qc.cfg, 'replay_lookup', 1):
-		match_id, game = await locate(rec, filename, by_elo)
-	else:  # lookup off: no World's Edge calls and no links in the post
-		match_id, game = None, None
-	meta = worldsedge.match_meta(game) if game else {}
+	lookup = bool(getattr(qc.cfg, 'replay_lookup', 1))
+	named = None
+	if lookup and (m := re.search(r"Replay_(\d{6,})", filename or '')):
+		named = int(m.group(1))
+	meta = {}
 	for name, info in found.items():
 		for p in rec['players']:
 			if p['name'] == name:
-				meta.setdefault(p['profile_id'], {}).update(elo=info['elo'], user_id=info['user_id'])
+				meta[p['profile_id']] = dict(elo=info['elo'], user_id=info['user_id'])
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
-	key = insights.game_key(worldsedge_id=match_id) if match_id else insights.game_key(filename=filename, rec=rec)
-	lobby = game.get('description') if game else None
+	key = insights.game_key(filename=filename, rec=rec)
 	saved = await insights.save(
-		result, key, map_name=rec.get('map_name'), lobby=lobby, channel_id=qc.id, source='upload',
+		result, key, map_name=rec.get('map_name'), channel_id=qc.id, source='upload',
 		uploaded_by=ctx.author.id, fingerprint=fp
 	)
 	key = saved or key
 	title = post.make_title(result, rec.get('map_name'))
-	links = _links(match_id, by_elo, worldsedge.replay_urls(game) if game else None)
+	links = _links(named, by_elo) if named else None
+	later = dict(rec=rec, filename=filename, by_elo=by_elo, result=result, key=key, fp=fp, uploaded_by=ctx.author.id)
 	if not summary:
 		if not saved:
 			raise ReplayError("The recorded game was read, but its stats could not be saved.")
 		await ctx.success(f"Saved player stats from **{title}** ({len(result['players'])} players). No summary posted.\n{report}")
+		if lookup:
+			_spawn(_links_later(qc, None, **later))  # still find the World's Edge id, so the game is known by it
 		return
 
-	footer = f"Uploaded by {get_nick(ctx.author)}" + (f" · World's Edge game {match_id}" if match_id else "")
+	footer = f"Uploaded by {get_nick(ctx.author)}"
 	existing = await _live_post(key=key, fingerprint=fp)
 	if existing or key in _posting or fp in _posting:
 		url = existing.get('post_url') if existing else None
 		where = f": {url}" if url else "."
 		if existing and await update_post(qc, existing, result, title, rec.get('map_name'), footer=footer, links=links):
 			await ctx.success(f"This game was already posted, so the post was updated with the latest Elo and stats{where}\n{report}")
+			if lookup and not links:
+				_spawn(_links_later(qc, existing, **later))
 		else:
 			await ctx.success(f"This game has already been posted{where} Player stats were refreshed.\n{report}")
 		return
 	_posting.update((key, fp))
 	try:
 		posted = await publish(
-			qc, result, map_name=rec.get('map_name'), lobby=lobby, title=title,
+			qc, result, map_name=rec.get('map_name'), title=title,
 			footer=footer, reply_ctx=ctx, reply_extra=report, links=links,
 		)
 		await _record_post(key, fp, posted)
 	finally:
 		_posting.difference_update((key, fp))
+	if lookup and posted:
+		row = dict(channel_id=posted['channel_id'], thread_id=posted.get('thread_id'), message_id=posted.get('message_id'),
+			post_url=posted.get('url'))
+		_spawn(_links_later(qc, row, **later))
+
+
+def _spawn(coro):
+	asyncio.get_event_loop().create_task(coro)
+
+
+async def _links_later(qc, row, rec, filename, by_elo, result, key, fp, uploaded_by):
+	"""
+	After the post is up: find the game on World's Edge, store it under its match id (so the automatic fetch and
+	later uploads know it) and add the download and match links to the post.
+	"""
+	try:
+		match_id, game = await locate(rec, filename, by_elo)
+		if not match_id:
+			log.info("Replay links: game not found on World's Edge.")
+			return
+		we_key = insights.game_key(worldsedge_id=match_id)
+		if we_key != key:
+			await insights.save(
+				result, we_key, map_name=rec.get('map_name'), lobby=game.get('description') if game else None,
+				channel_id=qc.id, source='upload', uploaded_by=uploaded_by, fingerprint=fp
+			)
+			if row:
+				await _record_post(we_key, fp, dict(channel_id=row['channel_id'], thread_id=row.get('thread_id'),
+					message_id=row.get('message_id'), url=row.get('post_url')))
+		if row:
+			await _add_links(row, _links(match_id, by_elo, worldsedge.replay_urls(game) if game else None))
+	except Exception as e:  # links are a bonus: never let them break anything
+		log.error(f"Replay links failed: {e}")
+
+
+async def _add_links(row, links):
+	""" Edit the posted breakdown to add the game links, without re-rendering it (no new AI summary). """
+	if row.get('message_id'):
+		channel = dc.get_channel(row['channel_id']) or await dc.fetch_channel(row['channel_id'])
+		msg = await channel.fetch_message(row['message_id'])
+	else:
+		thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
+		msg = await thread.fetch_message(row['thread_id'])
+	if msg.embeds:
+		await msg.edit(embed=post.with_links(msg.embeds[0], links))
 
 
 # ---------- automatic fetch after a pickup match is reported

@@ -73,6 +73,37 @@ def _clip(text, limit):
 	return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
+LINKS_FIELD = "Recorded game"
+
+
+def links_value(links):
+	""" "[Download recorded game](...) · [AoE2 Insights](...) · [AoE2 Companion](...)" or None. """
+	if not links:
+		return None
+	parts = []
+	if links.get('replay'):
+		parts.append(f"[Download recorded game]({links['replay']})")
+	if links.get('insights'):
+		parts.append(f"[AoE2 Insights]({links['insights']})")
+	if links.get('companion'):
+		parts.append(f"[AoE2 Companion]({links['companion']})")
+	return " · ".join(parts) or None
+
+
+def with_links(embed, links):
+	""" Add (or replace) the game links in an existing post's embed, just before the score table. """
+	value = links_value(links)
+	if not value:
+		return embed
+	fields = [(f.name, f.value, f.inline) for f in embed.fields if f.name != LINKS_FIELD]
+	at = next((i for i, f in enumerate(fields) if f[0] == "Scores"), len(fields))
+	fields.insert(at, (LINKS_FIELD, value, False))
+	embed.clear_fields()
+	for name, val, inline in fields:
+		embed.add_field(name=name, value=val, inline=inline)
+	return embed
+
+
 def build_embed(result, title, narrative=None, footer=None, url=None, links=None):
 	won = [p for p in result['players'].values() if p['won']]
 	colour = Colour.dark_teal() if won else Colour.dark_grey()
@@ -101,16 +132,8 @@ def build_embed(result, title, narrative=None, footer=None, url=None, links=None
 		players = result['players']
 		value = ", ".join(f"{players[a]['name']} → {players[b]['name']} {v:,}" for a, b, v in result['tributes'][:6])
 		embed.add_field(name="Tributes", value=_clip(value, 1024), inline=False)
-	if links:
-		parts = []
-		if links.get('replay'):
-			parts.append(f"[Download recorded game]({links['replay']})")
-		if links.get('insights'):
-			parts.append(f"[AoE2 Insights]({links['insights']})")
-		if links.get('companion'):
-			parts.append(f"[AoE2 Companion]({links['companion']})")
-		if parts:
-			embed.add_field(name="Recorded game", value=" · ".join(parts), inline=False)
+	if value := links_value(links):
+		embed.add_field(name=LINKS_FIELD, value=value, inline=False)
 	embed.add_field(name="Scores", value=score_table(result), inline=False)
 	note = (
 		"Scores are 1–10 relative to this lobby. Survival is only scored when a base was seriously attacked (— otherwise). "

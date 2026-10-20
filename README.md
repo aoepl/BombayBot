@@ -51,7 +51,8 @@ their name matched), so a player needs to appear in one uploaded game first.
 
 Posts never attach the recording, to save the server's Discord storage. They link to the official download
 (`aoe.ms/replay`) and the match pages on AoE2 Insights and AoE2 Companion. The match id comes from the file name
-(`AgeIIDE_Replay_<id>`) or from a World's Edge lookup by players and start time.
+(`AgeIIDE_Replay_<id>`, links straight away) or from a World's Edge lookup by players and start time, which
+runs after the post is up and adds the links to it, so the post is never delayed.
 
 Setup (optional):
 * Uploading a game that is already posted updates that post in place (new Elo links, latest scoring) instead of posting again.
