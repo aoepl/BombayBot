@@ -62,7 +62,8 @@ def player_line(result, pid):
 	verdict = f" · {VERDICT_MARK[s['elo_verdict']]}" if s.get('elo_verdict') in VERDICT_MARK else ""
 	surv = sc['surv'] if sc['surv'] is not None else "—"
 	return (
-		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{elo} · **{sc['overall']}**/10{verdict}\n"
+		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{elo} · **{sc['overall']}**/10{verdict}"
+		f" · {s['playstyle']}\n"
 		f"> {s['strategy']}\n"
 		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} APM"
 		f" · Army {s['army']['avg_units']} avg / {s['army']['peak_units']} peak units"
@@ -110,13 +111,14 @@ def score_table(result):
 	players, stats = result['players'], result['stats']
 	order = sorted(players, key=lambda p: -stats[p]['scores']['overall'])
 	fmt = lambda v: f"{v:>4.1f}" if v is not None else "   —"  # noqa: E731
-	lines = ["Player        Exec Pres Surv Team Total W/L"]
+	lines = ["Player        Exec Pres Surv Team Total  Mac  Mic W/L"]
 	for pid in order:
 		p, sc = players[pid], stats[pid]['scores']
 		name = p['name'][:12].ljust(12)
 		result_txt = {True: "W", False: "L"}.get(p['won'], "-")
 		lines.append(
-			f"{name}  {fmt(sc['exec'])} {fmt(sc['press'])} {fmt(sc['surv'])} {fmt(sc['team'])}  {fmt(sc['overall'])}  {result_txt}"
+			f"{name}  {fmt(sc['exec'])} {fmt(sc['press'])} {fmt(sc['surv'])} {fmt(sc['team'])}  {fmt(sc['overall'])}"
+			f" {fmt(stats[pid]['macro'])} {fmt(stats[pid]['micro'])}  {result_txt}"
 		)
 	return _clip("```\n" + "\n".join(lines) + "\n```", 1024)
 
@@ -175,6 +177,10 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"Imperial {mmss(s['ages'].get('Imperial Age'))}; units queued: {units}; "
 				f"army orders into enemy bases {s['press_out']}{target}; enemy orders into own base {s['press_in']}, "
 				f"enemy castles built in own base {s['enemy_castles_in_base']} (cleared {s['enemy_castles_cleared']}); "
+				f"playstyle {s['playstyle']} (macro {s['macro']}/10: steady villager and military production, army size, "
+				f"economy; micro {s['micro']}/10 estimated from army commands per minute {s['army']['army_apm']}, "
+				f"{round(s['army']['targeted_share'] * 100)}% of attack orders aimed at a specific target, average group "
+				f"{s['army']['avg_group']} units, share of produced military kept alive {s['army']['units_kept']}); "
 				f"army on the map from 15 min: {s['army']['avg_units']} units on average, peak {s['army']['peak_units']}, "
 				f"average unit value {s['army']['unit_value']} (gold weighted most), army value sent at the enemy (its base, units or buildings) "
 				f"{s['army']['value_sent']}; tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "

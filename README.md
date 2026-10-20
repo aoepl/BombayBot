@@ -54,6 +54,10 @@ What the breakdown shows:
   Each age's army lists the two biggest unit lines plus any siege the player made (2 or more units).
 * When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
+* Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
+  a label). Macro: steady villager and military production, army size, villager count and little floating.
+  Micro is estimated, since the replay has no kill data: army commands per minute, share of attack orders
+  aimed at a specific enemy unit or building, smaller groups, and how much of the produced military stays alive.
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
   40% average army value on the map from 15 minutes on (units plus castles, Kreposts, Donjons and towers),
   45% army value sent at the enemy, and 15% forward castles and towers. An order counts as sent at the enemy

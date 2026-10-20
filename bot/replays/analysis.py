@@ -359,6 +359,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	press = {p: 0.40 * on_map[p] + 0.45 * sent[p] + 0.15 * forward[p] for p in pids}
 	for p in pids:
 		stats[p]['army'] = army[p]
+	playstyle(A, players, stats, army, peak_bank, end)
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
 	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
 	# orders into that base from 3 minutes before it was placed to 5 minutes after.
@@ -491,6 +492,50 @@ FEUDAL_NAMES = {
 NOT_ARMY = (MILITARY_SKIP - {'Monk'}) | {'Trade Cart', 'Trade Cog'}  # monk pushes are a strategy too
 
 
+def _steady(times, start, end):
+	""" Share of minutes between start and end with at least one unit queued. """
+	if start is None or end <= start:
+		return None
+	minutes = range(int(start // 60000), int(end // 60000) + 1)
+	busy = {int(t // 60000) for t in times}
+	return sum(1 for m in minutes if m in busy) / len(minutes)
+
+
+def playstyle(A, players, stats, army, peak_bank, end):
+	"""
+	Macro: steady villager and military production, a big army on the map, many villagers, little floating.
+	Micro (estimated; the replay has no kill data): army commands per minute, share of attack orders aimed
+	at a specific enemy unit or building, smaller groups, and how much of the produced military stays alive.
+	Both scores are 1-10 within the lobby; 6.0 or more earns the label.
+	"""
+	pids = list(players)
+	vill_times, mil_times = defaultdict(list), defaultdict(list)
+	for a in A:
+		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players:
+			n = _name('objects', a['unit_id'])
+			(vill_times if n == 'Villager' else mil_times)[a['player_id']].append(a['t'])
+	castle_plus = {p: (stats[p]['ages'].get('Castle Age') or end) + 10 * 60000 for p in pids}
+	macro_parts = [
+		_minmax({p: _steady(vill_times[p], 0, min(end, castle_plus[p])) for p in pids}),
+		_minmax({p: _steady(mil_times[p], stats[p]['first_military'], end) for p in pids}),
+		_minmax({p: army[p]['avg_units'] for p in pids}),
+		_minmax({p: stats[p]['villagers'] for p in pids}),
+		_minmax(peak_bank, invert=True),
+	]
+	micro_parts = [
+		_minmax({p: army[p]['army_apm'] for p in pids}),
+		_minmax({p: army[p]['targeted_share'] for p in pids}),
+		_minmax({p: army[p]['avg_group'] for p in pids}, invert=True),
+		_minmax({p: army[p]['units_kept'] for p in pids}),
+	]
+	for p in pids:
+		macro = round(sum(part[p] for part in macro_parts) / len(macro_parts), 1)
+		micro = round(sum(part[p] for part in micro_parts) / len(micro_parts), 1)
+		label = ("Macro + Micro" if macro >= 6.0 and micro >= 6.0 else "Macro" if macro >= 6.0
+			else "Micro" if micro >= 6.0 else "Neither stood out")
+		stats[p]['macro'], stats[p]['micro'], stats[p]['playstyle'] = macro, micro, label
+
+
 ENGAGE_RADIUS = 12  # tiles
 ENGAGE_WINDOW = 60000  # ms
 
@@ -603,7 +648,26 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 						sent.add((i, int(a['t'] // 60000)))  # each unit once per minute
 		window = range(min(15, minutes - 1), minutes)  # from 15 minutes on, when armies matter
 		on_map = [alive[m] * value_per_unit[m] + structures[m] for m in window]
+		# Micro inputs: how much the player controls the army, picks targets, splits groups and keeps units alive.
+		army_cmds = [a for a in A if a.get('player_id') == pid and any(i in military[pid] for i in (a.get('object_ids') or []))]
+		army_minutes = max(1.0, (end - min((seen[(pid, i)][0] for i in military[pid]), default=end)) / 60000)
+		targeted = sum(1 for a in army_cmds if id(a) in offensive and (a.get('target_id') or 0) > 0)
+		offensive_cmds = sum(1 for a in army_cmds if id(a) in offensive)
+		group_sizes = [len(a.get('object_ids') or []) for a in army_cmds if a['a'] in ARMY_ORDERS]
+		produced = [0] * minutes
+		cum = 0
+		j = 0
+		for m in range(minutes):
+			while j < len(q) and q[j][0] <= (m + 1) * 60000:
+				cum += q[j][2]
+				j += 1
+			produced[m] = cum
+		kept = [alive[m] / produced[m] for m in window if produced[m] >= 10]
 		out[pid] = dict(
+			army_apm=round(len(army_cmds) / army_minutes, 1),
+			targeted_share=round(targeted / offensive_cmds, 2) if offensive_cmds else 0.0,
+			avg_group=round(sum(group_sizes) / len(group_sizes), 1) if group_sizes else None,
+			units_kept=round(sum(kept) / len(kept), 2) if kept else None,
 			avg_units=round(sum(alive[m] for m in window) / len(window)),
 			peak_units=max(alive) if alive else 0,
 			avg_value_on_map=round(sum(on_map) / len(on_map)),
