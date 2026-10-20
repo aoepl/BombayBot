@@ -37,6 +37,17 @@ nano config.cfg
   # Rebuild after code changes                                                                                                                                                                                           
   docker compose up -d --build
 ```
+### Player strats and civ statistics
+Reports over the games analysed in the queue channel (uploads and automatic breakdowns):
+* `/aoe strats [player]`: games and win rate; flank and pocket games with their win rates; average APM; how the player
+  does against their BombayBot Elo (average difference and how often above or below); their best position, army style
+  (Cavalry, Archers, Cavalry archers, Infantry, Gunpowder, Monks, Naval, from their main unit line) and strategy
+  (opening plus boom), each by average score over 2+ games; **individual luck**, the share of those bests they got
+  per game; **team luck**, the share of their teammates' own bests the teammates got per game; most played civs.
+* `/aoe civs [map]`: win rate of every civ, overall or on one map (name or type, e.g. `Arena`, `Golden Lakes`,
+  `Closed`), and the best civs (2+ games) by BombayBot Elo range (under 1400, 1400–1599, 1600–1799, 1800+), by
+  position (flank, pocket) and by map.
+
 ### Game breakdowns from recorded games
 Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).
 BombayBot analyses it, saves every player's performance (see Player insights) and posts a breakdown of the game.
