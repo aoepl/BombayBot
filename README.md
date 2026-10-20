@@ -55,8 +55,14 @@ What the breakdown shows:
 * When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
-  a label). Macro: steady villager and military production, army size, villagers queued (which includes
-  replacements for villagers that were killed, so it is not the number of villagers alive) and little floating.
+  a label). Macro: steady villager and military production, army size, villagers, economy beyond villagers
+  (trade carts and tributes to allies) and little unplanned floating.
+  Villagers: each one queued counts in full up to 120, then less and less until 150, and nothing after that,
+  unless the player's base was attacked in the previous 10 minutes (10+ enemy army orders into it in a minute,
+  or an enemy castle built there): those are replacements for villagers that were killed and count in full.
+  Floating: resources banked from 10 minutes on count against the player, except near 200 population
+  (estimated from villagers queued, army on the map and trade carts) and money saved for a research, age-up
+  or building costing 600+ that the player starts within the next 2 minutes. Execution uses the same rules.
   Micro is about fights, not clicks, and is estimated because the replay has no kill data: a unit that stops
   being commanded during or right after a fight counts as lost there, and its value is credited to the enemies
   fighting that player at the time. Micro weighs value traded (60%), how much fighting the player did (25%)

@@ -28,6 +28,16 @@ def _costs():
 		return json.load(f)['costs']
 
 
+def tech_cost(tech_id):
+	return sum(_costs_all().get('techs', {}).get(str(tech_id), {}).values())
+
+
+@lru_cache(maxsize=1)
+def _costs_all():
+	with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'costs.json'), encoding='utf-8') as f:
+		return json.load(f)
+
+
 def unit_value(object_id):
 	""" Resource-weighted cost of a unit or building (gold counts most). """
 	return sum(RESOURCE_WEIGHTS.get(k, 1.0) * v for k, v in _costs().get(str(object_id), {}).items())
@@ -174,12 +184,14 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		units = Counter()
 		first_military = None
 		vills = 0
+		vill_times = []
 		for a in mine:
 			if a['a'] == 'DE_QUEUE':
 				n = _name('objects', a['unit_id'])
 				amt = a.get('amount', 1) or 1
 				if n == 'Villager':
 					vills += amt
+					vill_times += [a['t']] * amt
 				else:
 					units[n] += amt
 					if n not in MILITARY_SKIP and first_military is None:
@@ -193,7 +205,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			and base_of(a['x'], a['y']) != pid)
 		minutes = max(end / 60000, 1)
 		stats[pid] = dict(
-			ages=ages, units=units, villagers_queued=vills, first_military=first_military, builds=bcount,
+			ages=ages, units=units, villagers_queued=vills, _vill_times=vill_times, first_military=first_military, builds=bcount,
 			apm=round(len(mine) / minutes),
 			tc_built=bcount.get('Town Center', 0), tc_after_castle=tc_after_castle, tc_moves=tc_moves,
 			towers=sum(bcount.get(t, 0) for t in TOWERS),
@@ -336,13 +348,16 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	pids = list(players)
 	castle_click = {p: stats[p]['ages'].get('Castle Age') for p in pids}
 	imp_click = {p: stats[p]['ages'].get('Imperial Age') for p in pids}
+	attacked = {p: {m for m, n in timeline_in[p].items() if n >= ATTACK_MINUTE_ORDERS} |
+		{int(c['t'] // 60000) for c in castles if c['forward'] and c['base'] == p} for p in pids}
+	for p in pids:
+		stats[p]['_attacked'] = attacked[p]
 	exec_parts = [
 		_minmax(castle_click, invert=True),
 		_minmax(imp_click, invert=True),
-		_minmax({p: stats[p]['villagers_queued'] for p in pids}),
+		_minmax({p: villager_value(stats[p]['_vill_times'], attacked[p]) for p in pids}),
 		_minmax({p: stats[p]['first_military'] for p in pids}, invert=True),
-		_minmax(peak_bank, invert=True),
-	]
+	]  # unplanned floating is added once it is known (below)
 	# Pressure: the army a player keeps on the map (units plus castles and towers, valued by cost),
 	# the army value sent into enemy bases, and forward castles and towers.
 	imp_at = {p: stats[p]['ages'].get('Imperial Age') for p in pids}
@@ -359,7 +374,11 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	press = {p: 0.40 * on_map[p] + 0.45 * sent[p] + 0.15 * forward[p] for p in pids}
 	for p in pids:
 		stats[p]['army'] = army[p]
-	playstyle(A, players, stats, army, peak_bank, end)
+	floating = {p: unplanned_floating(A, p, curve.get(p, []), army[p]['_alive'], stats[p], end) for p in pids}
+	for p in pids:
+		stats[p]['floating'] = floating[p]
+	exec_parts.append(_minmax(floating, invert=True))
+	playstyle(A, players, stats, army, floating, end, trib_out)
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
 	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
 	# orders into that base from 3 minutes before it was placed to 5 minutes after.
@@ -501,10 +520,83 @@ def _steady(times, start, end):
 	return sum(1 for m in minutes if m in busy) / len(minutes)
 
 
-def playstyle(A, players, stats, army, peak_bank, end):
+VILLAGER_FULL, VILLAGER_STOP = 120, 150
+POP_CAP_NEAR = 190
+SAVE_WINDOW = 120000  # resources spent on a big purchase within 2 minutes were being saved on purpose
+BIG_PURCHASE = 600    # research, age-up or building costing at least this much (all resources)
+NORMAL_FLOAT = 400    # a little bank is normal
+
+
+ATTACK_MINUTE_ORDERS = 10  # enemy army orders into a base in one minute that count as an attack
+REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of an attack on the base are replacements
+
+
+def villager_value(times, attacked_minutes=()):
 	"""
-	Macro: steady villager and military production, a big army on the map, many villagers queued (includes
-	replacements for villagers that were killed), little floating.
+	Value of villagers queued: full value up to 120, then less and less until 150, and nothing after that
+	unless the player's base was attacked in the previous 10 minutes: then they are replacing villagers
+	that were killed, and each one counts in full again.
+	"""
+	attacked = set(attacked_minutes)
+	value, count = 0.0, 0
+	for t in sorted(times):
+		count += 1
+		if count <= VILLAGER_FULL:
+			value += 1
+		elif count <= VILLAGER_STOP:
+			value += (VILLAGER_STOP - count) / (VILLAGER_STOP - VILLAGER_FULL)
+		else:
+			m = int(t // 60000)
+			if any(k in attacked for k in range(m - REPLACE_WINDOW, m + 1)):
+				value += 1
+	return round(value, 1)
+
+
+def unplanned_floating(A, pid, curve, military_alive, st, end):
+	"""
+	Average resources banked without a reason, from 10 minutes on. Not counted: snapshots where the player
+	is near 200 population (estimated from villagers queued, army on the map and trade carts), and money
+	being saved for a big research, age-up or building started within the next 2 minutes.
+	"""
+	purchases = []
+	vill_queue, trade_queue = [], []
+	for a in A:
+		if a.get('player_id') != pid:
+			continue
+		if a['a'] == 'RESEARCH':
+			cost = tech_cost(a.get('technology_id'))
+			if cost >= BIG_PURCHASE:
+				purchases.append((a['t'], cost))
+		elif a['a'] == 'BUILD':
+			cost = unit_value(a.get('building_id'))
+			if cost >= BIG_PURCHASE:
+				purchases.append((a['t'], cost))
+		elif a['a'] == 'DE_QUEUE':
+			n = _name('objects', a['unit_id'])
+			if n == 'Villager':
+				vill_queue.append((a['t'], a.get('amount', 1) or 1))
+			elif n in ('Trade Cart', 'Trade Cog'):
+				trade_queue.append((a['t'], a.get('amount', 1) or 1))
+	values = []
+	for t, _, bank in curve:
+		if t < 10 * 60000 or t > end:
+			continue
+		villagers = min(VILLAGER_STOP, sum(n for tq, n in vill_queue if tq <= t))
+		trade = sum(n for tq, n in trade_queue if tq <= t)
+		minute = min(len(military_alive) - 1, int(t // 60000)) if military_alive else 0
+		pop = villagers + trade + (military_alive[minute] if military_alive else 0)
+		if pop >= POP_CAP_NEAR:
+			continue
+		planned = max((cost for tp, cost in purchases if t <= tp <= t + SAVE_WINDOW), default=0)
+		values.append(max(0, bank - planned - NORMAL_FLOAT))
+	return round(sum(values) / len(values)) if values else 0
+
+
+def playstyle(A, players, stats, army, floating, end, trib_out):
+	"""
+	Macro: steady villager and military production, a big army on the map, villagers queued (full value up to
+	120, less after, none after 150), economy beyond villagers (trade carts, tributes to allies), and little
+	unplanned floating (not counted near 200 population or when saving for a big purchase).
 	Micro (estimated; the replay has no kill data): value traded in fights (enemy army value that dropped out
 	while fighting this player vs own army value that dropped out while fighting), how much fighting the player
 	did, and target picking. Lots of clicking without fighting, or fights that lose the army, score low.
@@ -512,18 +604,28 @@ def playstyle(A, players, stats, army, peak_bank, end):
 	"""
 	pids = list(players)
 	vill_times, mil_times = defaultdict(list), defaultdict(list)
+	trade = Counter()
 	for a in A:
 		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players:
 			n = _name('objects', a['unit_id'])
-			(vill_times if n == 'Villager' else mil_times)[a['player_id']].append(a['t'])
+			if n == 'Villager':
+				vill_times[a['player_id']].append(a['t'])
+			elif n in ('Trade Cart', 'Trade Cog'):
+				trade[a['player_id']] += a.get('amount', 1) or 1
+			else:
+				mil_times[a['player_id']].append(a['t'])
 	castle_plus = {p: (stats[p]['ages'].get('Castle Age') or end) + 10 * 60000 for p in pids}
 	macro_parts = [
 		_minmax({p: _steady(vill_times[p], 0, min(end, castle_plus[p])) for p in pids}),
 		_minmax({p: _steady(mil_times[p], stats[p]['first_military'], end) for p in pids}),
 		_minmax({p: army[p]['avg_units'] for p in pids}),
-		_minmax({p: stats[p]['villagers_queued'] for p in pids}),
-		_minmax(peak_bank, invert=True),
+		_minmax({p: villager_value(stats[p]['_vill_times'], stats[p]['_attacked']) for p in pids}),
+		_minmax({p: trade[p] * 150 + trib_out[p] for p in pids}),  # a trade cart is worth about 150 resources
+		_minmax(floating, invert=True),
 	]
+	for p in pids:
+		stats[p]['trade_carts'] = trade[p]
+		stats[p]['villager_value'] = villager_value(stats[p]['_vill_times'], stats[p]['_attacked'])
 	# Micro: value traded in fights. A unit that drops out within 2 minutes of its owner fighting counts as
 	# lost in that fight; its value is credited to the enemies who were fighting that player at that moment.
 	lost, killed = Counter(), Counter()
@@ -705,7 +807,7 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 			for e in offensive.get(id(a), ()):
 				fights[int(a['t'] // 60000)][e] += 1
 		out[pid] = dict(
-			_gone=gone, _fights=fights,
+			_gone=gone, _fights=fights, _alive=alive,
 			army_apm=round(len(army_cmds) / army_minutes, 1),
 			targeted_share=round(targeted / offensive_cmds, 2) if offensive_cmds else 0.0,
 			avg_group=round(sum(group_sizes) / len(group_sizes), 1) if group_sizes else None,
