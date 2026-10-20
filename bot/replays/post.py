@@ -73,7 +73,38 @@ def _clip(text, limit):
 	return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
-def build_embed(result, title, narrative=None, footer=None, url=None):
+LINKS_FIELD = "Recorded game"
+
+
+def links_value(links):
+	""" "[Download recorded game](...) · [AoE2 Insights](...) · [AoE2 Companion](...)" or None. """
+	if not links:
+		return None
+	parts = []
+	if links.get('replay'):
+		parts.append(f"[Download recorded game]({links['replay']})")
+	if links.get('insights'):
+		parts.append(f"[AoE2 Insights]({links['insights']})")
+	if links.get('companion'):
+		parts.append(f"[AoE2 Companion]({links['companion']})")
+	return " · ".join(parts) or None
+
+
+def with_links(embed, links):
+	""" Add (or replace) the game links in an existing post's embed, just before the score table. """
+	value = links_value(links)
+	if not value:
+		return embed
+	fields = [(f.name, f.value, f.inline) for f in embed.fields if f.name != LINKS_FIELD]
+	at = next((i for i, f in enumerate(fields) if f[0] == "Scores"), len(fields))
+	fields.insert(at, (LINKS_FIELD, value, False))
+	embed.clear_fields()
+	for name, val, inline in fields:
+		embed.add_field(name=name, value=val, inline=inline)
+	return embed
+
+
+def build_embed(result, title, narrative=None, footer=None, url=None, links=None):
 	won = [p for p in result['players'].values() if p['won']]
 	colour = Colour.dark_teal() if won else Colour.dark_grey()
 	embed = Embed(title=_clip(title, 256), colour=colour, url=url)
@@ -101,6 +132,8 @@ def build_embed(result, title, narrative=None, footer=None, url=None):
 		players = result['players']
 		value = ", ".join(f"{players[a]['name']} → {players[b]['name']} {v:,}" for a, b, v in result['tributes'][:6])
 		embed.add_field(name="Tributes", value=_clip(value, 1024), inline=False)
+	if value := links_value(links):
+		embed.add_field(name=LINKS_FIELD, value=value, inline=False)
 	embed.add_field(name="Scores", value=score_table(result), inline=False)
 	note = (
 		"Scores are 1–10 relative to this lobby. Survival is only scored when a base was seriously attacked (— otherwise). "
@@ -192,7 +225,8 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"population kept high (estimated average {s.get('avg_pop')} of 200 from 20 min), economy; micro {s['micro']}/10 from fights: estimated enemy army value killed "
 				f"{s['army']['value_killed_in_fights']} vs own army value lost {s['army']['value_lost_in_fights']}, "
 				f"{round(s['army']['targeted_share'] * 100)}% of attack orders aimed at a specific target); "
-				f"enemy villagers killed about {s.get('villagers_killed', 0)}; army on the map from 8 min: {s['army']['avg_units']} units on average, peak {s['army']['peak_units']}, "
+				f"enemy villagers and fishing ships killed at least {s.get('villagers_killed', 0)} (only kills from attack "
+				f"orders on them; kills by patrol, attack-move, towers or castles are not seen); army on the map from 8 min: {s['army']['avg_units']} units on average, peak {s['army']['peak_units']}, "
 				f"average unit value {s['army']['unit_value']} (gold weighted most), army value sent at the enemy (its base, units or buildings) "
 				f"{s['army']['value_sent']}; tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "
 				f"score {s['scores']['overall']}/10 (exec {s['scores']['exec']}, pressure {s['scores']['press']}, "

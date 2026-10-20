@@ -414,7 +414,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['_vill_made'], stats[p]['_vill_alive'] = v['made'], v['alive']
 		stats[p]['villagers_made'] = v['villagers']
 		stats[p]['fishing_ships_made'] = v['fishing']
-		stats[p]['villagers_lost'] = len(v['lost'])
+		stats[p]['villagers_lost'] = len(v['lost'])  # villagers and fishing ships killed or deleted
+		stats[p]['fishing_ships_lost'] = v.get('ships_lost', 0)
 		stats[p]['villagers_peak'] = max(v['alive'], default=0)
 		stats[p]['villagers_at'] = {m: v['alive'][m] for m in (20, 30, 40) if m < len(v['alive'])}
 	banked = {p: unplanned_floating(A, p, curve.get(p, []), army[p]['_alive'], stats[p], end) for p in pids}
@@ -453,9 +454,9 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		if not c['forward'] or c['status'] == 'unclear':  # only castles that were actually built
 			continue
 		m0 = int(c['t'] // 60000)
-		army = sum(n for m, n in team_into[(players[c['player']]['team_id'], c['base'])].items() if m0 - 3 <= m <= m0 + 5)
-		c['army_support'] = army
-		c['threat'] = round(10 + min(40, army * 0.5))
+		support = sum(n for m, n in team_into[(players[c['player']]['team_id'], c['base'])].items() if m0 - 3 <= m <= m0 + 5)
+		c['army_support'] = support
+		c['threat'] = round(10 + min(40, support * 0.5))
 		siege_in[c['base']] += c['threat']
 		siege_times[c['base']].append(c['t'])
 		if c['status'] in ('lost', 'deleted'):
@@ -550,7 +551,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 
 	# ---- strategy names
 	for p in pids:
-		parts = strategy_parts(stats[p], [c for c in castles if c['player'] == p], A, p, players, base_of, attack_times[p])
+		parts = strategy_parts(stats[p], [c for c in castles if c["player"] == p], A, p, players, base_of, attack_times[p], villagers)
 		stats[p]['strategy'] = parts['name']
 		stats[p]['strategy_parts'] = parts
 		stats[p].update(
@@ -562,7 +563,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	return dict(
 		duration=end, players=players, stats=stats, castles=castles, water_weight=water,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
-		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end}),
+		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end},
+			army, vest, A, end),
 	)
 
 
@@ -643,9 +645,34 @@ REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of a
 
 VILLAGER_TRAIN = 25000     # ms per villager at one Town Center
 WORKER_TRAIN = {'Villager': VILLAGER_TRAIN, 'Fishing Ship': 40000}  # fishing ships are economy workers too
-VILLAGER_KILL_RADIUS = 10  # tiles
-VILLAGER_KILL_ORDERS = 3   # enemy army orders near a villager's last position that mean it was likely killed
+VILLAGER_HIT_GRACE = 20000  # ms: a targeted villager its owner ordered again after this got away
+VILLAGER_CONFIRM = 3 * 60000  # hits in the last 3 minutes analysed can't be confirmed (no time to see it again)
 START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
+
+
+def fishing_ship_hits(A, players, villagers, end):
+	"""
+	Enemy attack orders on fishing ships: {ship id: (time, attacker, victim)} (the last such order).
+	Only ships known from their owner's orders count (ordered onto the fish a Dock sends ships to): a ship that
+	never got an order can't be seen alive again, so a hit on it can't be told from a kill.
+	"""
+	dock_ids = {b for a in A if a['a'] == 'DE_QUEUE' and _name('objects', a['unit_id']) == 'Fishing Ship'
+		for b in a.get('object_ids') or []}
+	fish_ids = {a['target_id'] for a in A if a['a'] in ('GATHER_POINT', 'DE_MULTI_GATHERPOINT')
+		and (a.get('target_id') or 0) > 0 and set(a.get('object_ids') or []) & dock_ids}
+	ships = {}
+	for a in A:
+		if a['a'] == 'ORDER' and a.get('target_id') in fish_ids and a.get('player_id') in players:
+			for o in a.get('object_ids') or []:
+				if o not in villagers:
+					ships[o] = a['player_id']
+	hits = {}
+	for a in A:
+		t, att = a.get('target_id') or 0, a.get('player_id')
+		if a['a'] == 'ORDER' and a['t'] <= end and t in ships and att in players \
+				and players[ships[t]]['team_id'] != players[att]['team_id']:
+			hits[t] = (a['t'], att, ships[t])
+	return hits
 
 
 def villager_estimate(A, players, villagers, army_alive, end):
@@ -653,8 +680,9 @@ def villager_estimate(A, players, villagers, army_alive, end):
 	Estimated economy workers alive per minute: villagers plus fishing ships. The replay has no unit counts, so:
 	- made: each queue click is 1 villager (5 with Shift); with several Town Centers selected each villager
 	  goes to the TC with the shortest queue, and a TC trains one every 25 s, so over-queueing is not counted;
-	- lost: a villager whose last order was followed, within 3 minutes, by 3+ enemy army orders within
-	  10 tiles of it is counted as killed; deleted villagers are subtracted too;
+	- lost: a villager an enemy attack order targeted, and that its owner never ordered again, is counted as
+	  killed (credited to that attacker), except in the last 3 minutes analysed, where that can't be told; deleted villagers are subtracted too. Villagers killed without being
+	  clicked on (attack-move, towers, castles) are not seen, so losses are a lower bound;
 	- capped by population room: at most 200 minus the army on the map.
 	Returns {pid: dict(made=[times], lost=[times], alive=[per minute])}.
 	"""
@@ -677,12 +705,20 @@ def villager_estimate(A, players, villagers, army_alive, end):
 				last[o] = (a['t'], a['x'], a['y'])
 			elif o in last:
 				last[o] = (a['t'],) + last[o][1:]
-	enemy_orders = defaultdict(list)
+	# Attack orders aimed at a villager: (time, attacker) of the last enemy order that targeted it.
+	hits = {}
 	for a in A:
-		ids = a.get('object_ids') or []
-		if a['a'] in ARMY_ORDERS and a.get('player_id') in players and ids and a.get('x') and a['x'] > 0 \
-				and not all(i in vill for i in ids):
-			enemy_orders[int(a['t'] // 60000)].append(a)
+		target = a.get('target_id') or 0
+		if a['a'] == 'ORDER' and a['t'] <= end and target in vill and a.get('player_id') in players \
+				and owner.get(target) in players and owner[target] != a['player_id'] \
+				and players[owner[target]]['team_id'] != players[a['player_id']]['team_id']:
+			hits[target] = (a['t'], a['player_id'])
+	ship_hits = fishing_ship_hits(A, players, vill, end)  # ship id -> (time, attacker, victim)
+	own_last = {}
+	for a in A:
+		for o in a.get('object_ids') or []:
+			if a.get('player_id') == owner.get(o):
+				own_last[o] = a['t']
 	out = {}
 	minutes = int(end // 60000) + 1
 	for pid, p in players.items():
@@ -705,21 +741,28 @@ def villager_estimate(A, players, villagers, army_alive, end):
 					kinds[kind] += 1
 		made.sort()
 		lost = [t for o, t in deleted.items() if owner.get(o) == pid]
-		killers = Counter()  # enemy player -> villagers of this player they killed (shared by orders nearby)
-		for o, (t, x, y) in last.items():
-			if owner.get(o) != pid or o in deleted or t > end - 4 * 60000:
+		killers = Counter()  # enemy player -> villagers of this player they killed
+		killed = []  # (time, {enemy: share}) for each villager counted as killed
+		# A villager is killed when an enemy attack order targeted it and its owner never ordered it again.
+		for o, (t_hit, attacker) in hits.items():
+			if owner.get(o) != pid or o in deleted:
 				continue
-			m, near = int(t // 60000), Counter()
-			for k in range(m - 1, m + 4):
-				for e in enemy_orders[k]:
-					if players[e['player_id']]['team_id'] != p['team_id'] and t - 60000 <= e['t'] <= t + 180000 \
-							and math.dist((x, y), (e['x'], e['y'])) <= VILLAGER_KILL_RADIUS:
-						near[e['player_id']] += 1
-			if sum(near.values()) >= VILLAGER_KILL_ORDERS:
-				lost.append(t)
-				total = sum(near.values())
-				for e, n in near.items():
-					killers[e] += n / total
+			if last.get(o, (0,))[0] > t_hit + VILLAGER_HIT_GRACE:
+				continue  # it was given orders afterwards: it got away
+			if t_hit > end - VILLAGER_CONFIRM:
+				continue  # too close to the end to tell: its owner had no time to order it again
+			lost.append(t_hit)
+			killers[attacker] += 1
+			killed.append((t_hit, {attacker: 1.0}, 'villager'))
+		# Fishing ships killed: same rule (targeted, never ordered again, not in the last 3 minutes).
+		ships_lost = 0
+		for o, (t_hit, attacker, victim) in ship_hits.items():
+			if victim != pid or own_last.get(o, 0) > t_hit + VILLAGER_HIT_GRACE or t_hit > end - VILLAGER_CONFIRM:
+				continue
+			lost.append(t_hit)
+			ships_lost += 1
+			killers[attacker] += 1
+			killed.append((t_hit, {attacker: 1.0}, 'fishing ship'))
 		lost.sort()
 		start = START_VILLAGERS.get(p.get('civ'), 3)
 		alive = []
@@ -729,7 +772,8 @@ def villager_estimate(A, players, villagers, army_alive, end):
 			army = army_alive[pid][min(len(army_alive[pid]) - 1, m)] if army_alive.get(pid) else 0
 			alive.append(max(0, min(n, POP_CAP - army)))
 		out[pid] = dict(made=made, lost=lost, alive=alive, villagers=kinds['Villager'], fishing=kinds['Fishing Ship'],
-			killers=killers, busy=busy, first_use=first_use)
+			ships_lost=ships_lost,
+			killers=killers, killed=sorted(killed, key=lambda k: k[0]), busy=busy, first_use=first_use)
 	return out
 
 
@@ -1240,7 +1284,53 @@ def _army_lines(counter, minimum=5):
 	return lines
 
 
-def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
+FEUDAL_ECO_TECHS = {'Double-Bit Axe', 'Horse Collar', 'Gold Mining', 'Stone Mining', 'Wheelbarrow', 'Gillnets'}
+FEUDAL_BOOM_FARMS = 8
+FISH_BOOM_SHIPS = 5  # working fishing ships up to 10 minutes after Castle Age
+
+
+def working_fishing_ships(A, pid, until, villagers=()):
+	"""
+	(fishing ships made, fishing ships that went to work) up to `until`. The replay doesn't say which unit is
+	a fishing ship, so a ship counts as working when its Dock's gather point was on a fish when it came out
+	(new ships go straight to fishing), or when the player ordered units onto fish (the fish a Dock gather
+	point was set on, by anyone). Ships sent to a spot on the water and never ordered stay idle.
+	"""
+	gather = defaultdict(list)  # dock -> [(t, on a resource)]
+	fish_ids = set()
+	for a in A:
+		if a['a'] in ('GATHER_POINT', 'DE_MULTI_GATHERPOINT'):
+			target = a.get('target_id') or -1
+			for b in a.get('object_ids') or []:
+				gather[b].append((a['t'], target > 0))
+			if target > 0:
+				fish_ids.add(target)  # resources Docks send ships to (fish); refined below to this player's docks
+	docks, made, auto = set(), 0, 0
+	free = defaultdict(int)
+	for a in A:
+		if a['a'] != 'DE_QUEUE' or a.get('player_id') != pid or a['t'] > until or _name('objects', a['unit_id']) != 'Fishing Ship':
+			continue
+		ids = a.get('object_ids') or [0]
+		docks.update(ids)
+		for _ in range(a.get('amount', 1) or 1):
+			b = min(ids, key=lambda i: free[i])
+			free[b] = max(a['t'], free[b]) + WORKER_TRAIN['Fishing Ship']
+			if free[b] > until:
+				continue
+			made += 1
+			points = [on for t, on in gather.get(b, []) if t <= free[b]]
+			if points and points[-1]:
+				auto += 1
+	dock_fish = {a.get('target_id') for a in A if a['a'] in ('GATHER_POINT', 'DE_MULTI_GATHERPOINT')
+		and (a.get('target_id') or -1) > 0 and set(a.get('object_ids') or []) & docks} or fish_ids
+	ordered = set()
+	for a in A:
+		if a['a'] == 'ORDER' and a.get('player_id') == pid and a['t'] <= until and a.get('target_id') in dock_fish:
+			ordered.update(i for i in a.get('object_ids') or [] if i not in villagers and i not in docks)
+	return made, min(made, auto + len(ordered))
+
+
+def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villagers=()):
 	""" The strategy as separate parts (for stats later) plus a readable name. """
 	ages = st['ages']
 	feudal, castle, imp = (ages.get(a) for a in AGES)
@@ -1258,6 +1348,14 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	feudal_attacks = sum(1 for t in attack_times if feudal and feudal <= t < (castle or end))
 	feudal_attack = feudal_attacks >= 10
 
+	# Feudal boom (Malay-style): little army in Feudal, eco upgrades and farms (or an extra TC) instead.
+	feudal_eco = {_name('technologies', a['technology_id']) for a in A if a['a'] == 'RESEARCH'
+		and a.get('player_id') == pid and feudal and feudal <= a['t'] < (castle or end)} & FEUDAL_ECO_TECHS
+	feudal_builds = Counter(_name('objects', a['building_id']) for a in A if a['a'] == 'BUILD'
+		and a.get('player_id') == pid and feudal and feudal <= a['t'] < (castle or end))
+	feudal_boom = bool(feudal) and sum(feudal_army.values()) < FEUDAL_ARMY_MIN and len(feudal_eco) >= 2 \
+		and (feudal_builds['Farm'] >= FEUDAL_BOOM_FARMS or feudal_builds['Town Center'] >= 1)
+
 	if forward_towers >= 2:
 		opening = "Feudal tower rush"
 	elif sum(feudal_army.values()) >= 8:
@@ -1266,11 +1364,19 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 			opening = "Feudal water: " + " + ".join(feudal_units or ["warships"])
 		else:
 			opening = "Feudal " + " + ".join(feudal_units or ["army"]) + ("" if feudal_attack else " (defensive)")
+	elif feudal_boom:
+		opening = "Feudal boom"
 	elif feudal and castle and castle - feudal <= 4 * 60000:
 		opening = "Fast Castle"
 	else:
 		opening = "Standard"
-	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)
+	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
+	# Fish boom: 5+ fishing ships that went to work (not left idle), up to 10 minutes after Castle Age.
+	boom_end = (castle or end) + 10 * 60000
+	fish, fish_working = working_fishing_ships(A, pid, boom_end, villagers)
+	fish_boom = fish_working >= FISH_BOOM_SHIPS
+	# Named by the economy behind it: extra Town Centers on farms, fishing ships, or both.
+	boom_label = "farm + fish boom" if boom and fish_boom else "fish boom" if fish_boom else "farm boom" if boom else ""
 
 	# Castle Age and Imperial Age armies, separately.
 	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
@@ -1281,8 +1387,11 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	tower_creep = st['towers'] >= 8
 
 	parts = []
-	if opening != "Standard" or boom:
-		parts.append((opening if opening != "Standard" else "Castle Age") + (" boom" if boom else ""))
+	# Opening, then the boom as its own stage: "Feudal scouts + spears → farm + fish boom → Knights".
+	if opening != "Standard":
+		parts.append(opening)
+	if boom_label:
+		parts.append(boom_label)
 	if castle_units:
 		parts.append(" + ".join(castle_units))
 	if imperial_units and imperial_units != castle_units:
@@ -1298,32 +1407,139 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 		parts.append(", ".join(extras))
 	return dict(
 		name=" → ".join(parts) if parts else "Standard play",
-		opening=opening, boom=boom, feudal_units=feudal_units, feudal_attack=feudal_attack,
+		opening=opening, feudal_boom=feudal_boom, boom=boom, fish_boom=fish_boom, fishing_ships=fish,
+		fishing_ships_working=fish_working, feudal_units=feudal_units, feudal_attack=feudal_attack,
 		forward_towers=forward_towers, castle_units=castle_units, imperial_units=imperial_units,
 		main_units=main_units, fast_imp=fast_imp, forward_castles=forward_castles, tower_creep=tower_creep,
 	)
 
 
-def key_moments(players, stats, castles, resigns):
-	ev = []
-	clicks = [(stats[p]['ages'].get('Castle Age'), p) for p in players if stats[p]['ages'].get('Castle Age')]
-	if clicks:
-		t, p = min(clicks)
-		ev.append((t, f"{players[p]['name']} ({players[p]['civ']}) is first to click Castle Age"))
-	imps = [(stats[p]['ages'].get('Imperial Age'), p) for p in players if stats[p]['ages'].get('Imperial Age')]
-	if imps:
-		t, p = min(imps)
-		ev.append((t, f"{players[p]['name']} ({players[p]['civ']}) is first to click Imperial Age"))
-	first_mil = [(stats[p]['first_military'], p) for p in players if stats[p]['first_military']]
-	if first_mil:
-		t, p = min(first_mil)
-		ev.append((t, f"First military unit queued by {players[p]['name']} ({players[p]['civ']})"))
+MOMENTS_MAX = 6  # the 5 biggest events plus the resignation that ends the analysis
+BATTLE_MIN = 500      # army value killed (both players) in 3 minutes that makes a fight worth listing
+RAID_MIN = 3          # villagers of one player killed by one raider in one burst that make a raid worth listing
+RAID_VILLAGER_WEIGHT = 300  # a villager killed counts like this much army value when picking moments
+RAID_GAP = 60000      # kills more than a minute apart are separate raids
+LATE_WINDOW = 3 * 60000  # events this close to the end of the analysis count half when picking moments
+ELIMINATED_GAP = 3 * 60000  # stopped giving orders this long before the end without resigning
+
+
+EPISODE_GAP = 5 * 60000  # fights or raids between the same two players less than 5 minutes apart are one moment
+
+
+def _episodes(items, time_of):
+	""" Split time-sorted items into runs whose consecutive starts are less than EPISODE_GAP apart. """
+	out, cur = [], []
+	for it in items:
+		if cur and time_of(it) - time_of(cur[-1]) > EPISODE_GAP:
+			out.append(cur)
+			cur = []
+		cur.append(it)
+	if cur:
+		out.append(cur)
+	return out
+
+
+def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0):
+	"""
+	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
+	big raids on villagers, castles destroyed, players eliminated (a regicide king killed or a defeat: their
+	orders stop well before the end with no resignation) and the resignation that ends the analysis.
+	All estimated from orders: the replay has no kill data.
+	"""
+	name = lambda p: players[p]['name']  # noqa: E731
+	team_of = {p: players[p]['team_id'] for p in players}
+	ev = []  # (size, time, text)
+
+	# Major fights, per pair of players (so a sea fight and a land fight at the same time stay apart): army
+	# value each one killed of the other over 3 minutes. A unit lost while its owner was clearly fighting is
+	# credited to the enemies fighting that player then, by their share of orders.
+	if army:
+		pair = defaultdict(Counter)  # (killer, victim) -> minute -> value
+		for p in players:
+			for t_last, value in army[p]['_gone']:
+				m = int(t_last // 60000)
+				ks = (m - 1, m, m + 1, m + 2)
+				if max(army[p]['_fight_orders'].get(k, 0) for k in ks) < FIGHT_MIN_ORDERS:
+					continue
+				credit = Counter()
+				for e in players:
+					if team_of[e] != team_of[p]:
+						for k in ks:
+							credit[e] += army[e]['_fights'].get(k, {}).get(p, 0)
+				total = sum(credit.values())
+				for e, n in credit.items():
+					if n:
+						pair[(e, p)][m] += value * n / total
+		fights = []
+		for a, b in {tuple(sorted(k)) for k in pair}:
+			minutes = sorted(set(pair[(a, b)]) | set(pair[(b, a)]))
+			for m in minutes:
+				ka = sum(pair[(a, b)].get(k, 0) for k in (m, m + 1, m + 2))  # a killed of b
+				kb = sum(pair[(b, a)].get(k, 0) for k in (m, m + 1, m + 2))
+				fights.append((ka + kb, m, a, b, ka, kb))
+		# Every fight window of a pair, then one line per pair covering all its fights.
+		used, per_pair = defaultdict(set), defaultdict(list)
+		for size, m, a, b, ka, kb in sorted(fights, key=lambda f: -f[0]):
+			if size < BATTLE_MIN or used[(a, b)] & {m, m + 1, m + 2}:
+				continue
+			used[(a, b)].update(range(m - 2, m + 3))
+			per_pair[(a, b)].append((m, ka, kb))
+		for (a, b), windows in per_pair.items():
+			for episode in _episodes(sorted(windows), lambda w: w[0] * 60000):
+				ka, kb = sum(w[1] for w in episode), sum(w[2] for w in episode)
+				first, last_m = episode[0][0], episode[-1][0]
+				win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
+				when = f" ({mmss(first * 60000)}–{mmss((last_m + 3) * 60000)})" if len(episode) > 1 else ""
+				late = all(m * 60000 >= end - LATE_WINDOW for m, _, _ in episode) if end else False
+				ev.append(((ka + kb) * (0.5 if late else 1), first * 60000,
+					f"{name(win)} fought {name(lose)}: {round(kw):,} vs {round(kl):,} army value killed{when}"))
+
+	# Raids: one player killing many of another player's villagers or fishing ships in one burst (kills under a
+	# minute apart); bursts on the same player less than 5 minutes apart are one moment.
+	if vest:
+		for p in players:
+			by_raider = defaultdict(list)
+			for t, share, kind in vest[p].get('killed', []):
+				by_raider[max(share, key=share.get)].append((t, kind))
+			for raider, kills in by_raider.items():
+				kills.sort()
+				bursts, cur = [], []
+				for k in kills:
+					if cur and k[0] - cur[-1][0] > RAID_GAP:
+						bursts.append(cur)
+						cur = []
+					cur.append(k)
+				if cur:
+					bursts.append(cur)
+				raids = [b for b in bursts if len(b) >= RAID_MIN]
+				for episode in _episodes(raids, lambda b: b[0][0]):
+					kinds = Counter(kind for b in episode for _, kind in b)
+					weight = sum(len(b) * RAID_VILLAGER_WEIGHT * (0.5 if end and b[0][0] >= end - LATE_WINDOW else 1)
+						for b in episode)
+					what = " and ".join(f"{kinds[k]} {k}{'s' if kinds[k] > 1 else ''}" for k in ('villager', 'fishing ship') if kinds[k])
+					start, stop = episode[0][0][0], episode[-1][-1][0]
+					when = f" ({mmss(start)}–{mmss(stop)})" if len(episode) > 1 else ""
+					ev.append((weight, start, f"{name(raider)} raided {name(p)}: {what} killed{when}"))
+
 	for c in castles:
-		if c['forward']:
-			outcome = {'up': 'went up', 'lost': 'went up and was likely destroyed', 'deleted': 'was deleted',
-				'unclear': 'outcome unclear'}[c['status']]
-			ev.append((c['t'], f"{players[c['player']]['civ']} castle in the {players[c['base']]['civ']} base ({outcome})"))
-	for p, t in resigns.items():
-		ev.append((t, f"{players[p]['name']} ({players[p]['civ']}) resigns"))
-	ev.sort(key=lambda e: e[0])
-	return [(mmss(t), txt) for t, txt in ev]
+		if c['status'] == 'lost':
+			where = f" in {name(c['base'])}'s base" if c['base'] != c['player'] else ""
+			ev.append((1500, c['t'], f"{name(c['player'])}'s castle{where} was destroyed"))
+
+	# Eliminated (regicide king killed, or defeated): orders stop well before the end, no resignation.
+	last = {}
+	for a in A:
+		if a.get('player_id') in players:
+			last[a['player_id']] = a['t']
+	for p, t in last.items():
+		if p not in resigns and end and t < end - ELIMINATED_GAP:
+			ev.append((10 ** 6, t, f"{name(p)} ({players[p]['civ']}) was eliminated (stopped playing, e.g. king killed)"))
+
+	first_resign = min(resigns.items(), key=lambda kv: kv[1]) if resigns else None
+	top = sorted(ev, key=lambda e: -e[0])[:MOMENTS_MAX - (1 if first_resign else 0)]
+	out = [(t, text) for _, t, text in top]
+	if first_resign:
+		p, t = first_resign
+		out.append((t, f"{name(p)} ({players[p]['civ']}) resigns"))
+	out.sort(key=lambda e: e[0])
+	return [(mmss(t), text) for t, text in out]
