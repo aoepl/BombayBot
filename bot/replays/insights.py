@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 13
+ANALYSIS_VERSION = 14
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -91,6 +91,7 @@ db.ensure_table(dict(
 		dict(cname="trade_carts", ctype=db.types.int),
 		dict(cname="macro_bonus", ctype=db.types.float),
 		dict(cname="no_trade_penalty", ctype=db.types.float),
+		dict(cname="avg_pop", ctype=db.types.int),
 		dict(cname="gold_starved", ctype=db.types.int),
 		dict(cname="late_gold_share", ctype=db.types.float),
 		dict(cname="score_exec", ctype=db.types.float),
@@ -215,7 +216,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				feudal_s=_secs(s['ages'].get('Feudal Age')), castle_s=_secs(s['ages'].get('Castle Age')),
 				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers_queued=s['villagers_queued'], villager_value=s.get('villager_value'),
 				unplanned_floating=s.get('floating'), trade_carts=s.get('trade_carts'),
-				macro_bonus=s.get('macro_bonus'), no_trade_penalty=s.get('no_trade_penalty'), gold_starved=int(bool(s.get('gold_starved'))),
+				macro_bonus=s.get('macro_bonus'), no_trade_penalty=s.get('no_trade_penalty'), avg_pop=s.get('avg_pop'), gold_starved=int(bool(s.get('gold_starved'))),
 				late_gold_share=s.get('late_gold_share'),
 				score_exec=sc['exec'], score_pressure=sc['press'], score_survival=sc['surv'], score_team=sc['team'],
 				score_overall=sc['overall'], score_rank=s.get('score_rank'), elo_delta=s.get('elo_delta'),

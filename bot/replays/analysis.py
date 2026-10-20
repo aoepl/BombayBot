@@ -605,10 +605,38 @@ def unplanned_floating(A, pid, curve, military_alive, st, end):
 	return round(sum(values) / len(values)) if values else 0
 
 
+POP_FROM = 20 * 60000  # population is judged from 20:00 (from 15:00 in shorter games)
+
+
+def average_population(A, pid, military_alive, end):
+	"""
+	Estimated population, averaged per minute from 20:00 to the end analysed: villagers queued (at most 150),
+	trade carts and army on the map, capped at 200. Keeping it high all game is good macro.
+	"""
+	vill, trade = [], []
+	for a in A:
+		if a.get('player_id') == pid and a['a'] == 'DE_QUEUE':
+			n = _name('objects', a['unit_id'])
+			if n == 'Villager':
+				vill.append((a['t'], a.get('amount', 1) or 1))
+			elif n in ('Trade Cart', 'Trade Cog'):
+				trade.append((a['t'], a.get('amount', 1) or 1))
+	start = POP_FROM if end >= POP_FROM + 5 * 60000 else 15 * 60000
+	values = []
+	for minute in range(int(start // 60000), int(end // 60000) + 1):
+		t = minute * 60000
+		villagers = min(VILLAGER_STOP, sum(n for tq, n in vill if tq <= t))
+		carts = sum(n for tq, n in trade if tq <= t)
+		army = military_alive[min(len(military_alive) - 1, minute)] if military_alive else 0
+		values.append(min(POP_CAP, villagers + carts + army))
+	return round(sum(values) / len(values)) if values else None
+
+
 def playstyle(A, players, stats, army, floating, end, trib_out):
 	"""
-	Macro: steady villager and military production, a big army on the map, villagers queued (full value up to
-	120, less after, none after 150 unless replacing villagers after an attack), and little unplanned floating
+	Macro: steady villager and military production, a big army on the map, population kept high from 20:00,
+	villagers queued (full value up to 120, less after, none after 150 unless replacing villagers after an
+	attack), and little unplanned floating
 	(not counted near 200 population or when saving for a big purchase). Bonus of up to 1 point: trade carts
 	made and resources tributed to allies. Not trading only costs points (up to 1) when the player ran out of
 	gold income late in the game (little gold spent, Market selling or no new Mining Camps) and made no trade
@@ -632,10 +660,12 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 			else:
 				mil_times[p].append(a['t'])
 	castle_plus = {p: (stats[p]['ages'].get('Castle Age') or end) + 10 * 60000 for p in pids}
+	avg_pop = {p: average_population(A, p, army[p]['_alive'], end) for p in pids}
 	macro_parts = [
 		_minmax({p: _steady(vill_times[p], 0, min(end, castle_plus[p])) for p in pids}),
 		_minmax({p: _steady(mil_times[p], stats[p]['first_military'], end) for p in pids}),
 		_minmax({p: army[p]['avg_units'] for p in pids}),
+		_minmax(avg_pop),
 		_minmax({p: villager_value(stats[p]['_vill_times'], stats[p]['_attacked']) for p in pids}),
 		_minmax(floating, invert=True),
 	]
@@ -648,6 +678,7 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 		penalty = 0.0
 		if g['starved']:
 			penalty = NO_TRADE_PENALTY * (1 - min(1.0, trade[p] / CARTS_ENOUGH)) * (1 - min(1.0, g['gold_in'] / GOLD_TRIB_ENOUGH))
+		stats[p]['avg_pop'] = avg_pop[p]
 		stats[p]['gold_starved'] = g['starved']
 		stats[p]['late_gold_share'] = g['share']
 		stats[p]['late_market_sold'] = g['sold']

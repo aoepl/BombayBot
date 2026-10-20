@@ -55,8 +55,8 @@ What the breakdown shows:
 * When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
-  a label). Macro: steady villager and military production, army size, villagers and little unplanned
-  floating, plus a bonus of up to 1 point for trade carts made and resources tributed to allies. Not trading
+  a label). Macro: steady villager and military production, army size, population kept high from 20:00
+  (estimated from villagers queued, trade carts and army), villagers and little unplanned floating, plus a bonus of up to 1 point for trade carts made and resources tributed to allies. Not trading
   only costs points (up to 1) when a player ran out of gold income late in a 40+ minute game: in the last
   15 minutes analysed, gold was under 20% of their spending and they sold 1000+ at the Market or built no new
   Mining Camp (or Mule Cart / Muisca drop site), with no trade carts (20 remove the penalty) and no gold tributed in by allies. A player still
