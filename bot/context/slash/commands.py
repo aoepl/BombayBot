@@ -1,7 +1,7 @@
 from typing import Callable
 from asyncio import wait_for, shield
 from asyncio.exceptions import TimeoutError as aTimeoutError
-from nextcord import Interaction, SlashOption, Member, TextChannel
+from nextcord import Interaction, SlashOption, Member, TextChannel, Attachment
 import traceback
 import time
 
@@ -753,3 +753,40 @@ async def _nick(
 		nick: str
 ): await run_slash(bot.commands.set_nick, interaction=interaction, nick=nick)
 
+
+
+# aoe -> ... (in-game names)
+
+@groups.aoe.subcommand(name='link', description='Link an in-game name to your Discord account (moderators: to anyone).')
+async def _aoe_link(
+		interaction: Interaction,
+		name: str = SlashOption(description="Your AoE2 in-game name, exactly as it shows in games."),
+		player: Member = SlashOption(required=False, verify=False, description="Moderators: link the name to this member.")
+): await run_slash(bot.commands.aoe_link, interaction=interaction, name=name, player=player)
+
+
+@groups.aoe.subcommand(name='unlink', description='Remove a linked in-game name.')
+async def _aoe_unlink(
+		interaction: Interaction,
+		name: str = SlashOption(description="The in-game name to unlink.")
+): await run_slash(bot.commands.aoe_unlink, interaction=interaction, name=name)
+
+
+@groups.aoe.subcommand(name='names', description='Show the in-game names linked to a member.')
+async def _aoe_names(
+		interaction: Interaction,
+		player: Member = SlashOption(required=False, verify=False)
+): await run_slash(bot.commands.aoe_names, interaction=interaction, player=player)
+
+
+# replay -> ...
+
+@groups.replay.subcommand(name='upload', description='Analyse a recorded game file (.aoe2record or .zip).')
+async def _replay_upload(
+		interaction: Interaction,
+		file: Attachment = SlashOption(description="The recorded game."),
+		summary: bool = SlashOption(
+			required=False, default=True,
+			description="Post a game breakdown (default). Turn off to only save the player stats."
+		)
+): await run_slash(bot.commands.replay_upload, interaction=interaction, file=file, summary=summary)

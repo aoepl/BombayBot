@@ -43,6 +43,14 @@
 | /top                  | Show top active players on the channel                  |
 | /stats show           | Show overall channel stats                              |
 
+#### Game breakdowns (AoE2 replays)
+| command               | description                                             |
+|-----------------------|---------------------------------------------------------|
+| /aoe link             | Link an in-game name to your account (moderators: to anyone) |
+| /aoe unlink           | Remove a linked in-game name                            |
+| /aoe names            | Show the in-game names linked to a member               |
+| /replay upload        | Analyse an attached recorded game (.aoe2record or .zip); `summary:False` only saves player stats |
+
 #### Miscellaneous
 | command               | description                                             |
 |-----------------------|---------------------------------------------------------|

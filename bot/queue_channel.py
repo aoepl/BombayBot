@@ -34,7 +34,7 @@ class QueueChannel:
 	cfg_factory = CfgFactory(
 		table=FactoryTable(name='qc_configs', p_key="channel_id"),
 		name="qc_config",
-		sections=["General", "Auto-remove", "Rating", "Leaderboard"],
+		sections=["General", "Auto-remove", "Rating", "Leaderboard", "Replays"],
 		variables=[
 			Variables.StrVar(
 				"prefix",
@@ -290,6 +290,21 @@ class QueueChannel:
 				section="Leaderboard",
 				notnull=True,
 				default=False
+			),
+			Variables.TextChanVar(
+				"replay_forum",
+				display="Replay forum",
+				section="Replays",
+				description="Forum channel (or text channel) where /replay upload posts game breakdowns. "
+					"Leave empty to post them in this queue channel."
+			),
+			Variables.BoolVar(
+				"replay_ai",
+				display="AI game recap",
+				section="Replays",
+				description="Write the game recap with the AI model (needs GOOGLE_AI_API_KEY).",
+				default=1,
+				notnull=True
 			),
 			VariableTable(
 				'ranks', display="Rating ranks", section="Leaderboard",
