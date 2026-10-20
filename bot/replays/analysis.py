@@ -213,6 +213,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 				trib_in[to] += amt
 				trib_pairs[(a['player_id'], to)] += amt
 
+	# ---- which army orders were offensive: aimed into an enemy base, at an enemy unit or building,
+	# or near enemy units (within ENGAGE_RADIUS tiles of where an enemy army was ordered within a minute).
+	offensive = find_engagements(A, players, base_of, villagers)
+
 	# ---- army orders: pressure dealt, pressure received, help given to allies
 	press_out, press_in, help_out = Counter(), Counter(), Counter()
 	press_matrix = Counter()
@@ -229,16 +233,16 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		if a['x'] <= 0 or a['y'] <= 0:
 			continue
 		b = base_of(a['x'], a['y'])
-		if b == pid:
-			continue
-		if players[b]['team_id'] != players[pid]['team_id']:
+		in_enemy_base = players[b]['team_id'] != players[pid]['team_id']
+		if id(a) in offensive:
 			press_out[pid] += 1
+			attack_times[pid].append(a['t'])
+		if in_enemy_base:  # pressure received is counted per base
 			press_in[b] += 1
 			press_matrix[(pid, b)] += 1
 			timeline_in[b][int(a['t'] // 60000)] += 1
 			team_into[(players[pid]['team_id'], b)][int(a['t'] // 60000)] += 1
-			attack_times[pid].append(a['t'])
-		else:
+		elif b != pid:
 			help_out[pid] += 1
 
 	# ---- castles: placement, where, outcome
@@ -340,7 +344,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	]
 	# Pressure: the army a player keeps on the map (units plus castles and towers, valued by cost),
 	# the army value sent into enemy bases, and forward castles and towers.
-	army = army_presence(A, players, base_of, villagers, end)
+	army = army_presence(A, players, base_of, villagers, end, offensive)
 	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up', 'lost', 'deleted'))
 	fwd_towers = Counter()
 	for a in A:
@@ -485,7 +489,48 @@ FEUDAL_NAMES = {
 NOT_ARMY = (MILITARY_SKIP - {'Monk'}) | {'Trade Cart', 'Trade Cog'}  # monk pushes are a strategy too
 
 
-def army_presence(A, players, base_of, villagers, end):
+ENGAGE_RADIUS = 12  # tiles
+ENGAGE_WINDOW = 60000  # ms
+
+
+def find_engagements(A, players, base_of, villagers):
+	""" ids (id(action)) of army orders that went at the enemy: their base, their units or their buildings. """
+	owner = {}
+	for a in A:
+		if a.get('player_id') in players:
+			for o in a.get('object_ids') or []:
+				owner.setdefault(o, a['player_id'])
+	orders = []
+	for a in A:
+		pid = a.get('player_id')
+		ids = a.get('object_ids') or []
+		if a['a'] in ARMY_ORDERS and pid in players and ids and a.get('x') and a['x'] > 0 and a['y'] > 0 \
+				and not all(i in villagers for i in ids):
+			orders.append(a)
+	by_minute = defaultdict(list)
+	for a in orders:
+		by_minute[int(a['t'] // 60000)].append(a)
+
+	offensive = set()
+	for a in orders:
+		team = players[a['player_id']]['team_id']
+		target = a.get('target_id') or 0
+		if target > 0 and owner.get(target) in players and players[owner[target]]['team_id'] != team:
+			offensive.add(id(a))
+			continue
+		if players[base_of(a['x'], a['y'])]['team_id'] != team:
+			offensive.add(id(a))
+			continue
+		m = int(a['t'] // 60000)
+		for other in by_minute[m - 1] + by_minute[m] + by_minute[m + 1]:
+			if players[other['player_id']]['team_id'] != team and abs(other['t'] - a['t']) <= ENGAGE_WINDOW \
+					and math.dist((other['x'], other['y']), (a['x'], a['y'])) <= ENGAGE_RADIUS:
+				offensive.add(id(a))
+				break
+	return offensive
+
+
+def army_presence(A, players, base_of, villagers, end, offensive):
 	"""
 	Estimate each player's army on the map over time from the unit ids in their commands.
 	A unit is military if it ever gets an army-only command (formation, stance, patrol, attack-move...)
@@ -500,9 +545,7 @@ def army_presence(A, players, base_of, villagers, end):
 		ids = [i for i in (a.get('object_ids') or []) if i not in villagers]
 		if pid not in players or not ids:
 			continue
-		is_army = a['a'] in ARMY_COMMANDS
-		if not is_army and a['a'] in ('MOVE', 'ORDER') and a.get('x') and a['x'] > 0:
-			is_army = players[base_of(a['x'], a['y'])]['team_id'] != players[pid]['team_id']
+		is_army = a['a'] in ARMY_COMMANDS or id(a) in offensive
 		for i in ids:
 			first_last = seen.setdefault((pid, i), [a['t'], a['t']])
 			first_last[1] = a['t']
@@ -539,11 +582,10 @@ def army_presence(A, players, base_of, villagers, end):
 					structures[m] += unit_value(a['building_id'])
 		sent = set()
 		for a in A:
-			if a.get('player_id') == pid and a['a'] in ARMY_ORDERS and a.get('x') and a['x'] > 0:
-				if players[base_of(a['x'], a['y'])]['team_id'] != players[pid]['team_id']:
-					for i in a.get('object_ids') or []:
-						if i in military[pid]:
-							sent.add((i, int(a['t'] // 60000)))  # each unit once per minute
+			if a.get('player_id') == pid and id(a) in offensive:
+				for i in a.get('object_ids') or []:
+					if i in military[pid]:
+						sent.add((i, int(a['t'] // 60000)))  # each unit once per minute
 		window = range(min(15, minutes - 1), minutes)  # from 15 minutes on, when armies matter
 		on_map = [alive[m] * value_per_unit[m] + structures[m] for m in window]
 		out[pid] = dict(

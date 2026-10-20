@@ -56,7 +56,9 @@ What the breakdown shows:
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
   40% average army value on the map from 15 minutes on (units plus castles, Kreposts, Donjons and towers),
-  45% army value sent into enemy bases, and 15% forward castles and towers. Unit value is the resource cost,
+  45% army value sent at the enemy, and 15% forward castles and towers. An order counts as sent at the enemy
+  when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
+  army was ordered within a minute (fights in the open count too). Unit value is the resource cost,
   with gold weighted 1.5, stone 1.2, food and wood 1.0, so an expensive army kept topped up scores higher than
   a cheap one. Units are tracked by their ids in the player's commands (the replay has no kill data), and count
   as on the map until 90 seconds after their owner last commanded them.
