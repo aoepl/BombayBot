@@ -528,6 +528,10 @@ NORMAL_FLOAT = 400    # a little bank is normal
 
 
 ATTACK_MINUTE_ORDERS = 10  # enemy army orders into a base in one minute that count as an attack
+TRADE_FROM = 30 * 60000
+TRADE_MINE_GAP = 5 * 60000
+TRADE_CART_VALUE = 150  # resources a trade cart stands for in the macro bonus
+MACRO_BONUS = 1.0
 REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of an attack on the base are replacements
 
 
@@ -595,8 +599,9 @@ def unplanned_floating(A, pid, curve, military_alive, st, end):
 def playstyle(A, players, stats, army, floating, end, trib_out):
 	"""
 	Macro: steady villager and military production, a big army on the map, villagers queued (full value up to
-	120, less after, none after 150), economy beyond villagers (trade carts, tributes to allies), and little
-	unplanned floating (not counted near 200 population or when saving for a big purchase).
+	120, less after, none after 150 unless replacing villagers after an attack), and little unplanned floating
+	(not counted near 200 population or when saving for a big purchase). Bonus of up to 1 point, never a
+	penalty: trade carts made once gold has likely run out, and resources tributed to allies.
 	Micro (estimated; the replay has no kill data): value traded in fights (enemy army value that dropped out
 	while fighting this player vs own army value that dropped out while fighting), how much fighting the player
 	did, and target picking. Lots of clicking without fighting, or fights that lose the army, score low.
@@ -604,27 +609,40 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 	"""
 	pids = list(players)
 	vill_times, mil_times = defaultdict(list), defaultdict(list)
-	trade = Counter()
+	trade, trade_counted = Counter(), Counter()
+	mining_camps = defaultdict(list)
+	for a in A:
+		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) == 'Mining Camp':
+			mining_camps[a['player_id']].append(a['t'])
 	for a in A:
 		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players:
-			n = _name('objects', a['unit_id'])
+			p, n = a['player_id'], _name('objects', a['unit_id'])
+			amt = a.get('amount', 1) or 1
 			if n == 'Villager':
-				vill_times[a['player_id']].append(a['t'])
+				vill_times[p].append(a['t'])
 			elif n in ('Trade Cart', 'Trade Cog'):
-				trade[a['player_id']] += a.get('amount', 1) or 1
+				trade[p] += amt
+				# Trade only counts once gold has likely run out: after 30:00 and with no new Mining Camp
+				# in the 5 minutes before (the replay does not show villagers on gold or gold left).
+				if a['t'] >= TRADE_FROM and not any(a['t'] - TRADE_MINE_GAP <= t <= a['t'] for t in mining_camps[p]):
+					trade_counted[p] += amt
 			else:
-				mil_times[a['player_id']].append(a['t'])
+				mil_times[p].append(a['t'])
 	castle_plus = {p: (stats[p]['ages'].get('Castle Age') or end) + 10 * 60000 for p in pids}
 	macro_parts = [
 		_minmax({p: _steady(vill_times[p], 0, min(end, castle_plus[p])) for p in pids}),
 		_minmax({p: _steady(mil_times[p], stats[p]['first_military'], end) for p in pids}),
 		_minmax({p: army[p]['avg_units'] for p in pids}),
 		_minmax({p: villager_value(stats[p]['_vill_times'], stats[p]['_attacked']) for p in pids}),
-		_minmax({p: trade[p] * 150 + trib_out[p] for p in pids}),  # a trade cart is worth about 150 resources
 		_minmax(floating, invert=True),
 	]
+	# Bonus only (never a penalty): late trade and tributes sent to allies add up to MACRO_BONUS points.
+	extra = {p: trade_counted[p] * TRADE_CART_VALUE + trib_out[p] for p in pids}
+	top_extra = max(extra.values(), default=0)
 	for p in pids:
 		stats[p]['trade_carts'] = trade[p]
+		stats[p]['trade_carts_counted'] = trade_counted[p]
+		stats[p]['macro_bonus'] = round(MACRO_BONUS * extra[p] / top_extra, 1) if top_extra else 0.0
 		stats[p]['villager_value'] = villager_value(stats[p]['_vill_times'], stats[p]['_attacked'])
 	# Micro: value traded in fights. A unit that drops out within 2 minutes of its owner fighting counts as
 	# lost in that fight; its value is credited to the enemies who were fighting that player at that moment.
@@ -657,7 +675,7 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 		(0.15, _minmax({p: army[p]['targeted_share'] for p in pids})),
 	]
 	for p in pids:
-		macro = round(sum(part[p] for part in macro_parts) / len(macro_parts), 1)
+		macro = round(min(10.0, sum(part[p] for part in macro_parts) / len(macro_parts) + stats[p]['macro_bonus']), 1)
 		micro = round(sum(w * part[p] for w, part in micro_parts), 1)
 		good_micro = micro >= 6.0 and (army[p]['trade_ratio'] or 0) >= 1.1  # must win its fights on value
 		label = ("Macro + Micro" if macro >= 6.0 and good_micro else "Macro" if macro >= 6.0

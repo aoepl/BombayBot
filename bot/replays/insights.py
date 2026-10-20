@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 10
+ANALYSIS_VERSION = 11
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -89,6 +89,8 @@ db.ensure_table(dict(
 		dict(cname="villager_value", ctype=db.types.float),
 		dict(cname="unplanned_floating", ctype=db.types.int),
 		dict(cname="trade_carts", ctype=db.types.int),
+		dict(cname="trade_carts_counted", ctype=db.types.int),
+		dict(cname="macro_bonus", ctype=db.types.float),
 		dict(cname="score_exec", ctype=db.types.float),
 		dict(cname="score_pressure", ctype=db.types.float),
 		dict(cname="score_survival", ctype=db.types.float),
@@ -211,6 +213,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				feudal_s=_secs(s['ages'].get('Feudal Age')), castle_s=_secs(s['ages'].get('Castle Age')),
 				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers_queued=s['villagers_queued'], villager_value=s.get('villager_value'),
 				unplanned_floating=s.get('floating'), trade_carts=s.get('trade_carts'),
+				trade_carts_counted=s.get('trade_carts_counted'), macro_bonus=s.get('macro_bonus'),
 				score_exec=sc['exec'], score_pressure=sc['press'], score_survival=sc['surv'], score_team=sc['team'],
 				score_overall=sc['overall'], score_rank=s.get('score_rank'), elo_delta=s.get('elo_delta'),
 				elo_verdict=s.get('elo_verdict'), pressure_dealt=s.get('press_out'),

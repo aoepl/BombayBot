@@ -55,8 +55,9 @@ What the breakdown shows:
 * When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
-  a label). Macro: steady villager and military production, army size, villagers, economy beyond villagers
-  (trade carts and tributes to allies) and little unplanned floating.
+  a label). Macro: steady villager and military production, army size, villagers and little unplanned
+  floating, plus a bonus of up to 1 point (never a penalty) for resources tributed to allies and for trade
+  carts made once gold has likely run out (after 30:00, with no new Mining Camp in the 5 minutes before).
   Villagers: each one queued counts in full up to 120, then less and less until 150, and nothing after that,
   unless the player's base was attacked in the previous 10 minutes (10+ enemy army orders into it in a minute,
   or an enemy castle built there): those are replacements for villagers that were killed and count in full.
