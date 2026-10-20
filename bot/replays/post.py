@@ -95,12 +95,29 @@ def build_embed(result, title, narrative=None, footer=None, url=None):
 		players = result['players']
 		value = ", ".join(f"{players[a]['name']} → {players[b]['name']} {v:,}" for a, b, v in result['tributes'][:6])
 		embed.add_field(name="Tributes", value=_clip(value, 1024), inline=False)
+	embed.add_field(name="Scores", value=score_table(result), inline=False)
 	note = (
 		"Scores are 1–10 relative to this lobby. Survival is only scored when a base was seriously attacked (— otherwise). "
 		"Elo arrows compare each score with the player's BombayBot Elo."
 	)
 	embed.set_footer(text=_clip(f"{footer}\n{note}" if footer else note, 2048))
 	return embed
+
+
+def score_table(result):
+	""" Monospace table of every player's scores, best overall first. """
+	players, stats = result['players'], result['stats']
+	order = sorted(players, key=lambda p: -stats[p]['scores']['overall'])
+	fmt = lambda v: f"{v:>4.1f}" if v is not None else "   —"  # noqa: E731
+	lines = ["Player        Exec Pres Surv Team Total W/L"]
+	for pid in order:
+		p, sc = players[pid], stats[pid]['scores']
+		name = p['name'][:12].ljust(12)
+		result_txt = {True: "W", False: "L"}.get(p['won'], "-")
+		lines.append(
+			f"{name}  {fmt(sc['exec'])} {fmt(sc['press'])} {fmt(sc['surv'])} {fmt(sc['team'])}  {fmt(sc['overall'])}  {result_txt}"
+		)
+	return _clip("```\n" + "\n".join(lines) + "\n```", 1024)
 
 
 def auto_summary(result):
