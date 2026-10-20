@@ -64,14 +64,14 @@ async def replay_match(ctx, match_id: int):
 	await ctx.success(f"Posted the breakdown for match ({match_id}).")
 
 
-async def replay_upload(ctx, file: Attachment):
-	""" Analyse a recorded game file (.aoe2record or .zip). """
+async def replay_upload(ctx, file: Attachment, summary: bool = True):
+	""" Analyse a recorded game file (.aoe2record or .zip). With summary off, only save the player stats. """
 	if file.size > MAX_UPLOAD:
 		raise bot.Exc.ValueError("That file is too large for a recorded game.")
 	if not file.filename.lower().endswith(('.aoe2record', '.zip', '.gz')):
 		raise bot.Exc.ValueError("Attach an .aoe2record file, or a .zip with one inside.")
 	data = await file.read()
 	try:
-		await bot.replays.analyze_upload(ctx.qc, ctx, data, file.filename)
+		await bot.replays.analyze_upload(ctx.qc, ctx, data, file.filename, summary=summary)
 	except Exception as e:
 		raise bot.Exc.ValueError(f"Could not read that recorded game: {e}")

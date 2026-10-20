@@ -798,5 +798,9 @@ async def _replay_match(
 @groups.replay.subcommand(name='upload', description='Analyse a recorded game file (.aoe2record or .zip).')
 async def _replay_upload(
 		interaction: Interaction,
-		file: Attachment = SlashOption(description="The recorded game.")
-): await run_slash(bot.commands.replay_upload, interaction=interaction, file=file)
+		file: Attachment = SlashOption(description="The recorded game."),
+		summary: bool = SlashOption(
+			required=False, default=True,
+			description="Post a game breakdown (default). Turn off to only save the player stats."
+		)
+): await run_slash(bot.commands.replay_upload, interaction=interaction, file=file, summary=summary)

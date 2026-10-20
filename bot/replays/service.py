@@ -271,8 +271,8 @@ async def _notify(qc, text):
 		log.error(f"Replay notice failed: {e}")
 
 
-async def analyze_upload(qc, ctx, data: bytes, filename: str):
-	""" /replay upload: analyse a recorded game attached by a user. """
+async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = True):
+	""" /replay upload: analyse a recorded game attached by a user; post the breakdown unless summary is off. """
 	rec = await asyncio.to_thread(rec_parser.parse, data)
 	profile_ids = [p['profile_id'] for p in rec['players'] if p['profile_id']]
 	meta = {}
@@ -290,11 +290,16 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str):
 			if elos.get(uid) is not None:
 				meta.setdefault(pid, {})['elo'] = elos[uid]
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
-	await insights.save(
+	saved = await insights.save(
 		result, insights.game_key(filename=filename, rec_bytes=rec_parser.unwrap(data)), map_name=rec.get('map_name'),
 		channel_id=qc.id, source='upload', uploaded_by=ctx.author.id
 	)
 	title = post.make_title(result, rec.get('map_name'))
+	if not summary:
+		if not saved:
+			raise ReplayError("The recorded game was read, but its stats could not be saved.")
+		await ctx.success(f"Saved player stats from **{title}** ({len(result['players'])} players). No summary posted.")
+		return
 	await publish(
 		qc, result, rec_bytes=rec_parser.unwrap(data), map_name=rec.get('map_name'), title=title,
 		footer=f"Uploaded by {get_nick(ctx.author)}", reply_ctx=ctx,

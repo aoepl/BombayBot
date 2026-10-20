@@ -51,7 +51,7 @@
 | /aoe unlink           | Remove your AoE2 account link                           |
 | /aoe set              | Link an AoE2 account for another member (moderators)    |
 | /replay match         | Post the game breakdown for a reported match (moderators) |
-| /replay upload        | Analyse an attached recorded game (.aoe2record or .zip) |
+| /replay upload        | Analyse an attached recorded game (.aoe2record or .zip); `summary:False` only saves player stats |
 
 #### Miscellaneous
 | command               | description                                             |

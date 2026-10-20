@@ -109,7 +109,7 @@ def auto_summary(result):
 	press = max(players, key=lambda p: stats[p]['press_out'])
 	hit = max(players, key=lambda p: stats[p]['press_in'])
 	winners = [players[p]['name'] for p in players if players[p]['won']]
-	parts = [f"Game length {mmss(result['duration'])}."]
+	parts = [f"Analysed up to the first resignation at {mmss(result['duration'])}."]
 	if winners:
 		parts.append(f"Won by {', '.join(winners)}.")
 	parts.append(
@@ -138,7 +138,8 @@ def auto_summary(result):
 def text_for_ai(result, map_name=None, lobby=None):
 	""" Compact plain-text version of the analysis to feed the recap model. """
 	players, stats = result['players'], result['stats']
-	lines = [f"Map: {map_name or 'unknown'}. Lobby: {lobby or 'unknown'}. Length: {mmss(result['duration'])}."]
+	lines = [f"Map: {map_name or 'unknown'}. Lobby: {lobby or 'unknown'}. "
+		f"Data covers the game up to the first resignation at {mmss(result['duration'])}; describe nothing after that."]
 	for idx, (_, members) in enumerate(_teams(result)):
 		lines.append(_team_label(result, members, idx) + ":")
 		for pid in members:

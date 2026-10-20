@@ -66,7 +66,9 @@ How it works:
   and the recap show who played above or below their Elo.
 * Posts are titled "Map - Top player's Team (Civ) vs Top player's Team (Civ)", where the top player is the
   highest BombayBot Elo on each team and the winning team comes first.
-* `/replay upload` analyses any recorded game a member attaches.
+* `/replay upload` analyses any recorded game a member attaches. With `summary:False` it only saves the
+  player stats (see Player insights) and posts nothing.
+* The breakdown covers the game up to the first resignation; the result still counts every resignation.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
 

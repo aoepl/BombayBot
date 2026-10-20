@@ -71,6 +71,16 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	ref = reference()
 	A = rec['actions']
 	end = rec['duration']
+	# Who resigned (for the result) comes from the whole game, but everything else is judged only up to
+	# the first resignation: after that the game is decided and players leave, delete or idle.
+	all_resigns = {}
+	for a in A:
+		if a['a'] == 'RESIGN' and a.get('player_id') is not None and a['player_id'] not in all_resigns:
+			all_resigns[a['player_id']] = a['t']
+	if all_resigns:
+		end = min(all_resigns.values())
+		A = [a for a in A if a['t'] <= end]
+		rec = dict(rec, syncs=[s for s in rec['syncs'] if s['t'] <= end])
 	players = {p['number']: dict(p) for p in rec['players']}
 	for p in players.values():
 		p['civ'] = civ_name(p['civ_id'])
@@ -108,7 +118,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			p['seat'] = 'Flank' if any(players[n]['team_id'] != p['team_id'] for n in neigh) else 'Pocket'
 
 	# ---- winner from resigns when World's Edge did not tell us
-	resigns = {a['player_id']: a['t'] for a in A if a['a'] == 'RESIGN' and a.get('player_id') in players}
+	resigns = {p: t for p, t in all_resigns.items() if p in players}
 	if all(p['won'] is None for p in players.values()) and resigns:
 		for tid, members in teams.items():
 			lost = all(m in resigns for m in members)
@@ -428,7 +438,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	return dict(
 		duration=end, players=players, stats=stats, castles=castles,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
-		pressure=timeline_in, moments=key_moments(players, stats, castles, resigns),
+		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end}),
 	)
 
 
