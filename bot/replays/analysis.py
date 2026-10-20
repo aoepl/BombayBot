@@ -1240,6 +1240,8 @@ def _army_lines(counter, minimum=5):
 	return lines
 
 
+FEUDAL_ECO_TECHS = {'Double-Bit Axe', 'Horse Collar', 'Gold Mining', 'Stone Mining', 'Wheelbarrow', 'Gillnets'}
+FEUDAL_BOOM_FARMS = 8
 FISH_BOOM_SHIPS = 15   # fishing ships up to 10 minutes after Castle Age
 FISH_BOOM_SHARE = 0.25  # and at least a quarter of the workers made in that time
 
@@ -1262,6 +1264,14 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	feudal_attacks = sum(1 for t in attack_times if feudal and feudal <= t < (castle or end))
 	feudal_attack = feudal_attacks >= 10
 
+	# Feudal boom (Malay-style): little army in Feudal, eco upgrades and farms (or an extra TC) instead.
+	feudal_eco = {_name('technologies', a['technology_id']) for a in A if a['a'] == 'RESEARCH'
+		and a.get('player_id') == pid and feudal and feudal <= a['t'] < (castle or end)} & FEUDAL_ECO_TECHS
+	feudal_builds = Counter(_name('objects', a['building_id']) for a in A if a['a'] == 'BUILD'
+		and a.get('player_id') == pid and feudal and feudal <= a['t'] < (castle or end))
+	feudal_boom = bool(feudal) and sum(feudal_army.values()) < FEUDAL_ARMY_MIN and len(feudal_eco) >= 2 \
+		and (feudal_builds['Farm'] >= FEUDAL_BOOM_FARMS or feudal_builds['Town Center'] >= 1)
+
 	if forward_towers >= 2:
 		opening = "Feudal tower rush"
 	elif sum(feudal_army.values()) >= 8:
@@ -1270,6 +1280,8 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 			opening = "Feudal water: " + " + ".join(feudal_units or ["warships"])
 		else:
 			opening = "Feudal " + " + ".join(feudal_units or ["army"]) + ("" if feudal_attack else " (defensive)")
+	elif feudal_boom:
+		opening = "Feudal boom"
 	elif feudal and castle and castle - feudal <= 4 * 60000:
 		opening = "Fast Castle"
 	else:
@@ -1318,7 +1330,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 		parts.append(", ".join(extras))
 	return dict(
 		name=" → ".join(parts) if parts else "Standard play",
-		opening=opening, boom=boom, fish_boom=fish_boom, fishing_ships=fish, feudal_units=feudal_units, feudal_attack=feudal_attack,
+		opening=opening, feudal_boom=feudal_boom, boom=boom, fish_boom=fish_boom, fishing_ships=fish, feudal_units=feudal_units, feudal_attack=feudal_attack,
 		forward_towers=forward_towers, castle_units=castle_units, imperial_units=imperial_units,
 		main_units=main_units, fast_imp=fast_imp, forward_castles=forward_castles, tower_creep=tower_creep,
 	)

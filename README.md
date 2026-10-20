@@ -67,8 +67,9 @@ What the breakdown shows:
 * Each player gets a strategy name: opening → Castle Age army → Imperial Age army → extras, for example
   "Fast Castle → Monks + Temple Guard → Imp: Monks + Spearmen/Halbs → 3 forward castles".
   Openings: "Feudal tower rush" (2+ towers in an enemy base before Castle Age), "Feudal archers + scouts"
-  (8+ Feudal units, named by line, marked "(defensive)" if they never attacked), "Fast Castle" (Castle Age
-  clicked within 4 minutes of Feudal), "Feudal water: hulks + demo ships" when most Feudal units are warships,
+  (8+ Feudal units, named by line, marked "(defensive)" if they never attacked), "Feudal boom" (fewer than 8
+  Feudal military units, 2+ Feudal eco upgrades and 8+ farms or an extra Town Center in Feudal, e.g. Malay),
+  "Fast Castle" (Castle Age clicked within 4 minutes of Feudal), "Feudal water: hulks + demo ships" when most Feudal units are warships,
   then the boom as its own stage, named by the economy behind it: "farm boom" (2+ Town Centers
   within 7 minutes of Castle Age), "fish boom" (15+ fishing ships, a quarter or more of the workers made up to
   10 minutes after Castle Age) or "farm + fish boom" for both.

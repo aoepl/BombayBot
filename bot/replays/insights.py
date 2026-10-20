@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 33
+ANALYSIS_VERSION = 34
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -72,6 +72,7 @@ db.ensure_table(dict(
 		dict(cname="opening", ctype=db.types.str),
 		dict(cname="boom", ctype=db.types.bool),
 		dict(cname="fish_boom", ctype=db.types.bool),
+		dict(cname="feudal_boom", ctype=db.types.bool),
 		dict(cname="main_units", ctype=db.types.str),
 		dict(cname="feudal_units", ctype=db.types.str),
 		dict(cname="feudal_attack", ctype=db.types.bool),
@@ -216,7 +217,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				user_id=p.get('user_id'), name=p['name'], map_name=map_name, map_category=category,
 				team_size=team_size, civ=p['civ'], civ_id=p['civ_id'], team=p['team_id'], seat=p['seat'],
 				won=p['won'], elo=p.get('elo'), tg_rating=p.get('rating'),
-				strategy=s['strategy'], opening=parts.get('opening'), boom=parts.get('boom'), fish_boom=parts.get('fish_boom'),
+				strategy=s['strategy'], opening=parts.get('opening'), boom=parts.get('boom'), fish_boom=parts.get('fish_boom'), feudal_boom=parts.get('feudal_boom'),
 				main_units=", ".join(parts.get('main_units', [])), fast_imp=parts.get('fast_imp'),
 				feudal_units=", ".join(parts.get('feudal_units', [])), feudal_attack=parts.get('feudal_attack'),
 				forward_towers=parts.get('forward_towers'), castle_units=", ".join(parts.get('castle_units', [])),
