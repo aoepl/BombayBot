@@ -77,7 +77,7 @@ def build_embed(result, title, narrative=None, footer=None, url=None):
 	won = [p for p in result['players'].values() if p['won']]
 	colour = Colour.dark_teal() if won else Colour.dark_grey()
 	embed = Embed(title=_clip(title, 256), colour=colour, url=url)
-	desc = narrative or auto_summary(result)
+	desc = f"**AI summary**\n{narrative}" if narrative else auto_summary(result)
 	embed.description = _clip(desc, 3500)
 	for idx, (_, members) in enumerate(_teams(result)):
 		value = "\n".join(player_line(result, p) for p in members)

@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [

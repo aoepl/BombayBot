@@ -51,6 +51,8 @@ What the breakdown shows:
   Openings: "Feudal tower rush" (2+ towers in an enemy base before Castle Age), "Feudal archers + scouts"
   (8+ Feudal units, named by line, marked "(defensive)" if they never attacked), "Fast Castle" (Castle Age
   clicked within 4 minutes of Feudal), plus "boom" for 2+ Town Centers soon after Castle Age.
+  Each age's army lists the two biggest unit lines plus any siege the player made (2 or more units).
+* When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
   The overall score weighs them by seat (flank or pocket).
 * Survival is only scored for players whose base was seriously attacked: it rewards keeping the economy at

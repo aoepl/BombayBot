@@ -464,8 +464,22 @@ def _army_between(A, pid, t0, t1):
 	return c
 
 
+SIEGE = {'Battering Ram', 'Mangonel', 'Scorpion', 'Bombard Cannon', 'Trebuchet', 'Siege Tower',
+	'Rocket Cart', 'Organ Gun', 'Houfnice', 'Traction Trebuchet', 'Armored Elephant', 'Siege Elephant'}
+
+
 def _top_lines(counter, minimum, names=LINE_NAMES, limit=2):
 	return [names.get(n, n) for n, c in counter.most_common() if c >= minimum][:limit]
+
+
+def _army_lines(counter, minimum=5):
+	""" Top two unit lines, plus any siege the player made (2 or more) that isn't already listed. """
+	lines = _top_lines(counter, minimum)
+	for n, c in counter.most_common():
+		label = LINE_NAMES.get(n, n)
+		if n in SIEGE and c >= 2 and label not in lines:
+			lines.append(label)
+	return lines
 
 
 def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
@@ -497,8 +511,8 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)
 
 	# Castle Age and Imperial Age armies, separately.
-	castle_units = _top_lines(_army_between(A, pid, castle, imp or end), 5) if castle else []
-	imperial_units = _top_lines(_army_between(A, pid, imp, end), 5) if imp else []
+	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
+	imperial_units = _army_lines(_army_between(A, pid, imp, end)) if imp else []
 	main_units = castle_units or imperial_units
 	fast_imp = bool(imp and imp < 25 * 60000)
 	forward_castles = sum(1 for c in my_castles if c['forward'])
