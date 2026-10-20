@@ -504,8 +504,9 @@ def _steady(times, start, end):
 def playstyle(A, players, stats, army, peak_bank, end):
 	"""
 	Macro: steady villager and military production, a big army on the map, many villagers, little floating.
-	Micro (estimated; the replay has no kill data): army commands per minute, share of attack orders aimed
-	at a specific enemy unit or building, smaller groups, and how much of the produced military stays alive.
+	Micro (estimated; the replay has no kill data): value traded in fights (enemy army value that dropped out
+	while fighting this player vs own army value that dropped out while fighting), how much fighting the player
+	did, and target picking. Lots of clicking without fighting, or fights that lose the army, score low.
 	Both scores are 1-10 within the lobby; 6.0 or more earns the label.
 	"""
 	pids = list(players)
@@ -522,17 +523,42 @@ def playstyle(A, players, stats, army, peak_bank, end):
 		_minmax({p: stats[p]['villagers'] for p in pids}),
 		_minmax(peak_bank, invert=True),
 	]
+	# Micro: value traded in fights. A unit that drops out within 2 minutes of its owner fighting counts as
+	# lost in that fight; its value is credited to the enemies who were fighting that player at that moment.
+	lost, killed = Counter(), Counter()
+	for p in pids:
+		for t_last, value in army[p]['_gone']:
+			m = int(t_last // 60000)
+			window = [army[p]['_fights'].get(k, {}) for k in (m - 1, m, m + 1, m + 2)]
+			if not any(window):
+				continue  # dropped out away from any fight: not counted
+			lost[p] += value
+			credit = Counter()
+			for e in pids:
+				if players[e]['team_id'] == players[p]['team_id']:
+					continue
+				for k in (m - 1, m, m + 1, m + 2):
+					credit[e] += army[e]['_fights'].get(k, {}).get(p, 0)
+			total = sum(credit.values())
+			for e, n in credit.items():
+				if n:
+					killed[e] += value * n / total
+	for p in pids:
+		army[p]['value_lost_in_fights'] = round(lost[p])
+		army[p]['value_killed_in_fights'] = round(killed[p])
+		volume = lost[p] + killed[p]
+		army[p]['trade_ratio'] = round(killed[p] / lost[p], 2) if lost[p] else (None if not killed[p] else 99.0)
 	micro_parts = [
-		_minmax({p: army[p]['army_apm'] for p in pids}),
-		_minmax({p: army[p]['targeted_share'] for p in pids}),
-		_minmax({p: army[p]['avg_group'] for p in pids}, invert=True),
-		_minmax({p: army[p]['units_kept'] for p in pids}),
+		(0.60, _minmax({p: (killed[p] / (killed[p] + lost[p]) if killed[p] + lost[p] else None) for p in pids})),
+		(0.25, _minmax({p: lost[p] + killed[p] for p in pids})),
+		(0.15, _minmax({p: army[p]['targeted_share'] for p in pids})),
 	]
 	for p in pids:
 		macro = round(sum(part[p] for part in macro_parts) / len(macro_parts), 1)
-		micro = round(sum(part[p] for part in micro_parts) / len(micro_parts), 1)
-		label = ("Macro + Micro" if macro >= 6.0 and micro >= 6.0 else "Macro" if macro >= 6.0
-			else "Micro" if micro >= 6.0 else "Neither stood out")
+		micro = round(sum(w * part[p] for w, part in micro_parts), 1)
+		good_micro = micro >= 6.0 and (army[p]['trade_ratio'] or 0) >= 1.1  # must win its fights on value
+		label = ("Macro + Micro" if macro >= 6.0 and good_micro else "Macro" if macro >= 6.0
+			else "Micro" if good_micro else "Neither stood out")
 		stats[p]['macro'], stats[p]['micro'], stats[p]['playstyle'] = macro, micro, label
 
 
@@ -541,7 +567,10 @@ ENGAGE_WINDOW = 60000  # ms
 
 
 def find_engagements(A, players, base_of, villagers):
-	""" ids (id(action)) of army orders that went at the enemy: their base, their units or their buildings. """
+	"""
+	Army orders that went at the enemy: their base, their units or their buildings.
+	Returns {id(action): set of enemy players it went at}.
+	"""
 	owner = {}
 	for a in A:
 		if a.get('player_id') in players:
@@ -558,22 +587,23 @@ def find_engagements(A, players, base_of, villagers):
 	for a in orders:
 		by_minute[int(a['t'] // 60000)].append(a)
 
-	offensive = set()
+	offensive = {}
 	for a in orders:
 		team = players[a['player_id']]['team_id']
+		enemies = set()
 		target = a.get('target_id') or 0
 		if target > 0 and owner.get(target) in players and players[owner[target]]['team_id'] != team:
-			offensive.add(id(a))
-			continue
-		if players[base_of(a['x'], a['y'])]['team_id'] != team:
-			offensive.add(id(a))
-			continue
+			enemies.add(owner[target])
+		b = base_of(a['x'], a['y'])
+		if players[b]['team_id'] != team:
+			enemies.add(b)
 		m = int(a['t'] // 60000)
 		for other in by_minute[m - 1] + by_minute[m] + by_minute[m + 1]:
 			if players[other['player_id']]['team_id'] != team and abs(other['t'] - a['t']) <= ENGAGE_WINDOW \
 					and math.dist((other['x'], other['y']), (a['x'], a['y'])) <= ENGAGE_RADIUS:
-				offensive.add(id(a))
-				break
+				enemies.add(other['player_id'])
+		if enemies:
+			offensive[id(a)] = enemies
 	return offensive
 
 
@@ -663,7 +693,18 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 				j += 1
 			produced[m] = cum
 		kept = [alive[m] / produced[m] for m in window if produced[m] >= 10]
+		# Units that stop being commanded before the end of the game are presumed gone (most often killed).
+		gone = []
+		for i in military[pid]:
+			t_gone = seen[(pid, i)][1] + ARMY_ALIVE_GRACE
+			if t_gone < end - ARMY_ALIVE_GRACE:
+				gone.append((seen[(pid, i)][1], value_per_unit[min(minutes - 1, int(seen[(pid, i)][1] // 60000))]))
+		fights = defaultdict(Counter)  # minute -> enemy -> orders
+		for a in army_cmds:
+			for e in offensive.get(id(a), ()):
+				fights[int(a['t'] // 60000)][e] += 1
 		out[pid] = dict(
+			_gone=gone, _fights=fights,
 			army_apm=round(len(army_cmds) / army_minutes, 1),
 			targeted_share=round(targeted / offensive_cmds, 2) if offensive_cmds else 0.0,
 			avg_group=round(sum(group_sizes) / len(group_sizes), 1) if group_sizes else None,

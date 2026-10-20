@@ -60,14 +60,12 @@ def player_line(result, pid):
 	seat = f" · {p['seat']}" if p['seat'] else ""
 	elo = f" · Elo {p['elo']}" if p.get('elo') is not None else ""
 	verdict = f" · {VERDICT_MARK[s['elo_verdict']]}" if s.get('elo_verdict') in VERDICT_MARK else ""
-	surv = sc['surv'] if sc['surv'] is not None else "—"
 	return (
 		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{elo} · **{sc['overall']}**/10{verdict}"
 		f" · {s['playstyle']}\n"
 		f"> {s['strategy']}\n"
 		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} APM"
 		f" · Army {s['army']['avg_units']} avg / {s['army']['peak_units']} peak units"
-		f" · Exec {sc['exec']} · Pressure {sc['press']} · Survival {surv} · Team {sc['team']}"
 	)
 
 
@@ -82,8 +80,14 @@ def build_embed(result, title, narrative=None, footer=None, url=None):
 	desc = f"**AI summary**\n{narrative}" if narrative else auto_summary(result)
 	embed.description = _clip(desc, 3500)
 	for idx, (_, members) in enumerate(_teams(result)):
-		value = "\n".join(player_line(result, p) for p in members)
-		embed.add_field(name=_team_label(result, members, idx), value=_clip(value, 1024), inline=False)
+		# Discord allows 1024 characters per section: continue a team in a second section if needed.
+		name, value = _team_label(result, members, idx), ""
+		for line in (player_line(result, p) for p in members):
+			if value and len(value) + len(line) + 1 > 1024:
+				embed.add_field(name=name, value=value, inline=False)
+				name, value = "\u200b", ""
+			value += ("\n" if value else "") + _clip(line, 1024)
+		embed.add_field(name=name, value=value, inline=False)
 	if result['moments']:
 		lines = [f"`{t}` {txt}" for t, txt in result['moments']]
 		value = ""
@@ -178,9 +182,9 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"army orders into enemy bases {s['press_out']}{target}; enemy orders into own base {s['press_in']}, "
 				f"enemy castles built in own base {s['enemy_castles_in_base']} (cleared {s['enemy_castles_cleared']}); "
 				f"playstyle {s['playstyle']} (macro {s['macro']}/10: steady villager and military production, army size, "
-				f"economy; micro {s['micro']}/10 estimated from army commands per minute {s['army']['army_apm']}, "
-				f"{round(s['army']['targeted_share'] * 100)}% of attack orders aimed at a specific target, average group "
-				f"{s['army']['avg_group']} units, share of produced military kept alive {s['army']['units_kept']}); "
+				f"economy; micro {s['micro']}/10 from fights: estimated enemy army value killed "
+				f"{s['army']['value_killed_in_fights']} vs own army value lost {s['army']['value_lost_in_fights']}, "
+				f"{round(s['army']['targeted_share'] * 100)}% of attack orders aimed at a specific target); "
 				f"army on the map from 15 min: {s['army']['avg_units']} units on average, peak {s['army']['peak_units']}, "
 				f"average unit value {s['army']['unit_value']} (gold weighted most), army value sent at the enemy (its base, units or buildings) "
 				f"{s['army']['value_sent']}; tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "

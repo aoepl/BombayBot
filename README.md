@@ -56,8 +56,10 @@ What the breakdown shows:
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
   a label). Macro: steady villager and military production, army size, villager count and little floating.
-  Micro is estimated, since the replay has no kill data: army commands per minute, share of attack orders
-  aimed at a specific enemy unit or building, smaller groups, and how much of the produced military stays alive.
+  Micro is about fights, not clicks, and is estimated because the replay has no kill data: a unit that stops
+  being commanded during or right after a fight counts as lost there, and its value is credited to the enemies
+  fighting that player at the time. Micro weighs value traded (60%), how much fighting the player did (25%)
+  and target picking (15%). The Micro label also needs more value killed than lost (1.1 times or better).
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
   40% average army value on the map from 15 minutes on (units plus castles, Kreposts, Donjons and towers),
   45% army value sent at the enemy, and 15% forward castles and towers. An order counts as sent at the enemy
