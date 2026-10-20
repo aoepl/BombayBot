@@ -15,10 +15,7 @@ import re
 from functools import lru_cache
 from importlib import resources
 
-from mgz import fast
-from mgz.fast import header as mgz_header
-from mgz.fast.enums import Operation, Action
-from mgz.util import Version
+# mgz is imported inside the functions, so the rest of the bot still starts if it is missing.
 
 # Action types we keep; everything else is dropped to save memory.
 KEEP_ACTIONS = {
@@ -142,6 +139,8 @@ def _map_name(header_bytes, rms_map_id):
 
 
 def read_players(raw: bytes):
+	from mgz.fast import header as mgz_header
+	from mgz.util import Version
 	stream = io.BytesIO(raw)
 	header = mgz_header.decompress(stream)
 	version, game, save, log = mgz_header.parse_version(header, stream)
@@ -177,6 +176,8 @@ def parse(data: bytes) -> dict:
 	"""
 	Returns dict(save, duration (ms), players [..], actions [{t, a, ...}], syncs [{t, <player>: {...}}], chat [...])
 	"""
+	from mgz import fast
+	from mgz.fast.enums import Operation
 	raw = unwrap(data)
 	save, players, map_name, started_at = read_players(raw)
 

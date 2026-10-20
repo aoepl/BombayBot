@@ -52,6 +52,10 @@ async def replay_upload(ctx, file: Attachment, summary: bool = True):
 		raise bot.Exc.ValueError("That file is too large for a recorded game.")
 	if not file.filename.lower().endswith(('.aoe2record', '.zip', '.gz')):
 		raise bot.Exc.ValueError("Attach an .aoe2record file, or a .zip with one inside.")
+	try:
+		import mgz  # noqa: F401
+	except ImportError:
+		raise bot.Exc.ValueError("Replay analysis is not available: the mgz package is not installed on the bot.")
 	data = await file.read()
 	try:
 		await bot.replays.analyze_upload(ctx.qc, ctx, data, file.filename, summary=summary)
