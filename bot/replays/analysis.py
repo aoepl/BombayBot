@@ -306,37 +306,56 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	]
 	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up',))
 	press = _minmax({p: press_out[p] + 25 * fwd_up[p] for p in pids})
+	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
+	siege_in, cleared, siege_times = Counter(), Counter(), defaultdict(list)
+	for c in castles:
+		if c['forward'] and c['status'] != 'unclear':  # only castles that were actually built
+			siege_in[c['base']] += 40
+			siege_times[c['base']].append(c['t'])
+			if c['status'] in ('lost', 'deleted'):
+				cleared[c['base']] += 1
+	for a in A:
+		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) in TOWERS:
+			b = base_of(a['x'], a['y'])
+			if players[b]['team_id'] != players[a['player_id']]['team_id']:
+				siege_in[b] += 5
+				siege_times[b].append(a['t'])
+	pressure = {p: press_in[p] + siege_in[p] for p in pids}
+
 	# Survival only counts for players whose base was really attacked: did they keep their
 	# economy at home afterwards, or did they have to rebuild somewhere else?
-	max_in = max(press_in.values()) if press_in else 0
+	max_in = max(pressure.values()) if pressure else 0
 	survival, survival_note = {}, {}
 	for p in pids:
-		if not max_in or press_in[p] < max(50, 0.25 * max_in):
+		enemy_castles = sum(1 for c in castles if c['forward'] and c['base'] == p and c['status'] != 'unclear')
+		stats[p]['enemy_castles_in_base'] = enemy_castles
+		stats[p]['enemy_castles_cleared'] = cleared[p]
+		if not max_in or (pressure[p] < max(50, 0.25 * max_in) and enemy_castles == 0):
 			survival[p] = None
 			survival_note[p] = "base not seriously attacked"
 			continue
 		tl = timeline_in[p]
-		total, cum, pressure_start = sum(tl.values()), 0, 0
+		total, cum, pressure_start = sum(tl.values()), 0, None
 		for minute in sorted(tl):
 			cum += tl[minute]
 			if cum >= 0.2 * total:
 				pressure_start = minute * 60000
 				break
+		starts = [t for t in [pressure_start] + siege_times[p] if t is not None]
+		pressure_start = min(starts) if starts else 0
 		eco = [a for a in A if a['a'] == 'BUILD' and a.get('player_id') == p and a['t'] >= pressure_start
 			and _name('objects', a['building_id']) in ECO_BUILDINGS]
-		if eco:
-			home = sum(1 for a in eco if base_of(a['x'], a['y']) == p) / len(eco)
-		else:
-			home = 0.5
+		home = sum(1 for a in eco if base_of(a['x'], a['y']) == p) / len(eco) if eco else 0.5
 		moved_tcs = sum(1 for a in eco if _name('objects', a['building_id']) == 'Town Center' and base_of(a['x'], a['y']) != p)
 		held = max(0.0, min(1.0, home - 0.1 * moved_tcs))
-		value = 1 + 9 * held + (press_in[p] / max_in) * held
+		value = 1 + 9 * held + (pressure[p] / max_in) * held + 0.5 * min(cleared[p], 2)
 		survival[p] = max(1.0, min(10.0, value))
+		cleared_txt = f", cleared {cleared[p]} enemy castle{'s' if cleared[p] != 1 else ''}" if cleared[p] else ""
 		survival_note[p] = (
-			f"held the base under pressure ({round(home * 100)}% of new economy buildings at home)" if held >= 0.75 else
-			f"base partly lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere)"
+			f"held the base under pressure ({round(home * 100)}% of new economy buildings at home{cleared_txt})" if held >= 0.75 else
+			f"base partly lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 			if held >= 0.4 else
-			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere)"
+			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
 	team_parts = [
 		_minmax({p: trib_out[p] for p in pids}),
@@ -383,7 +402,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p in pids:
 		stats[p]['strategy'] = strategy_name(stats[p], [c for c in castles if c['player'] == p], A, p)
 		stats[p].update(
-			press_out=press_out[p], press_in=press_in[p], help_out=help_out[p],
+			press_out=press_out[p], press_in=press_in[p], pressure_in=pressure[p], help_out=help_out[p],
 			trib_out=int(trib_out[p]), trib_in=int(trib_in[p]), peak_bank=peak_bank[p],
 			top_target=max(((players[d]['civ'], n) for (a, d), n in press_matrix.items() if a == p), key=lambda x: x[1], default=None),
 		)
