@@ -645,6 +645,7 @@ REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of a
 VILLAGER_TRAIN = 25000     # ms per villager at one Town Center
 WORKER_TRAIN = {'Villager': VILLAGER_TRAIN, 'Fishing Ship': 40000}  # fishing ships are economy workers too
 VILLAGER_HIT_GRACE = 20000  # ms: a targeted villager its owner ordered again after this got away
+VILLAGER_CONFIRM = 3 * 60000  # hits in the last 3 minutes analysed can't be confirmed (no time to see it again)
 START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
 
 
@@ -654,7 +655,7 @@ def villager_estimate(A, players, villagers, army_alive, end):
 	- made: each queue click is 1 villager (5 with Shift); with several Town Centers selected each villager
 	  goes to the TC with the shortest queue, and a TC trains one every 25 s, so over-queueing is not counted;
 	- lost: a villager an enemy attack order targeted, and that its owner never ordered again, is counted as
-	  killed (credited to that attacker); deleted villagers are subtracted too. Villagers killed without being
+	  killed (credited to that attacker), except in the last 3 minutes analysed, where that can't be told; deleted villagers are subtracted too. Villagers killed without being
 	  clicked on (attack-move, towers, castles) are not seen, so losses are a lower bound;
 	- capped by population room: at most 200 minus the army on the map.
 	Returns {pid: dict(made=[times], lost=[times], alive=[per minute])}.
@@ -716,6 +717,8 @@ def villager_estimate(A, players, villagers, army_alive, end):
 				continue
 			if last.get(o, (0,))[0] > t_hit + VILLAGER_HIT_GRACE:
 				continue  # it was given orders afterwards: it got away
+			if t_hit > end - VILLAGER_CONFIRM:
+				continue  # too close to the end to tell: its owner had no time to order it again
 			lost.append(t_hit)
 			killers[attacker] += 1
 			killed.append((t_hit, {attacker: 1.0}))
