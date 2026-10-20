@@ -30,7 +30,7 @@ def replay_link(match_id, profile_id):
 def match_links(match_id):
 	return dict(
 		insights=f"https://www.aoe2insights.com/match/{match_id}/",
-		companion=f"https://www.aoe2companion.com/match/{match_id}",
+		companion=f"https://www.aoe2companion.com/matches/{match_id}",
 	)
 
 
