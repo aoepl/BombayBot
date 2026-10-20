@@ -56,16 +56,22 @@ What the breakdown shows:
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
   a label). Macro: steady villager and military production, army size, population kept high from 20:00
-  (estimated from villagers queued, trade carts and army), villagers and little unplanned floating, plus a bonus of up to 1 point for trade carts made and resources tributed to allies. Not trading
-  only costs points (up to 1) when a player ran out of gold income late in a 40+ minute game: in the last
-  15 minutes analysed, gold was under 20% of their spending and they sold 1000+ at the Market or built no new
-  Mining Camp (or Mule Cart / Muisca drop site), with no trade carts (20 remove the penalty) and no gold tributed in by allies. A player still
-  mining gold is never penalised for not trading.
-  Villagers: each one queued counts in full up to 120, then less and less until 150, and nothing after that,
-  unless the player's base was attacked in the previous 10 minutes (10+ enemy army orders into it in a minute,
-  or an enemy castle built there): those are replacements for villagers that were killed and count in full.
+  (estimated villagers alive, trade carts and army), villagers made and little unplanned floating, plus a
+  bonus of up to 1 point for trade carts made and resources tributed to allies. Not trading only costs points
+  (up to 1) when a player ran out of gold income late in a 40+ minute game: in the last 15 minutes analysed,
+  gold was under 20% of their spending and they sold 1000+ at the Market or built no new Mining Camp (or Mule
+  Cart / Muisca drop site), with no trade carts (20 remove the penalty) and no gold tributed in by allies. A
+  player still mining gold is never penalised for not trading.
+  Villagers alive are estimated, since the replay has no unit counts: a queue click is 1 villager (5 with
+  Shift); with several Town Centers selected each villager goes to the TC with the shortest queue, and a TC
+  trains one every 25 seconds. A villager is counted as killed when its last order is followed within 3
+  minutes by 3+ enemy army orders within 10 tiles of it; deleted villagers are subtracted; and villagers can
+  never exceed 200 minus the army on the map.
+  Villager value: each villager made counts in full while the player has under 120 alive, then less and less
+  until 150, and nothing at 150+ (unless the base was attacked in the previous 10 minutes). After losses the
+  alive count drops, so replacements count again.
   Floating: resources banked from 10 minutes on count against the player, except near 200 population
-  (estimated from villagers queued, army on the map and trade carts) and money saved for a research, age-up
+  (estimated villagers alive, army on the map and trade carts) and money saved for a research, age-up
   or building costing 600+ that the player starts within the next 2 minutes. Execution uses the same rules.
   Micro is about fights, not clicks, and is estimated because the replay has no kill data: a unit that stops
   being commanded during or right after a fight counts as lost there, and its value is credited to the enemies

@@ -355,7 +355,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	exec_parts = [
 		_minmax(castle_click, invert=True),
 		_minmax(imp_click, invert=True),
-		_minmax({p: villager_value(stats[p]['_vill_times'], attacked[p]) for p in pids}),
+		None,  # villager value: filled in once villagers alive are estimated (below)
 		_minmax({p: stats[p]['first_military'] for p in pids}, invert=True),
 	]  # unplanned floating is added once it is known (below)
 	# Pressure: the army a player keeps on the map (units plus castles and towers, valued by cost),
@@ -374,9 +374,18 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	press = {p: 0.40 * on_map[p] + 0.45 * sent[p] + 0.15 * forward[p] for p in pids}
 	for p in pids:
 		stats[p]['army'] = army[p]
+	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end)
+	for p in pids:
+		v = vest[p]
+		stats[p]['_vill_made'], stats[p]['_vill_alive'] = v['made'], v['alive']
+		stats[p]['villagers_made'] = len(v['made'])
+		stats[p]['villagers_lost'] = len(v['lost'])
+		stats[p]['villagers_peak'] = max(v['alive'], default=0)
+		stats[p]['villagers_at'] = {m: v['alive'][m] for m in (20, 30, 40) if m < len(v['alive'])}
 	floating = {p: unplanned_floating(A, p, curve.get(p, []), army[p]['_alive'], stats[p], end) for p in pids}
 	for p in pids:
 		stats[p]['floating'] = floating[p]
+	exec_parts[2] = _minmax({p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids})
 	exec_parts.append(_minmax(floating, invert=True))
 	playstyle(A, players, stats, army, floating, end, trib_out)
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
@@ -544,16 +553,95 @@ MINING_SITES = {'Mining Camp', 'Mule Cart', '2556'}
 REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of an attack on the base are replacements
 
 
-def villager_value(times, attacked_minutes=()):
+VILLAGER_TRAIN = 25000     # ms per villager at one Town Center
+VILLAGER_KILL_RADIUS = 10  # tiles
+VILLAGER_KILL_ORDERS = 3   # enemy army orders near a villager's last position that mean it was likely killed
+START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
+
+
+def villager_estimate(A, players, villagers, army_alive, end):
 	"""
-	Value of villagers queued: full value up to 120, then less and less until 150, and nothing after that
-	unless the player's base was attacked in the previous 10 minutes: then they are replacing villagers
-	that were killed, and each one counts in full again.
+	Estimated villagers alive per minute. The replay has no unit counts, so:
+	- made: each queue click is 1 villager (5 with Shift); with several Town Centers selected each villager
+	  goes to the TC with the shortest queue, and a TC trains one every 25 s, so over-queueing is not counted;
+	- lost: a villager whose last order was followed, within 3 minutes, by 3+ enemy army orders within
+	  10 tiles of it is counted as killed; deleted villagers are subtracted too;
+	- capped by population room: at most 200 minus the army on the map.
+	Returns {pid: dict(made=[times], lost=[times], alive=[per minute])}.
+	"""
+	vill = set(villagers)
+	for a in A:  # groups that are mostly known villagers are villagers too
+		ids = a.get('object_ids') or []
+		if a['a'] in ('ORDER', 'MOVE') and ids and sum(i in vill for i in ids) * 2 >= len(ids):
+			vill.update(ids)
+	owner, last, deleted = {}, {}, {}
+	for a in A:
+		if a['t'] > end:
+			break
+		for o in a.get('object_ids') or []:
+			owner.setdefault(o, a.get('player_id'))
+			if o not in vill:
+				continue
+			if a['a'] == 'DELETE':
+				deleted[o] = a['t']
+			elif a.get('x') and a['x'] > 0:
+				last[o] = (a['t'], a['x'], a['y'])
+			elif o in last:
+				last[o] = (a['t'],) + last[o][1:]
+	enemy_orders = defaultdict(list)
+	for a in A:
+		ids = a.get('object_ids') or []
+		if a['a'] in ARMY_ORDERS and a.get('player_id') in players and ids and a.get('x') and a['x'] > 0 \
+				and not all(i in vill for i in ids):
+			enemy_orders[int(a['t'] // 60000)].append(a)
+	out = {}
+	minutes = int(end // 60000) + 1
+	for pid, p in players.items():
+		made, free = [], defaultdict(int)
+		for a in A:
+			if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid and a['t'] <= end and _name('objects', a['unit_id']) == 'Villager':
+				ids = a.get('object_ids') or [0]
+				for _ in range(a.get('amount', 1) or 1):
+					tc = min(ids, key=lambda i: free[i])
+					free[tc] = max(a['t'], free[tc]) + VILLAGER_TRAIN
+					made.append(free[tc])
+		made.sort()
+		lost = [t for o, t in deleted.items() if owner.get(o) == pid]
+		for o, (t, x, y) in last.items():
+			if owner.get(o) != pid or o in deleted or t > end - 4 * 60000:
+				continue
+			m, near = int(t // 60000), 0
+			for k in range(m - 1, m + 4):
+				for e in enemy_orders[k]:
+					if players[e['player_id']]['team_id'] != p['team_id'] and t - 60000 <= e['t'] <= t + 180000 \
+							and math.dist((x, y), (e['x'], e['y'])) <= VILLAGER_KILL_RADIUS:
+						near += 1
+			if near >= VILLAGER_KILL_ORDERS:
+				lost.append(t)
+		lost.sort()
+		start = START_VILLAGERS.get(p.get('civ'), 3)
+		alive = []
+		for m in range(minutes):
+			t = m * 60000
+			n = start + sum(1 for x in made if x <= t) - sum(1 for x in lost if x <= t)
+			army = army_alive[pid][min(len(army_alive[pid]) - 1, m)] if army_alive.get(pid) else 0
+			alive.append(max(0, min(n, POP_CAP - army)))
+		out[pid] = dict(made=made, lost=lost, alive=alive)
+	return out
+
+
+def villager_value(times, attacked_minutes=(), alive=None):
+	"""
+	Value of villagers made: full value while the player has under 120 alive, then less and less until 150,
+	and nothing at 150+ unless the base was attacked in the previous 10 minutes (replacements). With an
+	alive estimate, a villager made after losses counts again because the alive count went down.
 	"""
 	attacked = set(attacked_minutes)
 	value, count = 0.0, 0
 	for t in sorted(times):
 		count += 1
+		if alive:  # villagers alive when this one came out (so replacements after losses count again)
+			count = alive[min(len(alive) - 1, int(t // 60000))] + 1
 		if count <= VILLAGER_FULL:
 			value += 1
 		elif count <= VILLAGER_STOP:
@@ -568,7 +656,7 @@ def villager_value(times, attacked_minutes=()):
 def unplanned_floating(A, pid, curve, military_alive, st, end):
 	"""
 	Average resources banked without a reason, from 10 minutes on. Not counted: snapshots where the player
-	is near 200 population (estimated from villagers queued, army on the map and trade carts), and money
+	is near 200 population (estimated villagers alive, army on the map and trade carts), and money
 	being saved for a big research, age-up or building started within the next 2 minutes.
 	"""
 	purchases = []
@@ -594,7 +682,11 @@ def unplanned_floating(A, pid, curve, military_alive, st, end):
 	for t, _, bank in curve:
 		if t < 10 * 60000 or t > end:
 			continue
-		villagers = min(VILLAGER_STOP, sum(n for tq, n in vill_queue if tq <= t))
+		alive = st.get('_vill_alive')
+		if alive:
+			villagers = alive[min(len(alive) - 1, int(t // 60000))]
+		else:
+			villagers = min(VILLAGER_STOP, sum(n for tq, n in vill_queue if tq <= t))
 		trade = sum(n for tq, n in trade_queue if tq <= t)
 		minute = min(len(military_alive) - 1, int(t // 60000)) if military_alive else 0
 		pop = villagers + trade + (military_alive[minute] if military_alive else 0)
@@ -608,9 +700,9 @@ def unplanned_floating(A, pid, curve, military_alive, st, end):
 POP_FROM = 20 * 60000  # population is judged from 20:00 (from 15:00 in shorter games)
 
 
-def average_population(A, pid, military_alive, end):
+def average_population(A, pid, military_alive, end, villagers_alive=None):
 	"""
-	Estimated population, averaged per minute from 20:00 to the end analysed: villagers queued (at most 150),
+	Estimated population, averaged per minute from 20:00 to the end analysed: villagers alive (estimated),
 	trade carts and army on the map, capped at 200. Keeping it high all game is good macro.
 	"""
 	vill, trade = [], []
@@ -625,7 +717,10 @@ def average_population(A, pid, military_alive, end):
 	values = []
 	for minute in range(int(start // 60000), int(end // 60000) + 1):
 		t = minute * 60000
-		villagers = min(VILLAGER_STOP, sum(n for tq, n in vill if tq <= t))
+		if villagers_alive:
+			villagers = villagers_alive[min(len(villagers_alive) - 1, minute)]
+		else:
+			villagers = min(VILLAGER_STOP, sum(n for tq, n in vill if tq <= t))
 		carts = sum(n for tq, n in trade if tq <= t)
 		army = military_alive[min(len(military_alive) - 1, minute)] if military_alive else 0
 		values.append(min(POP_CAP, villagers + carts + army))
@@ -660,13 +755,13 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 			else:
 				mil_times[p].append(a['t'])
 	castle_plus = {p: (stats[p]['ages'].get('Castle Age') or end) + 10 * 60000 for p in pids}
-	avg_pop = {p: average_population(A, p, army[p]['_alive'], end) for p in pids}
+	avg_pop = {p: average_population(A, p, army[p]['_alive'], end, stats[p].get('_vill_alive')) for p in pids}
 	macro_parts = [
 		_minmax({p: _steady(vill_times[p], 0, min(end, castle_plus[p])) for p in pids}),
 		_minmax({p: _steady(mil_times[p], stats[p]['first_military'], end) for p in pids}),
 		_minmax({p: army[p]['avg_units'] for p in pids}),
 		_minmax(avg_pop),
-		_minmax({p: villager_value(stats[p]['_vill_times'], stats[p]['_attacked']) for p in pids}),
+		_minmax({p: villager_value(stats[p].get('_vill_made') or stats[p]['_vill_times'], stats[p]['_attacked'], stats[p].get('_vill_alive')) for p in pids}),
 		_minmax(floating, invert=True),
 	]
 	# Bonus only (never a penalty): trade carts and tributes sent to allies add up to MACRO_BONUS points.
@@ -685,7 +780,7 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 		stats[p]['no_trade_penalty'] = round(penalty, 1)
 		stats[p]['trade_carts'] = trade[p]
 		stats[p]['macro_bonus'] = round(MACRO_BONUS * extra[p] / top_extra, 1) if top_extra else 0.0
-		stats[p]['villager_value'] = villager_value(stats[p]['_vill_times'], stats[p]['_attacked'])
+		stats[p]['villager_value'] = villager_value(stats[p].get('_vill_made') or stats[p]['_vill_times'], stats[p]['_attacked'], stats[p].get('_vill_alive'))
 	# Micro: value traded in fights. A unit that drops out within 2 minutes of its owner fighting counts as
 	# lost in that fight; its value is credited to the enemies who were fighting that player at that moment.
 	lost, killed = Counter(), Counter()
