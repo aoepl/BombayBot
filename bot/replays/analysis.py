@@ -1240,6 +1240,10 @@ def _army_lines(counter, minimum=5):
 	return lines
 
 
+FISH_BOOM_SHIPS = 15   # fishing ships up to 10 minutes after Castle Age
+FISH_BOOM_SHARE = 0.25  # and at least a quarter of the workers made in that time
+
+
 def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	""" The strategy as separate parts (for stats later) plus a readable name. """
 	ages = st['ages']
@@ -1270,7 +1274,19 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 		opening = "Fast Castle"
 	else:
 		opening = "Standard"
-	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)
+	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
+	# Fish boom: a big share of the economy from fishing ships, up to 10 minutes after Castle Age.
+	boom_end = (castle or end) + 10 * 60000
+	fish = vills = 0
+	for a in A:
+		if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid and a['t'] <= boom_end:
+			n = _name('objects', a['unit_id'])
+			if n == 'Fishing Ship':
+				fish += a.get('amount', 1) or 1
+			elif n == 'Villager':
+				vills += a.get('amount', 1) or 1
+	fish_boom = fish >= FISH_BOOM_SHIPS and fish >= FISH_BOOM_SHARE * (fish + vills)
+	boom_label = " TC + fish boom" if boom and fish_boom else " fish boom" if fish_boom else " boom" if boom else ""
 
 	# Castle Age and Imperial Age armies, separately.
 	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
@@ -1281,8 +1297,11 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	tower_creep = st['towers'] >= 8
 
 	parts = []
-	if opening != "Standard" or boom:
-		parts.append((opening if opening != "Standard" else "Castle Age") + (" boom" if boom else ""))
+	if opening != "Standard" or boom_label:
+		first = opening if opening != "Standard" else "Castle Age"
+		if boom_label and first.startswith("Feudal "):  # "Feudal scouts + spears, fish boom"
+			first += ","
+		parts.append(first + boom_label)
 	if castle_units:
 		parts.append(" + ".join(castle_units))
 	if imperial_units and imperial_units != castle_units:
@@ -1298,7 +1317,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 		parts.append(", ".join(extras))
 	return dict(
 		name=" → ".join(parts) if parts else "Standard play",
-		opening=opening, boom=boom, feudal_units=feudal_units, feudal_attack=feudal_attack,
+		opening=opening, boom=boom, fish_boom=fish_boom, fishing_ships=fish, feudal_units=feudal_units, feudal_attack=feudal_attack,
 		forward_towers=forward_towers, castle_units=castle_units, imperial_units=imperial_units,
 		main_units=main_units, fast_imp=fast_imp, forward_castles=forward_castles, tower_creep=tower_creep,
 	)
