@@ -65,7 +65,7 @@ def player_line(result, pid):
 		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{elo} · **{sc['overall']}**/10{verdict}\n"
 		f"> {s['strategy']}\n"
 		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} APM"
-		f" · Army {s['army']['avg_units']} avg / {s['army']['peak_units']} peak"
+		f" · Army {s['army']['avg_units']} avg / {s['army']['peak_units']} peak units"
 		f" · Exec {sc['exec']} · Pressure {sc['press']} · Survival {surv} · Team {sc['team']}"
 	)
 

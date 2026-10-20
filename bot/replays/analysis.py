@@ -19,6 +19,7 @@ from .rec_parser import reference
 RESOURCE_WEIGHTS = dict(gold=1.5, stone=1.2, food=1.0, wood=1.0)
 ARMY_COMMANDS = {'FORMATION', 'STANCE', 'PATROL', 'DE_ATTACK_MOVE', 'ATTACK_GROUND', 'GUARD', 'FOLLOW'}
 ARMY_ALIVE_GRACE = 90000  # a unit counts as on the map until 90 s after its owner last commanded it
+POP_CAP = 200
 
 
 @lru_cache(maxsize=1)
@@ -567,6 +568,7 @@ def army_presence(A, players, base_of, villagers, end, offensive):
 			first, last = seen[(pid, i)]
 			for m in range(int(first // 60000), min(minutes - 1, int(min(end, last + ARMY_ALIVE_GRACE) // 60000)) + 1):
 				alive[m] += 1
+		alive = [min(n, POP_CAP) for n in alive]  # an estimate can never beat the population cap
 		value_per_unit, total, count, q = [0.0] * minutes, 0.0, 0, sorted(queued[pid])
 		j = 0
 		for m in range(minutes):
