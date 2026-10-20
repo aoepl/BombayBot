@@ -42,6 +42,7 @@ Members upload a recorded game with `/replay upload` (an .aoe2record file, or a 
 BombayBot analyses it, saves every player's performance (see Player insights) and posts a breakdown of the game.
 
 Setup (optional):
+* Uploading a game that is already posted updates that post in place (new Elo links, latest scoring) instead of posting again.
 * Posts go to the queue channel. To post them in a forum instead: `/channel set variable:replay_forum value:#game-breakdowns`.
 * Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
@@ -50,10 +51,22 @@ What the breakdown shows:
   "Fast Castle → Monks + Temple Guard → Imp: Monks + Spearmen/Halbs → 3 forward castles".
   Openings: "Feudal tower rush" (2+ towers in an enemy base before Castle Age), "Feudal archers + scouts"
   (8+ Feudal units, named by line, marked "(defensive)" if they never attacked), "Fast Castle" (Castle Age
-  clicked within 4 minutes of Feudal), plus "boom" for 2+ Town Centers soon after Castle Age.
+  clicked within 4 minutes of Feudal), "Feudal water: hulks + demo ships" when most Feudal units are warships,
+  plus "boom" for 2+ Town Centers soon after Castle Age.
   Each age's army lists the two biggest unit lines plus any siege the player made (2 or more units).
 * When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
+  A part nobody in the lobby did (no forward castles or towers, no tributes, nobody in Imperial Age) is left
+  out and its weight spread over the other parts. Saving for an age-up or an expensive technology (550+
+  resources; the 2 minutes before the click) is not a gap in military production. Execution weighs the first military unit at a quarter of the others.
+  Overall weights: flanks execution 27%, pressure 36%, survival 27%, team 10%; pockets 40/25/25/10; others
+  32/32/26/10. When survival is not scored its weight is spread over the rest.
+  Execution: Castle and Imperial Age timing, villager value, first military unit and floating. A player who made
+  8+ Feudal military units scores the better of their Castle Age click time and their Feudal production uptime
+  (Town Centers and Docks kept busy, military buildings producing every minute), so a late Castle Age after a
+  strong Feudal army is not penalised.
+* Villagers killed are estimated: a villager counted as killed is credited to the enemies whose army orders were
+  near it, by share of those orders. They count towards micro (value killed) and pressure (damage done).
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
   a label). Macro: steady villager and military production, army size, population kept high from 20:00
   (estimated villagers alive, trade carts and army), villagers made and little unplanned floating, plus a
@@ -62,6 +75,11 @@ What the breakdown shows:
   gold was under 20% of their spending and they sold 1000+ at the Market or built no new Mining Camp (or Mule
   Cart / Muisca drop site), with no trade carts (20 remove the penalty) and no gold tributed in by allies. A
   player still mining gold is never penalised for not trading.
+  Production steadiness (share of minutes with a worker or military unit queued) is scored on its own scale:
+  86% of minutes scores 8.6. Worker production is half steadiness and half workers made per minute up to 10
+  minutes after Castle Age, so producing from more Town Centers and Docks at once counts.
+  Fishing ships count as economy workers alongside villagers (a Dock trains one every 40 seconds); warships
+  count as army, and transport ships as neither.
   Villagers alive are estimated, since the replay has no unit counts: a queue click is 1 villager (5 with
   Shift); with several Town Centers selected each villager goes to the TC with the shortest queue, and a TC
   trains one every 25 seconds. A villager is counted as killed when its last order is followed within 3
@@ -70,9 +88,11 @@ What the breakdown shows:
   Villager value: each villager made counts in full while the player has under 120 alive, then less and less
   until 150, and nothing at 150+ (unless the base was attacked in the previous 10 minutes). After losses the
   alive count drops, so replacements count again.
+  Floating is judged against spending: the unplanned bank divided by what the player spent per minute (units,
+  research, buildings, tributes) from 10:00, so a big bank matters less for a player converting a lot into units.
   Floating: resources banked from 10 minutes on count against the player, except near 200 population
   (estimated villagers alive, army on the map and trade carts) and money saved for a research, age-up
-  or building costing 600+ that the player starts within the next 2 minutes. Execution uses the same rules.
+  or building costing 550+ that the player starts within the next 2 minutes. Execution uses the same rules.
   Micro is about fights, not clicks, and is estimated because the replay has no kill data: a unit that stops
   being commanded during or right after a fight counts as lost there, and its value is credited to the enemies
   fighting that player at the time, split by how many orders each aimed at that player (an order at
@@ -81,12 +101,17 @@ What the breakdown shows:
   look the same as kills and count in full. Micro weighs value traded (60%), how much fighting the player did (25%)
   and target picking (15%). The Micro label also needs more value killed than lost (1.1 times or better).
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
-  40% average army value on the map from 15 minutes on (units plus castles, Kreposts, Donjons and towers),
-  45% army value sent at the enemy, and 15% forward castles and towers. An order counts as sent at the enemy
+  35% average army value on the map from 8:00 on, scaled by how much damage that army did for its size (full
+  credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 40% army
+  value sent at the enemy, 15% damage done (enemy army value killed in fights plus enemy villagers killed, 100
+  each), and 10% forward castles and towers. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
   army was ordered within a minute (fights in the open count too).
-  Army sent at the enemy early counts more: double before 25:00, 1.5 times until the player reaches
-  Imperial Age, and normal after that. Unit value is the resource cost,
+  Warships count for less in pressure where water does not decide the land fight: 0.4 of their value on lake
+  maps (4 Lakes, Golden Lakes, Kawasan), 0.7 on coastal maps (Baltic, Mediterranean, Continental...), in full
+  on island maps, 0.6 elsewhere. Micro still counts water fights at full value.
+  Army on the map and army sent early count more: double before 15:00, 1.5 times before 20:00, and
+  normal after that. Unit value is the resource cost,
   with gold weighted 1.5, stone 1.2, food and wood 1.0, so an expensive army kept topped up scores higher than
   a cheap one. Units are tracked by their ids in the player's commands (the replay has no kill data), and count
   as on the map until 90 seconds after their owner last commanded them.
