@@ -5,7 +5,7 @@ post the breakdown once per game (in the replay forum when one is set, otherwise
 
 Games arrive two ways:
 - /replay upload: a member uploads the recording.
-- Automatically after a pickup match is reported, only when the queue channel's replay forum is a forum
+- Automatically after a pickup match is reported with /report (not /report abort), only when the queue channel's replay forum is a forum
   channel: the bot finds the game in the World's Edge match history of the highest-rated player whose AoE2
   profile it knows, downloads that player's recording and posts it. It stops looking as soon as a member
   uploads the same game.
@@ -429,7 +429,7 @@ def _auto_enabled(qc):
 
 
 def schedule(match):
-	""" Called when a match is reported. Runs in the background so reporting is never slowed down. """
+	""" Called after /report loss or draw (never abort). Runs in the background so reporting is never slowed down. """
 	if not _auto_enabled(match.qc) or match.id in _pending:
 		return
 	info = dict(

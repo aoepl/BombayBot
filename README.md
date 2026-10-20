@@ -41,9 +41,9 @@ nano config.cfg
 Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).
 BombayBot analyses it, saves every player's performance (see Player insights) and posts a breakdown of the game.
 
-Automatic breakdowns: when a queue channel's `replay_forum` is a **forum channel**, every reported match is looked
+Automatic breakdowns: when a queue channel's `replay_forum` is a **forum channel**, every match reported with `/report` is looked
 up on World's Edge (the game's own match history, also used by AoE2 Insights and AoE2 Companion) about 90 seconds
-after the report, retrying for about 20 minutes. The bot searches the history of the highest-rated players whose
+after `/report loss` (or `/report draw` once both captains agree; never after `/report abort`), retrying for about 20 minutes. The bot searches the history of the highest-rated players whose
 AoE2 profile it knows, downloads the highest-rated player's recording and posts the breakdown in the forum,
 mentioning the players. It stops looking as soon as a member uploads that game with `/replay upload`. Profile ids
 are learned from uploaded recordings (each recording lists every player's profile id, saved against the member
