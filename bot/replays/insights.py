@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -94,6 +94,11 @@ db.ensure_table(dict(
 		dict(cname="elo_delta", ctype=db.types.float),
 		dict(cname="elo_verdict", ctype=db.types.str),
 		dict(cname="pressure_dealt", ctype=db.types.int),
+		dict(cname="army_avg_units", ctype=db.types.int),
+		dict(cname="army_peak_units", ctype=db.types.int),
+		dict(cname="army_value_on_map", ctype=db.types.int),
+		dict(cname="army_unit_value", ctype=db.types.int),
+		dict(cname="army_value_sent", ctype=db.types.int),
 		dict(cname="pressure_taken", ctype=db.types.int),
 		dict(cname="base_note", ctype=db.types.text),
 		dict(cname="tributes_sent", ctype=db.types.int),
@@ -193,7 +198,10 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers=s['villagers'],
 				score_exec=sc['exec'], score_pressure=sc['press'], score_survival=sc['surv'], score_team=sc['team'],
 				score_overall=sc['overall'], score_rank=s.get('score_rank'), elo_delta=s.get('elo_delta'),
-				elo_verdict=s.get('elo_verdict'), pressure_dealt=s.get('press_out'), pressure_taken=s.get('pressure_in'),
+				elo_verdict=s.get('elo_verdict'), pressure_dealt=s.get('press_out'),
+				army_avg_units=s['army']['avg_units'], army_peak_units=s['army']['peak_units'],
+				army_value_on_map=s['army']['avg_value_on_map'], army_unit_value=s['army']['unit_value'],
+				army_value_sent=s['army']['value_sent'], pressure_taken=s.get('pressure_in'),
 				base_note=(s.get('survival_note') or '')[:2000], tributes_sent=s.get('trib_out'),
 				tributes_received=s.get('trib_in'), analysis_version=ANALYSIS_VERSION, at=now
 			))

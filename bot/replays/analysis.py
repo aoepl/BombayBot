@@ -7,10 +7,29 @@ snapshots, so numbers are proxies: age times are when the age-up was clicked,
 unit counts are queue clicks (cancelled units included) and each unit line is
 named after its base unit (Archer covers Crossbowmen and Arbalesters, etc.).
 """
+import json
 import math
+from functools import lru_cache
+import os
 from collections import Counter, defaultdict
 
 from .rec_parser import reference
+
+# Resource weights for army value: gold is the scarcest, stone next, then food and wood.
+RESOURCE_WEIGHTS = dict(gold=1.5, stone=1.2, food=1.0, wood=1.0)
+ARMY_COMMANDS = {'FORMATION', 'STANCE', 'PATROL', 'DE_ATTACK_MOVE', 'ATTACK_GROUND', 'GUARD', 'FOLLOW'}
+ARMY_ALIVE_GRACE = 90000  # a unit counts as on the map until 90 s after its owner last commanded it
+
+
+@lru_cache(maxsize=1)
+def _costs():
+	with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'costs.json'), encoding='utf-8') as f:
+		return json.load(f)['costs']
+
+
+def unit_value(object_id):
+	""" Resource-weighted cost of a unit or building (gold counts most). """
+	return sum(RESOURCE_WEIGHTS.get(k, 1.0) * v for k, v in _costs().get(str(object_id), {}).items())
 
 AGES = ('Feudal Age', 'Castle Age', 'Imperial Age')
 MILITARY_SKIP = {'Villager', 'Trade Cart', 'Trade Cog', 'Fishing Ship', 'Transport Ship', 'Monk', 'Missionary'}
@@ -319,8 +338,21 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		_minmax({p: stats[p]['first_military'] for p in pids}, invert=True),
 		_minmax(peak_bank, invert=True),
 	]
-	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up',))
-	press = _minmax({p: press_out[p] + 25 * fwd_up[p] for p in pids})
+	# Pressure: the army a player keeps on the map (units plus castles and towers, valued by cost),
+	# the army value sent into enemy bases, and forward castles and towers.
+	army = army_presence(A, players, base_of, villagers, end)
+	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up', 'lost', 'deleted'))
+	fwd_towers = Counter()
+	for a in A:
+		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) in TOWERS:
+			if players[base_of(a['x'], a['y'])]['team_id'] != players[a['player_id']]['team_id']:
+				fwd_towers[a['player_id']] += 1
+	on_map = _minmax({p: army[p]['avg_value_on_map'] for p in pids})
+	sent = _minmax({p: army[p]['value_sent'] for p in pids})
+	forward = _minmax({p: fwd_up[p] + 0.25 * fwd_towers[p] for p in pids})
+	press = {p: 0.40 * on_map[p] + 0.45 * sent[p] + 0.15 * forward[p] for p in pids}
+	for p in pids:
+		stats[p]['army'] = army[p]
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
 	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
 	# orders into that base from 3 minutes before it was placed to 5 minutes after.
@@ -451,6 +483,78 @@ FEUDAL_NAMES = {
 	'Battle Elephant': 'elephants', 'Steppe Lancer': 'lancers',
 }
 NOT_ARMY = (MILITARY_SKIP - {'Monk'}) | {'Trade Cart', 'Trade Cog'}  # monk pushes are a strategy too
+
+
+def army_presence(A, players, base_of, villagers, end):
+	"""
+	Estimate each player's army on the map over time from the unit ids in their commands.
+	A unit is military if it ever gets an army-only command (formation, stance, patrol, attack-move...)
+	or is sent into a non-allied area; it counts as alive from its first command until 90 s after its last.
+	Each unit is valued at the player's average military unit cost so far (gold weighted most).
+	"""
+	pids = list(players)
+	minutes = int(end // 60000) + 1
+	seen, military = {}, defaultdict(set)
+	for a in A:
+		pid = a.get('player_id')
+		ids = [i for i in (a.get('object_ids') or []) if i not in villagers]
+		if pid not in players or not ids:
+			continue
+		is_army = a['a'] in ARMY_COMMANDS
+		if not is_army and a['a'] in ('MOVE', 'ORDER') and a.get('x') and a['x'] > 0:
+			is_army = players[base_of(a['x'], a['y'])]['team_id'] != players[pid]['team_id']
+		for i in ids:
+			first_last = seen.setdefault((pid, i), [a['t'], a['t']])
+			first_last[1] = a['t']
+			if is_army:
+				military[pid].add(i)
+
+	# Average military unit value per minute, from what the player had queued so far.
+	queued = defaultdict(list)
+	for a in A:
+		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players:
+			name = _name('objects', a['unit_id'])
+			if name not in NOT_ARMY and name != 'Villager':
+				queued[a['player_id']].append((a['t'], unit_value(a['unit_id']), a.get('amount', 1) or 1))
+
+	out = {}
+	for pid in pids:
+		alive = [0] * minutes
+		for i in military[pid]:
+			first, last = seen[(pid, i)]
+			for m in range(int(first // 60000), min(minutes - 1, int(min(end, last + ARMY_ALIVE_GRACE) // 60000)) + 1):
+				alive[m] += 1
+		value_per_unit, total, count, q = [0.0] * minutes, 0.0, 0, sorted(queued[pid])
+		j = 0
+		for m in range(minutes):
+			while j < len(q) and q[j][0] <= (m + 1) * 60000:
+				total += q[j][1] * q[j][2]
+				count += q[j][2]
+				j += 1
+			value_per_unit[m] = total / count if count else 0.0
+		structures = [0.0] * minutes
+		for a in A:
+			if a['a'] == 'BUILD' and a.get('player_id') == pid and _name('objects', a['building_id']) in CASTLES | TOWERS:
+				for m in range(int(a['t'] // 60000) + 1, minutes):
+					structures[m] += unit_value(a['building_id'])
+		sent = set()
+		for a in A:
+			if a.get('player_id') == pid and a['a'] in ARMY_ORDERS and a.get('x') and a['x'] > 0:
+				if players[base_of(a['x'], a['y'])]['team_id'] != players[pid]['team_id']:
+					for i in a.get('object_ids') or []:
+						if i in military[pid]:
+							sent.add((i, int(a['t'] // 60000)))  # each unit once per minute
+		window = range(min(15, minutes - 1), minutes)  # from 15 minutes on, when armies matter
+		on_map = [alive[m] * value_per_unit[m] + structures[m] for m in window]
+		out[pid] = dict(
+			avg_units=round(sum(alive[m] for m in window) / len(window)),
+			peak_units=max(alive) if alive else 0,
+			avg_value_on_map=round(sum(on_map) / len(on_map)),
+			unit_value=round(value_per_unit[-1]),
+			value_sent=round(sum(value_per_unit[m] for _, m in sent)),
+			units_by_5min=[alive[m] for m in range(0, minutes, 5)],
+		)
+	return out
 
 
 def _army_between(A, pid, t0, t1):

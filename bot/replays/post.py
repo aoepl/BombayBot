@@ -65,6 +65,7 @@ def player_line(result, pid):
 		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{elo} · **{sc['overall']}**/10{verdict}\n"
 		f"> {s['strategy']}\n"
 		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} APM"
+		f" · Army {s['army']['avg_units']} avg / {s['army']['peak_units']} peak"
 		f" · Exec {sc['exec']} · Pressure {sc['press']} · Survival {surv} · Team {sc['team']}"
 	)
 
@@ -174,7 +175,9 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"Imperial {mmss(s['ages'].get('Imperial Age'))}; units queued: {units}; "
 				f"army orders into enemy bases {s['press_out']}{target}; enemy orders into own base {s['press_in']}, "
 				f"enemy castles built in own base {s['enemy_castles_in_base']} (cleared {s['enemy_castles_cleared']}); "
-				f"tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "
+				f"army on the map from 15 min: {s['army']['avg_units']} units on average, peak {s['army']['peak_units']}, "
+				f"average unit value {s['army']['unit_value']} (gold weighted most), army value sent into enemy bases "
+				f"{s['army']['value_sent']}; tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "
 				f"score {s['scores']['overall']}/10 (exec {s['scores']['exec']}, pressure {s['scores']['press']}, "
 				f"survival {s['scores']['surv'] if s['scores']['surv'] is not None else 'not scored'}, team {s['scores']['team']}); "
 				f"base: {s['survival_note']}."
