@@ -550,7 +550,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 
 	# ---- strategy names
 	for p in pids:
-		parts = strategy_parts(stats[p], [c for c in castles if c['player'] == p], A, p, players, base_of, attack_times[p])
+		parts = strategy_parts(stats[p], [c for c in castles if c["player"] == p], A, p, players, base_of, attack_times[p], villagers)
 		stats[p]['strategy'] = parts['name']
 		stats[p]['strategy_parts'] = parts
 		stats[p].update(
@@ -1242,11 +1242,51 @@ def _army_lines(counter, minimum=5):
 
 FEUDAL_ECO_TECHS = {'Double-Bit Axe', 'Horse Collar', 'Gold Mining', 'Stone Mining', 'Wheelbarrow', 'Gillnets'}
 FEUDAL_BOOM_FARMS = 8
-FISH_BOOM_SHIPS = 15   # fishing ships up to 10 minutes after Castle Age
-FISH_BOOM_SHARE = 0.25  # and at least a quarter of the workers made in that time
+FISH_BOOM_SHIPS = 5  # working fishing ships up to 10 minutes after Castle Age
 
 
-def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
+def working_fishing_ships(A, pid, until, villagers=()):
+	"""
+	(fishing ships made, fishing ships that went to work) up to `until`. The replay doesn't say which unit is
+	a fishing ship, so a ship counts as working when its Dock's gather point was on a fish when it came out
+	(new ships go straight to fishing), or when the player ordered units onto fish (the fish a Dock gather
+	point was set on, by anyone). Ships sent to a spot on the water and never ordered stay idle.
+	"""
+	gather = defaultdict(list)  # dock -> [(t, on a resource)]
+	fish_ids = set()
+	for a in A:
+		if a['a'] in ('GATHER_POINT', 'DE_MULTI_GATHERPOINT'):
+			target = a.get('target_id') or -1
+			for b in a.get('object_ids') or []:
+				gather[b].append((a['t'], target > 0))
+			if target > 0:
+				fish_ids.add(target)  # resources Docks send ships to (fish); refined below to this player's docks
+	docks, made, auto = set(), 0, 0
+	free = defaultdict(int)
+	for a in A:
+		if a['a'] != 'DE_QUEUE' or a.get('player_id') != pid or a['t'] > until or _name('objects', a['unit_id']) != 'Fishing Ship':
+			continue
+		ids = a.get('object_ids') or [0]
+		docks.update(ids)
+		for _ in range(a.get('amount', 1) or 1):
+			b = min(ids, key=lambda i: free[i])
+			free[b] = max(a['t'], free[b]) + WORKER_TRAIN['Fishing Ship']
+			if free[b] > until:
+				continue
+			made += 1
+			points = [on for t, on in gather.get(b, []) if t <= free[b]]
+			if points and points[-1]:
+				auto += 1
+	dock_fish = {a.get('target_id') for a in A if a['a'] in ('GATHER_POINT', 'DE_MULTI_GATHERPOINT')
+		and (a.get('target_id') or -1) > 0 and set(a.get('object_ids') or []) & docks} or fish_ids
+	ordered = set()
+	for a in A:
+		if a['a'] == 'ORDER' and a.get('player_id') == pid and a['t'] <= until and a.get('target_id') in dock_fish:
+			ordered.update(i for i in a.get('object_ids') or [] if i not in villagers and i not in docks)
+	return made, min(made, auto + len(ordered))
+
+
+def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villagers=()):
 	""" The strategy as separate parts (for stats later) plus a readable name. """
 	ages = st['ages']
 	feudal, castle, imp = (ages.get(a) for a in AGES)
@@ -1287,17 +1327,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	else:
 		opening = "Standard"
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
-	# Fish boom: a big share of the economy from fishing ships, up to 10 minutes after Castle Age.
+	# Fish boom: 5+ fishing ships that went to work (not left idle), up to 10 minutes after Castle Age.
 	boom_end = (castle or end) + 10 * 60000
-	fish = vills = 0
-	for a in A:
-		if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid and a['t'] <= boom_end:
-			n = _name('objects', a['unit_id'])
-			if n == 'Fishing Ship':
-				fish += a.get('amount', 1) or 1
-			elif n == 'Villager':
-				vills += a.get('amount', 1) or 1
-	fish_boom = fish >= FISH_BOOM_SHIPS and fish >= FISH_BOOM_SHARE * (fish + vills)
+	fish, fish_working = working_fishing_ships(A, pid, boom_end, villagers)
+	fish_boom = fish_working >= FISH_BOOM_SHIPS
 	# Named by the economy behind it: extra Town Centers on farms, fishing ships, or both.
 	boom_label = "farm + fish boom" if boom and fish_boom else "fish boom" if fish_boom else "farm boom" if boom else ""
 
@@ -1330,7 +1363,8 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 		parts.append(", ".join(extras))
 	return dict(
 		name=" → ".join(parts) if parts else "Standard play",
-		opening=opening, feudal_boom=feudal_boom, boom=boom, fish_boom=fish_boom, fishing_ships=fish, feudal_units=feudal_units, feudal_attack=feudal_attack,
+		opening=opening, feudal_boom=feudal_boom, boom=boom, fish_boom=fish_boom, fishing_ships=fish,
+		fishing_ships_working=fish_working, feudal_units=feudal_units, feudal_attack=feudal_attack,
 		forward_towers=forward_towers, castle_units=castle_units, imperial_units=imperial_units,
 		main_units=main_units, fast_imp=fast_imp, forward_castles=forward_castles, tower_creep=tower_creep,
 	)

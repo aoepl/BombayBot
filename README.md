@@ -71,8 +71,8 @@ What the breakdown shows:
   Feudal military units, 2+ Feudal eco upgrades and 8+ farms or an extra Town Center in Feudal, e.g. Malay),
   "Fast Castle" (Castle Age clicked within 4 minutes of Feudal), "Feudal water: hulks + demo ships" when most Feudal units are warships,
   then the boom as its own stage, named by the economy behind it: "farm boom" (2+ Town Centers
-  within 7 minutes of Castle Age), "fish boom" (15+ fishing ships, a quarter or more of the workers made up to
-  10 minutes after Castle Age) or "farm + fish boom" for both.
+  within 7 minutes of Castle Age), "fish boom" (5+ fishing ships that went to work, not left idle, up to
+  10 minutes after Castle Age: made at a Dock whose gather point was on fish, or ordered onto fish) or "farm + fish boom" for both.
   Each age's army lists the two biggest unit lines plus any siege the player made (2 or more units).
 * When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
