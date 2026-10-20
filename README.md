@@ -58,7 +58,9 @@ What the breakdown shows:
   40% average army value on the map from 15 minutes on (units plus castles, Kreposts, Donjons and towers),
   45% army value sent at the enemy, and 15% forward castles and towers. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
-  army was ordered within a minute (fights in the open count too). Unit value is the resource cost,
+  army was ordered within a minute (fights in the open count too).
+  Army sent at the enemy early counts more: double before 25:00, 1.5 times until the player reaches
+  Imperial Age, and normal after that. Unit value is the resource cost,
   with gold weighted 1.5, stone 1.2, food and wood 1.0, so an expensive army kept topped up scores higher than
   a cheap one. Units are tracked by their ids in the player's commands (the replay has no kill data), and count
   as on the map until 90 seconds after their owner last commanded them.

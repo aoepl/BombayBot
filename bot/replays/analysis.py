@@ -345,7 +345,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	]
 	# Pressure: the army a player keeps on the map (units plus castles and towers, valued by cost),
 	# the army value sent into enemy bases, and forward castles and towers.
-	army = army_presence(A, players, base_of, villagers, end, offensive)
+	imp_at = {p: stats[p]['ages'].get('Imperial Age') for p in pids}
+	army = army_presence(A, players, base_of, villagers, end, offensive, imp_at)
 	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up', 'lost', 'deleted'))
 	fwd_towers = Counter()
 	for a in A:
@@ -531,7 +532,19 @@ def find_engagements(A, players, base_of, villagers):
 	return offensive
 
 
-def army_presence(A, players, base_of, villagers, end, offensive):
+EARLY_MINUTES = 25
+
+
+def early_weight(minute, imp_at=None):
+	""" Army sent at the enemy early counts more: x2 before 25:00, x1.5 until Imperial Age, x1 after. """
+	if minute < EARLY_MINUTES:
+		return 2.0
+	if imp_at is None or minute * 60000 < imp_at:
+		return 1.5
+	return 1.0
+
+
+def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None):
 	"""
 	Estimate each player's army on the map over time from the unit ids in their commands.
 	A unit is military if it ever gets an army-only command (formation, stance, patrol, attack-move...)
@@ -595,7 +608,7 @@ def army_presence(A, players, base_of, villagers, end, offensive):
 			peak_units=max(alive) if alive else 0,
 			avg_value_on_map=round(sum(on_map) / len(on_map)),
 			unit_value=round(value_per_unit[-1]),
-			value_sent=round(sum(value_per_unit[m] for _, m in sent)),
+			value_sent=round(sum(value_per_unit[m] * early_weight(m, (imp_at or {}).get(pid)) for _, m in sent)),
 			units_by_5min=[alive[m] for m in range(0, minutes, 5)],
 		)
 	return out
