@@ -7,4 +7,3 @@ prettytable>=3.8
 google-genai
 matplotlib>=3.7
 mgz>=1.8.51
-aiohttp>=3.8

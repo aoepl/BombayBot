@@ -154,7 +154,6 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 		team_size = max(teams.values()) if teams else None
 		category = map_category(map_name)
 		now = int(time.time())
-		links = {r['profile_id']: r['user_id'] for r in await db.select(('user_id', 'profile_id'), 'aoe_profiles')}
 		we_id = int(key[3:]) if key.startswith('we:') else None
 		# Keep the pickup match link if this game was already saved from a report.
 		if old := await db.select_one(('match_id', 'channel_id'), 'aoe_games', where=dict(game_key=key)):
@@ -176,7 +175,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 			profile_id = p.get('profile_id') or 0
 			rows.append(dict(
 				game_key=key, profile_id=profile_id if profile_id else -pid,  # bots/AI get a negative slot id
-				user_id=links.get(profile_id), name=p['name'], map_name=map_name, map_category=category,
+				user_id=p.get('user_id'), name=p['name'], map_name=map_name, map_category=category,
 				team_size=team_size, civ=p['civ'], civ_id=p['civ_id'], team=p['team_id'], seat=p['seat'],
 				won=p['won'], elo=p.get('elo'), tg_rating=p.get('rating'),
 				strategy=s['strategy'], opening=parts.get('opening'), boom=parts.get('boom'),

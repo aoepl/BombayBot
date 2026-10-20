@@ -87,6 +87,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		m = meta.get(p['profile_id'], {})
 		p['rating'] = m.get('rating')  # World's Edge team rating
 		p['elo'] = m.get('elo')  # BombayBot Elo used to make the match
+		p['user_id'] = m.get('user_id')  # Discord member matched by name, if any
 		p['won'] = m.get('won')
 		if m.get('alias'):
 			p['name'] = m['alias']

@@ -295,8 +295,8 @@ class QueueChannel:
 				"replay_forum",
 				display="Replay forum",
 				section="Replays",
-				description="Forum channel (or text channel) where the bot posts a breakdown of every reported game, "
-					"using the recorded game from World's Edge. Leave empty to turn this off."
+				description="Forum channel (or text channel) where /replay upload posts game breakdowns. "
+					"Leave empty to post them in this queue channel."
 			),
 			Variables.BoolVar(
 				"replay_ai",

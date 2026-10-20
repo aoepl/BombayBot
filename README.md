@@ -38,22 +38,14 @@ nano config.cfg
   docker compose up -d --build
 ```
 ### Game breakdowns from recorded games
-When a match is reported, BombayBot can find the game on World's Edge, download the recorded game
-uploaded by the highest-rated player, and open a forum post with a breakdown of the game and every
-player's performance. Players discuss the game in that post, and the recorded game is attached.
+Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).
+BombayBot analyses it, saves every player's performance (see Player insights) and posts a breakdown of the game.
 
-Setup:
-1. Create a forum channel, then set it for the queue channel: `/channel set variable:replay_forum value:#game-breakdowns`.
-2. Every player links their AoE2 account once: `/aoe link account:<profile id, Steam id or AoE2 Insights link>`.
-3. Optional: set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
+Setup (optional):
+* Posts go to the queue channel. To post them in a forum instead: `/channel set variable:replay_forum value:#game-breakdowns`.
+* Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
-How it works:
-* After `/report`, the bot waits about 90 seconds, then searches the linked players' World's Edge match
-  history for the game that finished closest to the report time. It keeps trying for about 20 minutes,
-  because recorded games take a little while to appear.
-* It downloads the recorded game of the player with the highest team-game rating and analyses it:
-  age-up times, army composition, castles (went up, deleted or likely destroyed), pressure on each base,
-  tributes and key moments.
+What the breakdown shows:
 * Each player gets a strategy name (for example "Fast Castle boom → Scouts/Hussars + Cavalry Archers")
   and four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
   The overall score weighs them by seat (flank or pocket).
@@ -62,30 +54,30 @@ How it works:
   than holding a light one. Enemy castles and towers built in a base count as pressure, weighted by how much
   enemy army came with them, and clearing them earns a little extra. Players who were never attacked get
   "—" and their overall score uses the other three.
-* Every score is compared with the player's BombayBot Elo (the rating used to make the match), so the post
-  and the recap show who played above or below their Elo.
+* Every score is compared with the player's BombayBot Elo, so the post and the recap show who played above
+  or below their Elo. Players are matched to BombayBot members by name: the in-game name is compared with
+  their BombayBot nick and Discord names, ignoring case, spaces, symbols and rating tags. Unmatched players
+  show no Elo.
 * Posts are titled "Map - Top player's Team (Civ) vs Top player's Team (Civ)", where the top player is the
   highest BombayBot Elo on each team and the winning team comes first.
-* `/replay upload` analyses any recorded game a member attaches. With `summary:False` it only saves the
-  player stats (see Player insights) and posts nothing.
 * The breakdown covers the game up to the first resignation; the result still counts every resignation.
-* Each game is posted once. If it was already posted, uploading it again (even a different player's recording
-  or a renamed file) just links the existing post and refreshes the saved stats. If the post was deleted,
-  uploading the game again creates a new post.
+* With `summary:False`, `/replay upload` only saves the player stats and posts nothing.
+* Each game is posted once. Uploading it again (even a different player's recording or a renamed file) links
+  the existing post and refreshes the saved stats. If the post was deleted, uploading the game again creates a new post.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
 
 ### Player insights (saved for later)
-Every analysed recorded game, whether found after a report or uploaded with `/replay upload`, is saved for
+Every recorded game uploaded with `/replay upload` is saved for
 future features such as suggesting civs and seats for a map. Nothing reads it yet; it builds up as games are played.
 
-* `aoe_games`: one row per game (map, map category, team size, length, source, linked pickup match).
-* `aoe_game_players`: one row per player per game: AoE2 profile and linked Discord user, map and map category
+* `aoe_games`: one row per game (map, map category, team size, length, who uploaded it).
+* `aoe_game_players`: one row per player per game: AoE2 profile and the Discord member matched by name, map and map category
   (Open, Semi Closed, Closed, Hybrid, Nomad or Other), civ, seat (flank or pocket), win or loss, BombayBot Elo,
   strategy (opening, boom, main units, fast Imperial, forward castles, tower creep), age-up times, APM,
   the four scores, overall score, rank in the lobby, performance against Elo, pressure dealt and taken, and tributes.
 
-The same game is never counted twice: re-analysing it replaces its rows. Games are matched by their World's Edge id, or by a fingerprint (start time, players, civs and teams) when the id is unknown. Example: best civs for one player on closed maps:
+The same game is never counted twice: re-analysing it replaces its rows. Games are matched by the game id in the file name (AgeIIDE_Replay_<id>), or by a fingerprint (start time, players, civs and teams). Example: best civs for one player on closed maps:
 
 ```sql
 SELECT civ, seat, COUNT(*) games, AVG(won) win_rate, AVG(score_overall) avg_score

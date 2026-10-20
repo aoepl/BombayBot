@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-After a pickup match is reported: find the game on World's Edge, download the
-replay uploaded by the highest-rated player, analyse it and open a forum post
-where the players can discuss it.
+Game breakdowns from recorded games that members upload with /replay upload:
+analyse the game, save every player's performance (insights.py) and post the breakdown
+once per game (in the replay forum when one is set, otherwise in the queue channel).
 """
 import asyncio
 import io
+import re
 import time
 import zipfile
 
@@ -18,32 +19,9 @@ from core.console import log
 from core.database import db
 from core.utils import get_nick
 
-from . import worldsedge, rec_parser, analysis, post, insights
+from . import rec_parser, analysis, post, insights
 
-db.ensure_table(dict(
-	tname="aoe_profiles",
-	columns=[
-		dict(cname="user_id", ctype=db.types.int),
-		dict(cname="profile_id", ctype=db.types.int),
-		dict(cname="alias", ctype=db.types.str),
-		dict(cname="linked_at", ctype=db.types.int)
-	],
-	primary_keys=["user_id"]
-))
-
-db.ensure_table(dict(
-	tname="aoe_replay_posts",
-	columns=[
-		dict(cname="match_id", ctype=db.types.int),
-		dict(cname="channel_id", ctype=db.types.int),
-		dict(cname="game_id", ctype=db.types.int),
-		dict(cname="thread_id", ctype=db.types.int),
-		dict(cname="at", ctype=db.types.int)
-	],
-	primary_keys=["match_id"]
-))
-
-# One post per game, however it arrived (report or upload). game_key/fingerprint match insights.
+# One post per game. game_key/fingerprint match insights.
 db.ensure_table(dict(
 	tname="aoe_game_posts",
 	columns=[
@@ -59,191 +37,45 @@ db.ensure_table(dict(
 ))
 _posting = set()  # game keys / fingerprints being posted right now
 
-# Replays usually appear a minute or two after the game ends; keep looking for ~20 minutes.
-RETRY_DELAYS = (90, 120, 180, 300, 600)
-_running = set()  # bot match ids being processed
-
 
 class ReplayError(Exception):
 	pass
 
 
-# ---------- account links
+# ---------- BombayBot Elo by in-game name
 
-async def link(user_id, identifier):
-	kind, value = worldsedge.parse_identifier(identifier)
-	profiles = await worldsedge.lookup_profiles(
-		profile_ids=[value] if kind == 'profile' else None,
-		steam_ids=[value] if kind == 'steam' else None
-	)
-	if not profiles:
-		raise ReplayError("No AoE2 player found for that id.")
-	profile_id, info = next(iter(profiles.items()))
-	await db.insert('aoe_profiles', dict(
-		user_id=user_id, profile_id=profile_id, alias=info.get('alias'), linked_at=int(time.time())
-	), on_dublicate="replace")
-	return profile_id, info
+def _norm(name):
+	""" Compare names without rating tags, case, spaces or symbols: "[1650] Link.Chaos" == "link_chaos". """
+	name = re.sub(r"^\[\d+\]\s*", "", name or "")
+	return re.sub(r"[^0-9a-z]", "", name.lower())
 
 
-async def unlink(user_id):
-	await db.delete('aoe_profiles', where=dict(user_id=user_id))
+async def bombay_players_by_name(qc, names):
+	"""
+	Match in-game names to members of this channel's rating, using their BombayBot nick and Discord names.
+	Returns {in-game name: dict(user_id, elo)} for names that match exactly one member.
+	"""
+	wanted = {_norm(n): n for n in names if _norm(n)}
+	candidates = {}  # normalised name -> set(user_id)
 
+	def add(name, user_id):
+		key = _norm(name)
+		if key in wanted:
+			candidates.setdefault(key, set()).add(user_id)
 
-async def get_link(user_id):
-	return await db.select_one(('user_id', 'profile_id', 'alias'), 'aoe_profiles', where=dict(user_id=user_id))
+	for row in await db.select(('user_id', 'nick'), 'qc_players', where=dict(channel_id=qc.rating.channel_id)):
+		add(row['nick'], row['user_id'])
+	guild = getattr(dc.get_channel(qc.id), 'guild', None)
+	if guild:
+		for m in guild.members:
+			for name in (m.name, getattr(m, 'global_name', None), m.nick, m.display_name):
+				add(name, m.id)
 
-
-async def get_links(user_ids):
-	rows = await db.select(('user_id', 'profile_id', 'alias'), 'aoe_profiles')
-	wanted = set(user_ids)
-	return {r['user_id']: r['profile_id'] for r in rows if r['user_id'] in wanted}
-
-
-# ---------- entry points
-
-def schedule(match):
-	""" Called when a match is reported. Runs in the background so reporting is never slowed down. """
-	if not getattr(match.qc.cfg, 'replay_forum', None) or match.id in _running:
-		return
-	info = dict(
-		match_id=match.id,
-		queue=match.queue.name,
-		maps=list(match.maps),
-		reported_at=int(time.time()),
-		players=[dict(user_id=p.id, nick=get_nick(p), rating=match.ratings.get(p.id, 0)) for p in match.players],
-	)
-	_running.add(match.id)
-	asyncio.get_event_loop().create_task(_run(match.qc, info))
-
-
-async def schedule_from_history(qc, match_id):
-	""" Re-run the lookup for an already reported match (moderator command). """
-	m = await db.select_one(('match_id', 'at', 'maps', 'queue_name'), 'qc_matches', where=dict(match_id=match_id, channel_id=qc.id))
-	if not m:
-		raise ReplayError("Match not found in this channel.")
-	rows = await db.select(('user_id', 'nick'), 'qc_player_matches', where=dict(match_id=match_id))
-	ratings = {p['user_id']: p['rating'] for p in await qc.rating.get_players((r['user_id'] for r in rows))}
-	info = dict(
-		match_id=match_id, queue=m['queue_name'], maps=(m['maps'] or '').split('\n'), reported_at=m['at'],
-		players=[dict(user_id=r['user_id'], nick=r['nick'], rating=ratings.get(r['user_id'], 0)) for r in rows],
-	)
-	return await _process(qc, info, notify_failure=True)
-
-
-async def _run(qc, info):
-	try:
-		for delay in RETRY_DELAYS:
-			await asyncio.sleep(delay)
-			try:
-				if await _process(qc, info, notify_failure=False):
-					return
-			except ReplayError as e:
-				log.info(f"Replay for match {info['match_id']}: {e}")
-				if "linked" in str(e):
-					return
-		await _notify(qc, f"Couldn't find a recorded game for match ({info['match_id']}). "
-			f"Make sure players have linked their AoE2 account with `/aoe link` and that someone uploaded the replay.")
-	except Exception as e:
-		log.error(f"Replay processing failed for match {info['match_id']}: {e}")
-	finally:
-		_running.discard(info['match_id'])
-
-
-# ---------- the work
-
-async def _process(qc, info, notify_failure):
-	done = await db.select_one(('game_id',), 'aoe_replay_posts', where=dict(match_id=info['match_id']))
-	if done and done.get('game_id') and await _live_post(key=insights.game_key(worldsedge_id=done['game_id'])):
-		return True
-
-	links = await get_links([p['user_id'] for p in info['players']])
-	if not links:
-		raise ReplayError("No players in this match have linked their AoE2 account (`/aoe link`).")
-
-	# Search the history of the highest-rated linked players first.
-	by_rating = sorted(info['players'], key=lambda p: p['rating'], reverse=True)
-	game = None
-	for p in [p for p in by_rating if p['user_id'] in links][:3]:
-		matches = await worldsedge.recent_matches(links[p['user_id']])
-		game = worldsedge.find_match(matches, links.values(), info['reported_at'])
-		if game:
-			break
-	if not game:
-		if notify_failure:
-			raise ReplayError("Couldn't find this game in the linked players' World's Edge match history.")
-		return False
-
-	key = insights.game_key(worldsedge_id=game['id'])
-	if await _live_post(key=key) or key in _posting:
-		await _link_match(qc, info, game, key)
-		return True
-
-	urls = worldsedge.replay_urls(game)
-	if not urls:
-		if notify_failure:
-			raise ReplayError("The game was found, but nobody uploaded a recorded game for it.")
-		return False
-
-	# BombayBot Elo (the rating used to make the match) for every linked player in the game.
-	meta = worldsedge.match_meta(game)
-	for p in info['players']:
-		if p['user_id'] in links:
-			meta.setdefault(links[p['user_id']], {})['elo'] = p['rating']
-	try:
-		ratings = await worldsedge.lookup_profiles(profile_ids=list(worldsedge.match_profiles(game)))
-	except worldsedge.WorldsEdgeError:
-		ratings = {}
-	for pid, r in ratings.items():
-		meta.setdefault(pid, {})['alias'] = r.get('alias')
-		if r.get('tg_rating'):
-			meta[pid]['rating'] = r['tg_rating']
-
-	# Replay uploaded by the highest-rated player: BombayBot Elo first, World's Edge team rating as a tiebreak.
-	def rating_key(pid):
-		return (meta.get(pid, {}).get('elo') or 0, meta.get(pid, {}).get('rating') or 0)
-	source = max(urls, key=rating_key)
-	raw = await worldsedge.download(urls[source])
-
-	rec = await asyncio.to_thread(rec_parser.parse, raw)
-	fp = insights.fingerprint(rec)
-	result = await asyncio.to_thread(analysis.analyze, rec, meta)
-
-	map_name = rec.get('map_name') or (game.get('mapname') or '').replace('.rms', '').replace('_', ' ') \
-		or (info['maps'][0] if info['maps'] else None)
-	key = await insights.save(
-		result, key, map_name=map_name, lobby=game.get('description'), match_id=info['match_id'],
-		channel_id=qc.id, source='auto', rec_profile_id=source, fingerprint=fp
-	) or key
-	source_name = ratings.get(source, {}).get('alias') or str(source)
-
-	# Someone may have uploaded this game (under a different file name) while we were working.
-	if key in _posting or fp in _posting or await _live_post(key=key, fingerprint=fp):
-		await _link_match(qc, info, game, key)
-		return True
-	_posting.update((key, fp))
-	try:
-		posted = await publish(
-			qc, result, rec_bytes=rec_parser.unwrap(raw), map_name=map_name, lobby=game.get('description'),
-			title=post.make_title(result, map_name),
-			footer=f"World's Edge game {game['id']} · replay uploaded by {source_name}",
-			mention_ids=[p['user_id'] for p in info['players']],
-		)
-		await _record_post(key, fp, posted)
-	finally:
-		_posting.difference_update((key, fp))
-	await _link_match(qc, info, game, key)
-	return True
-
-
-async def _link_match(qc, info, game, key):
-	""" Remember which World's Edge game a pickup match was, so it is not looked up again. """
-	try:
-		await db.update('aoe_games', dict(match_id=info['match_id'], channel_id=qc.id), keys=dict(game_key=key))
-	except Exception:
-		pass
-	await db.insert('aoe_replay_posts', dict(
-		match_id=info['match_id'], channel_id=qc.id, game_id=game['id'], at=int(time.time())
-	), on_dublicate="replace")
+	matched = {key: next(iter(ids)) for key, ids in candidates.items() if len(ids) == 1}
+	if not matched:
+		return {}
+	elos = {r['user_id']: r['rating'] for r in await qc.rating.get_players(matched.values())}
+	return {wanted[key]: dict(user_id=uid, elo=elos.get(uid)) for key, uid in matched.items()}
 
 
 # ---------- one post per game
@@ -297,7 +129,7 @@ def _winner_text(result):
 	return " & ".join(p['civ'] for p in winners) + " win"
 
 
-async def publish(qc, result, rec_bytes, map_name=None, lobby=None, title=None, footer=None, mention_ids=(), reply_ctx=None):
+async def publish(qc, result, rec_bytes, map_name=None, lobby=None, title=None, footer=None, reply_ctx=None):
 	"""
 	Create the forum post (or, with no forum set, a message in the queue channel).
 	Returns dict(channel_id, thread_id, message_id, url) describing the post.
@@ -313,8 +145,7 @@ async def publish(qc, result, rec_bytes, map_name=None, lobby=None, title=None, 
 	title = title or f"{map_name or 'Game'} — {_winner_text(result)}"
 	embed = post.build_embed(result, title, narrative=narrative, footer=footer)
 	file = _rec_file(rec_bytes, title)
-	mentions = " ".join(f"<@{uid}>" for uid in mention_ids)
-	content = (mentions + "\n" if mentions else "") + "Discuss the game here. The recorded game is attached."
+	content = "Discuss the game here. The recorded game is attached."
 	extra = dict(file=file) if file else {}
 
 	forum = getattr(qc.cfg, 'replay_forum', None)
@@ -361,24 +192,14 @@ async def _notify(qc, text):
 
 
 async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = True):
-	""" /replay upload: analyse a recorded game attached by a user; post the breakdown unless summary is off. """
+	""" /replay upload: analyse a recorded game; post the breakdown unless summary is off. """
 	rec = await asyncio.to_thread(rec_parser.parse, data)
 	fp = insights.fingerprint(rec)
-	profile_ids = [p['profile_id'] for p in rec['players'] if p['profile_id']]
 	meta = {}
-	try:
-		for pid, r in (await worldsedge.lookup_profiles(profile_ids=profile_ids)).items():
-			meta[pid] = dict(alias=r.get('alias'), rating=r.get('tg_rating'))
-	except Exception:
-		pass  # World's Edge names and ratings are optional
-	# BombayBot Elo for players who linked their AoE2 account
-	rows = await db.select(('user_id', 'profile_id'), 'aoe_profiles')
-	user_of = {r['profile_id']: r['user_id'] for r in rows if r['profile_id'] in profile_ids}
-	if user_of:
-		elos = {r['user_id']: r['rating'] for r in await qc.rating.get_players(user_of.values())}
-		for pid, uid in user_of.items():
-			if elos.get(uid) is not None:
-				meta.setdefault(pid, {})['elo'] = elos[uid]
+	for name, info in (await bombay_players_by_name(qc, [p['name'] for p in rec['players']])).items():
+		for p in rec['players']:
+			if p['name'] == name:
+				meta[p['profile_id']] = dict(elo=info['elo'], user_id=info['user_id'])
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
 	key = insights.game_key(filename=filename, rec=rec)
 	saved = await insights.save(
