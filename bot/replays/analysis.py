@@ -414,7 +414,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['_vill_made'], stats[p]['_vill_alive'] = v['made'], v['alive']
 		stats[p]['villagers_made'] = v['villagers']
 		stats[p]['fishing_ships_made'] = v['fishing']
-		stats[p]['villagers_lost'] = len(v['lost'])
+		stats[p]['villagers_lost'] = len(v['lost'])  # villagers and fishing ships killed or deleted
+		stats[p]['fishing_ships_lost'] = v.get('ships_lost', 0)
 		stats[p]['villagers_peak'] = max(v['alive'], default=0)
 		stats[p]['villagers_at'] = {m: v['alive'][m] for m in (20, 30, 40) if m < len(v['alive'])}
 	banked = {p: unplanned_floating(A, p, curve.get(p, []), army[p]['_alive'], stats[p], end) for p in pids}
@@ -649,6 +650,66 @@ VILLAGER_CONFIRM = 3 * 60000  # hits in the last 3 minutes analysed can't be con
 START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
 
 
+FISH_CLICK_RADIUS = 6  # tiles: an attack clicked this close to a fish was on a fishing ship
+
+
+def fishing_ship_hits(A, players, villagers, end):
+	"""
+	Enemy attack orders on fishing ships: {ship id: (time, attacker, victim)} (the last such order).
+	A fishing ship is a unit its owner ordered onto fish, or a unit created during the game that nobody ever gave
+	orders to (it came out of a Dock with a gather point on fish) and that an enemy clicked right next to fish;
+	its owner is then the attacker's enemy with the nearest Dock.
+	"""
+	# Deep-water fish: what Docks (buildings that trained fishing ships) send ships to. Shore fish that Town
+	# Centers send villagers to are left out, so attacks on those villagers aren't taken for fishing ships.
+	dock_ids = {b for a in A if a['a'] == 'DE_QUEUE' and _name('objects', a['unit_id']) == 'Fishing Ship'
+		for b in a.get('object_ids') or []}
+	fish_ids, fish_pos = set(), []
+	for a in A:
+		if a['a'] in ('GATHER_POINT', 'DE_MULTI_GATHERPOINT') and (a.get('target_id') or 0) > 0 \
+				and set(a.get('object_ids') or []) & dock_ids:
+			fish_ids.add(a['target_id'])
+			if a.get('x'):
+				fish_pos.append((a['x'], a['y']))
+	owner = {}
+	for a in A:
+		for o in a.get('object_ids') or []:
+			owner.setdefault(o, a.get('player_id'))
+	ships = {}
+	for a in A:
+		if a['a'] == 'ORDER' and a.get('target_id') in fish_ids:
+			for o in a.get('object_ids') or []:
+				if o not in villagers:
+					ships[o] = a.get('player_id')
+	# Units created during the game have higher ids than everything that existed at the start (fish, trees,
+	# starting buildings and units): above the highest id referenced in the first 30 seconds.
+	start_ids = [o for a in A if a['t'] < 30000 for o in (a.get('object_ids') or []) + [a.get('target_id') or 0]]
+	first_unit = max(start_ids) if start_ids else 0
+	docks = defaultdict(list)
+	for a in A:
+		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) == 'Dock':
+			docks[a['player_id']].append((a['x'], a['y']))
+	hits = {}
+	for a in A:
+		t = a.get('target_id') or 0
+		att = a.get('player_id')
+		if a['a'] != 'ORDER' or a['t'] > end or att not in players or t <= 0 or t in villagers:
+			continue
+		if t in ships:
+			victim = ships[t]
+		elif t not in owner and t > first_unit and a.get('x') and fish_pos \
+				and min(math.dist((a['x'], a['y']), f) for f in fish_pos) <= FISH_CLICK_RADIUS:
+			enemies = [p for p in players if players[p]['team_id'] != players[att]['team_id'] and docks[p]]
+			if not enemies:
+				continue
+			victim = min(enemies, key=lambda p: min(math.dist((a['x'], a['y']), d) for d in docks[p]))
+		else:
+			continue
+		if victim in players and players[victim]['team_id'] != players[att]['team_id']:
+			hits[t] = (a['t'], att, victim)
+	return hits
+
+
 def villager_estimate(A, players, villagers, army_alive, end):
 	"""
 	Estimated economy workers alive per minute: villagers plus fishing ships. The replay has no unit counts, so:
@@ -687,6 +748,12 @@ def villager_estimate(A, players, villagers, army_alive, end):
 				and owner.get(target) in players and owner[target] != a['player_id'] \
 				and players[owner[target]]['team_id'] != players[a['player_id']]['team_id']:
 			hits[target] = (a['t'], a['player_id'])
+	ship_hits = fishing_ship_hits(A, players, vill, end)  # ship id -> (time, attacker, victim)
+	own_last = {}
+	for a in A:
+		for o in a.get('object_ids') or []:
+			if a.get('player_id') == owner.get(o):
+				own_last[o] = a['t']
 	out = {}
 	minutes = int(end // 60000) + 1
 	for pid, p in players.items():
@@ -721,7 +788,16 @@ def villager_estimate(A, players, villagers, army_alive, end):
 				continue  # too close to the end to tell: its owner had no time to order it again
 			lost.append(t_hit)
 			killers[attacker] += 1
-			killed.append((t_hit, {attacker: 1.0}))
+			killed.append((t_hit, {attacker: 1.0}, 'villager'))
+		# Fishing ships killed: same rule (targeted, never ordered again, not in the last 3 minutes).
+		ships_lost = 0
+		for o, (t_hit, attacker, victim) in ship_hits.items():
+			if victim != pid or own_last.get(o, 0) > t_hit + VILLAGER_HIT_GRACE or t_hit > end - VILLAGER_CONFIRM:
+				continue
+			lost.append(t_hit)
+			ships_lost += 1
+			killers[attacker] += 1
+			killed.append((t_hit, {attacker: 1.0}, 'fishing ship'))
 		lost.sort()
 		start = START_VILLAGERS.get(p.get('civ'), 3)
 		alive = []
@@ -731,6 +807,7 @@ def villager_estimate(A, players, villagers, army_alive, end):
 			army = army_alive[pid][min(len(army_alive[pid]) - 1, m)] if army_alive.get(pid) else 0
 			alive.append(max(0, min(n, POP_CAP - army)))
 		out[pid] = dict(made=made, lost=lost, alive=alive, villagers=kinds['Villager'], fishing=kinds['Fishing Ship'],
+			ships_lost=ships_lost,
 			killers=killers, killed=sorted(killed, key=lambda k: k[0]), busy=busy, first_use=first_use)
 	return out
 
@@ -1452,28 +1529,32 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 				ev.append(((ka + kb) * (0.5 if late else 1), first * 60000,
 					f"{name(win)} fought {name(lose)}: {round(kw):,} vs {round(kl):,} army value killed{when}"))
 
-	# Big raids: one player killing many of another player's villagers in one burst (kills under a minute apart).
+	# Raids: one player killing many of another player's villagers or fishing ships in one burst (kills under a
+	# minute apart); bursts on the same player less than 5 minutes apart are one moment.
 	if vest:
 		for p in players:
 			by_raider = defaultdict(list)
-			for t, share in vest[p].get('killed', []):
-				by_raider[max(share, key=share.get)].append(t)
-			for raider, times in by_raider.items():
-				times.sort()
+			for t, share, kind in vest[p].get('killed', []):
+				by_raider[max(share, key=share.get)].append((t, kind))
+			for raider, kills in by_raider.items():
+				kills.sort()
 				bursts, cur = [], []
-				for t in times:
-					if cur and t - cur[-1] > RAID_GAP:
+				for k in kills:
+					if cur and k[0] - cur[-1][0] > RAID_GAP:
 						bursts.append(cur)
 						cur = []
-					cur.append(t)
+					cur.append(k)
 				if cur:
 					bursts.append(cur)
 				raids = [b for b in bursts if len(b) >= RAID_MIN]
-				for episode in _episodes(raids, lambda b: b[0]):  # raids on the same player close together: one line
-					n = sum(len(b) for b in episode)
-					weight = sum(len(b) * RAID_VILLAGER_WEIGHT * (0.5 if end and b[0] >= end - LATE_WINDOW else 1) for b in episode)
-					when = f" ({mmss(episode[0][0])}–{mmss(episode[-1][-1])})" if len(episode) > 1 else ""
-					ev.append((weight, episode[0][0], f"{name(raider)} raided {name(p)}: {n} villagers killed{when}"))
+				for episode in _episodes(raids, lambda b: b[0][0]):
+					kinds = Counter(kind for b in episode for _, kind in b)
+					weight = sum(len(b) * RAID_VILLAGER_WEIGHT * (0.5 if end and b[0][0] >= end - LATE_WINDOW else 1)
+						for b in episode)
+					what = " and ".join(f"{kinds[k]} {k}{'s' if kinds[k] > 1 else ''}" for k in ('villager', 'fishing ship') if kinds[k])
+					start, stop = episode[0][0][0], episode[-1][-1][0]
+					when = f" ({mmss(start)}–{mmss(stop)})" if len(episode) > 1 else ""
+					ev.append((weight, start, f"{name(raider)} raided {name(p)}: {what} killed{when}"))
 
 	for c in castles:
 		if c['status'] == 'lost':

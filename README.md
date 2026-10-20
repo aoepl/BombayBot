@@ -107,7 +107,8 @@ What the breakdown shows:
   minutes after Castle Age, so producing from more Town Centers and Docks at once counts.
   Fishing ships count as economy workers alongside villagers (a Dock trains one every 40 seconds); warships
   count as army, and transport ships as neither.
-  Villagers killed: an enemy attack order targeted the villager and its owner never ordered it again; hits in
+  Villagers and fishing ships killed (eco kills): an enemy attack order targeted it and its owner never ordered it
+  again (a fishing ship is a unit ordered onto fish, or a never-ordered unit an enemy clicked right next to fish); hits in
   the last 3 minutes before the game is decided are not counted, since there is no time to see the villager
   again (villagers killed by attack-move, towers or castles are not seen either, so it is a lower bound).
   Villagers alive are estimated, since the replay has no unit counts: a queue click is 1 villager (5 with
