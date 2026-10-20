@@ -46,8 +46,12 @@ Setup (optional):
 * Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
 What the breakdown shows:
-* Each player gets a strategy name (for example "Fast Castle boom → Scouts/Hussars + Cavalry Archers")
-  and four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
+* Each player gets a strategy name: opening → Castle Age army → Imperial Age army → extras, for example
+  "Fast Castle → Monks + Temple Guard → Imp: Monks + Spearmen/Halbs → 3 forward castles".
+  Openings: "Feudal tower rush" (2+ towers in an enemy base before Castle Age), "Feudal archers + scouts"
+  (8+ Feudal units, named by line, marked "(defensive)" if they never attacked), "Fast Castle" (Castle Age
+  clicked within 4 minutes of Feudal), plus "boom" for 2+ Town Centers soon after Castle Age.
+* Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
   The overall score weighs them by seat (flank or pocket).
 * Survival is only scored for players whose base was seriously attacked: it rewards keeping the economy at
   home under pressure and marks players whose main base was destroyed. Holding a heavy attack scores higher
@@ -75,7 +79,8 @@ future features such as suggesting civs and seats for a map. Nothing reads it ye
 * `aoe_games`: one row per game (map, map category, team size, length, who uploaded it).
 * `aoe_game_players`: one row per player per game: AoE2 profile and the Discord member matched by name, map and map category
   (Open, Semi Closed, Closed, Hybrid, Nomad or Other), civ, seat (flank or pocket), win or loss, BombayBot Elo,
-  strategy (opening, boom, main units, fast Imperial, forward castles, tower creep), age-up times, APM,
+  strategy (opening, Feudal units and whether they attacked, forward towers, boom, Castle Age and Imperial Age
+  armies, fast Imperial, forward castles, tower creep), age-up times, APM,
   the four scores, overall score, rank in the lobby, performance against Elo, pressure dealt and taken, and tributes.
 
 The same game is never counted twice: re-analysing it replaces its rows. Games are matched by the game id in the file name (AgeIIDE_Replay_<id>), or by a fingerprint (start time, players, civs and teams). Example: best civs for one player on closed maps:

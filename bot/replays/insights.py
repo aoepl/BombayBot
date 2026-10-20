@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 1
+ANALYSIS_VERSION = 2
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -72,6 +72,11 @@ db.ensure_table(dict(
 		dict(cname="opening", ctype=db.types.str),
 		dict(cname="boom", ctype=db.types.bool),
 		dict(cname="main_units", ctype=db.types.str),
+		dict(cname="feudal_units", ctype=db.types.str),
+		dict(cname="feudal_attack", ctype=db.types.bool),
+		dict(cname="forward_towers", ctype=db.types.int),
+		dict(cname="castle_units", ctype=db.types.str),
+		dict(cname="imperial_units", ctype=db.types.str),
 		dict(cname="fast_imp", ctype=db.types.bool),
 		dict(cname="forward_castles", ctype=db.types.int),
 		dict(cname="tower_creep", ctype=db.types.bool),
@@ -180,6 +185,9 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				won=p['won'], elo=p.get('elo'), tg_rating=p.get('rating'),
 				strategy=s['strategy'], opening=parts.get('opening'), boom=parts.get('boom'),
 				main_units=", ".join(parts.get('main_units', [])), fast_imp=parts.get('fast_imp'),
+				feudal_units=", ".join(parts.get('feudal_units', [])), feudal_attack=parts.get('feudal_attack'),
+				forward_towers=parts.get('forward_towers'), castle_units=", ".join(parts.get('castle_units', [])),
+				imperial_units=", ".join(parts.get('imperial_units', [])),
 				forward_castles=parts.get('forward_castles'), tower_creep=parts.get('tower_creep'),
 				feudal_s=_secs(s['ages'].get('Feudal Age')), castle_s=_secs(s['ages'].get('Castle Age')),
 				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers=s['villagers'],

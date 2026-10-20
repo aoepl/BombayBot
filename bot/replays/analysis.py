@@ -199,6 +199,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	press_matrix = Counter()
 	timeline_in = defaultdict(Counter)  # defender -> minute -> orders
 	team_into = defaultdict(Counter)  # (attacking team, defender) -> minute -> orders
+	attack_times = defaultdict(list)  # attacker -> times of army orders into enemy bases
 	for a in A:
 		if a['a'] not in ARMY_ORDERS or a.get('x') is None:
 			continue
@@ -217,6 +218,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			press_matrix[(pid, b)] += 1
 			timeline_in[b][int(a['t'] // 60000)] += 1
 			team_into[(players[pid]['team_id'], b)][int(a['t'] // 60000)] += 1
+			attack_times[pid].append(a['t'])
 		else:
 			help_out[pid] += 1
 
@@ -427,7 +429,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 
 	# ---- strategy names
 	for p in pids:
-		parts = strategy_parts(stats[p], [c for c in castles if c['player'] == p], A, p)
+		parts = strategy_parts(stats[p], [c for c in castles if c['player'] == p], A, p, players, base_of, attack_times[p])
 		stats[p]['strategy'] = parts['name']
 		stats[p]['strategy_parts'] = parts
 		stats[p].update(
@@ -443,31 +445,61 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	)
 
 
-def strategy_parts(st, my_castles, A, pid):
+FEUDAL_NAMES = {
+	'Archer': 'archers', 'Skirmisher': 'skirms', 'Scout Cavalry': 'scouts', 'Militia': 'Men-at-Arms',
+	'Spearman': 'spears', 'Eagle Scout': 'Eagles', 'Camel Rider': 'camels', 'Cavalry Archer': 'cavalry archers',
+	'Battle Elephant': 'elephants', 'Steppe Lancer': 'lancers',
+}
+NOT_ARMY = (MILITARY_SKIP - {'Monk'}) | {'Trade Cart', 'Trade Cog'}  # monk pushes are a strategy too
+
+
+def _army_between(A, pid, t0, t1):
+	""" Units queued by a player from t0 up to (not including) t1, by line. """
+	c = Counter()
+	for a in A:
+		if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid and t0 <= a['t'] < t1:
+			n = _name('objects', a['unit_id'])
+			if n not in NOT_ARMY:
+				c[n] += a.get('amount', 1) or 1
+	return c
+
+
+def _top_lines(counter, minimum, names=LINE_NAMES, limit=2):
+	return [names.get(n, n) for n, c in counter.most_common() if c >= minimum][:limit]
+
+
+def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times):
 	""" The strategy as separate parts (for stats later) plus a readable name. """
 	ages = st['ages']
 	feudal, castle, imp = (ages.get(a) for a in AGES)
+	end = max((a['t'] for a in A), default=0) + 1
+	team = players[pid]['team_id']
 
-	towers_early = 0
-	if castle:
-		towers_early = sum(1 for a in A if a['a'] == 'BUILD' and a.get('player_id') == pid
-			and _name('objects', a['building_id']) in TOWERS and a['t'] < castle)
-	feudal_army = 0
-	if feudal and castle:
-		feudal_army = sum((a.get('amount', 1) or 1) for a in A if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid
-			and feudal <= a['t'] < castle and _name('objects', a['unit_id']) not in MILITARY_SKIP)
-	if towers_early >= 2:
+	# Feudal Age: a tower rush means towers in an enemy base, not defensive towers at home.
+	forward_towers = 0
+	if feudal:
+		forward_towers = sum(1 for a in A if a['a'] == 'BUILD' and a.get('player_id') == pid
+			and _name('objects', a['building_id']) in TOWERS and feudal <= a['t'] < (castle or end)
+			and players[base_of(a['x'], a['y'])]['team_id'] != team)
+	feudal_army = _army_between(A, pid, feudal, castle or end) if feudal else Counter()
+	feudal_units = _top_lines(feudal_army, 3, FEUDAL_NAMES)
+	feudal_attacks = sum(1 for t in attack_times if feudal and feudal <= t < (castle or end))
+	feudal_attack = feudal_attacks >= 10
+
+	if forward_towers >= 2:
 		opening = "Feudal tower rush"
-	elif feudal_army >= 8:
-		opening = "Feudal aggression"
+	elif sum(feudal_army.values()) >= 8:
+		opening = "Feudal " + " + ".join(feudal_units or ["army"]) + ("" if feudal_attack else " (defensive)")
 	elif feudal and castle and castle - feudal <= 4 * 60000:
 		opening = "Fast Castle"
 	else:
 		opening = "Standard"
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)
 
-	army = [(n, c) for n, c in st['units'].most_common() if n not in ('Villager', 'Trade Cart', 'Trade Cog')]
-	main_units = [LINE_NAMES.get(n, n) for n, c in army[:2] if c >= 5]
+	# Castle Age and Imperial Age armies, separately.
+	castle_units = _top_lines(_army_between(A, pid, castle, imp or end), 5) if castle else []
+	imperial_units = _top_lines(_army_between(A, pid, imp, end), 5) if imp else []
+	main_units = castle_units or imperial_units
 	fast_imp = bool(imp and imp < 25 * 60000)
 	forward_castles = sum(1 for c in my_castles if c['forward'])
 	tower_creep = st['towers'] >= 8
@@ -475,8 +507,10 @@ def strategy_parts(st, my_castles, A, pid):
 	parts = []
 	if opening != "Standard" or boom:
 		parts.append((opening if opening != "Standard" else "Castle Age") + (" boom" if boom else ""))
-	if main_units:
-		parts.append(" + ".join(main_units))
+	if castle_units:
+		parts.append(" + ".join(castle_units))
+	if imperial_units and imperial_units != castle_units:
+		parts.append("Imp: " + " + ".join(imperial_units))
 	extras = []
 	if fast_imp:
 		extras.append("fast Imperial")
@@ -488,8 +522,9 @@ def strategy_parts(st, my_castles, A, pid):
 		parts.append(", ".join(extras))
 	return dict(
 		name=" → ".join(parts) if parts else "Standard play",
-		opening=opening, boom=boom, main_units=main_units, fast_imp=fast_imp,
-		forward_castles=forward_castles, tower_creep=tower_creep,
+		opening=opening, boom=boom, feudal_units=feudal_units, feudal_attack=feudal_attack,
+		forward_towers=forward_towers, castle_units=castle_units, imperial_units=imperial_units,
+		main_units=main_units, fast_imp=fast_imp, forward_castles=forward_castles, tower_creep=tower_creep,
 	)
 
 
