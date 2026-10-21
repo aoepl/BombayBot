@@ -37,22 +37,60 @@ nano config.cfg
   # Rebuild after code changes                                                                                                                                                                                           
   docker compose up -d --build
 ```
+### Player stats and civ statistics
+Reports over the games analysed in the queue channel (uploads and automatic breakdowns):
+* `/aoe stat [player]`: games and win rate; flank and pocket games with their win rates; average APM; how the player
+  does against their BombayBot Elo (average difference and how often above or below); their best position, army style
+  (Cavalry, Archers, Cavalry archers, Infantry, Gunpowder, Monks, Naval, from their main unit line) and strategy
+  (opening plus boom), each by average score over 2+ games; **individual luck**, the share of those bests they got
+  per game; **team luck**, the share of their teammates' own bests the teammates got per game; most played civs.
+* `/aoe civs [map]`: win rate of every civ, overall or on one map (name or type, e.g. `Arena`, `Golden Lakes`,
+  `Closed`), and the best civs (2+ games) by BombayBot Elo range (under 1400, 1400–1599, 1600–1799, 1800+), by
+  position (flank, pocket) and by map.
+
 ### Game breakdowns from recorded games
 Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).
 BombayBot analyses it, saves every player's performance (see Player insights) and posts a breakdown of the game.
 
+Automatic breakdowns: when a queue channel's `replay_forum` is a **forum channel**, every match reported with `/report` is looked
+up on World's Edge (the game's own match history, also used by AoE2 Insights and AoE2 Companion) about 90 seconds
+after `/report loss` (or `/report draw` once both captains agree; never after `/report abort`), retrying for about 20 minutes. The bot searches the history of the highest-rated players whose
+AoE2 profile it knows, downloads the highest-rated player's recording and posts the breakdown in the forum,
+mentioning the players. It stops looking as soon as a member uploads that game with `/replay upload`. Profile ids
+are learned from uploaded recordings (each recording lists every player's profile id, saved against the member
+their name matched), so a player needs to appear in one uploaded game first.
+
+Posts never attach the recording, to save the server's Discord storage. They link to the official download
+(`aoe.ms/replay`) and the match pages on AoE2 Insights and AoE2 Companion. The match id comes from the file name
+(`AgeIIDE_Replay_<id>`, links straight away) or from a World's Edge lookup by players and start time, which
+runs after the post is up and adds the links to it, so the post is never delayed.
+
 Setup (optional):
 * Uploading a game that is already posted updates that post in place (new Elo links, latest scoring) instead of posting again.
-* Posts go to the queue channel. To post them in a forum instead: `/channel set variable:replay_forum value:#game-breakdowns`.
+* Posts go to the queue channel. To post them in a forum instead (and turn on automatic breakdowns):
+  `/channel set variable:replay_forum value:#game-breakdowns`. A text channel works too, without the automatic part.
+* Turn the automatic part off (keeping the forum) with `/replay auto_replay_off`, back on with `/replay auto_replay_on`
+  (moderators; stored as the `replay_auto` channel setting).
+* Turn off the World's Edge lookup for uploads with `/replay auto_lookup_off`: uploaded games are then posted
+  without the download and match links. Back on with `/replay auto_lookup_on` (channel setting `replay_lookup`).
 * Set `GOOGLE_AI_API_KEY` for an AI-written recap; turn it off per channel with `replay_ai`.
 
 What the breakdown shows:
+* Key moments: the 5 biggest events, in time order, raids or fights between the same two players less than 5
+  minutes apart are merged into one line with the time span: fights between two players (500+
+  army value killed in 3 minutes, so a sea fight and a land fight at the same time stay apart), raids (3+
+  villagers of one player killed by one raider in one burst, kills under a minute apart; events in the last 3
+  minutes before the game is decided count half when picking), castles destroyed, players eliminated (orders
+  stop well before the end with no resignation, e.g. a regicide king killed) and the resignation that ends the analysis.
 * Each player gets a strategy name: opening → Castle Age army → Imperial Age army → extras, for example
   "Fast Castle → Monks + Temple Guard → Imp: Monks + Spearmen/Halbs → 3 forward castles".
   Openings: "Feudal tower rush" (2+ towers in an enemy base before Castle Age), "Feudal archers + scouts"
-  (8+ Feudal units, named by line, marked "(defensive)" if they never attacked), "Fast Castle" (Castle Age
-  clicked within 4 minutes of Feudal), "Feudal water: hulks + demo ships" when most Feudal units are warships,
-  plus "boom" for 2+ Town Centers soon after Castle Age.
+  (8+ Feudal units, named by line, marked "(defensive)" if they never attacked), "Feudal boom" (fewer than 8
+  Feudal military units, 2+ Feudal eco upgrades and 8+ farms or an extra Town Center in Feudal, e.g. Malay),
+  "Fast Castle" (Castle Age clicked within 4 minutes of Feudal), "Feudal water: hulks + demo ships" when most Feudal units are warships,
+  then the boom as its own stage, named by the economy behind it: "farm boom" (2+ Town Centers
+  within 7 minutes of Castle Age), "fish boom" (5+ fishing ships that went to work, not left idle, up to
+  10 minutes after Castle Age: made at a Dock whose gather point was on fish, or ordered onto fish) or "farm + fish boom" for both.
   Each age's army lists the two biggest unit lines plus any siege the player made (2 or more units).
 * When the AI recap is on, the summary at the top is labelled "AI summary"; the plain summary has no label.
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
@@ -80,6 +118,10 @@ What the breakdown shows:
   minutes after Castle Age, so producing from more Town Centers and Docks at once counts.
   Fishing ships count as economy workers alongside villagers (a Dock trains one every 40 seconds); warships
   count as army, and transport ships as neither.
+  Villagers and fishing ships killed (eco kills): an enemy attack order targeted it and its owner never ordered it
+  again (fishing ships only when their owner had ordered them onto fish, so a kill can be told from a survivor); hits in
+  the last 3 minutes before the game is decided are not counted, since there is no time to see the villager
+  again (villagers killed by attack-move, towers or castles are not seen either, so it is a lower bound).
   Villagers alive are estimated, since the replay has no unit counts: a queue click is 1 villager (5 with
   Shift); with several Town Centers selected each villager goes to the TC with the shortest queue, and a TC
   trains one every 25 seconds. A villager is counted as killed when its last order is followed within 3

@@ -49,7 +49,13 @@
 | /aoe link             | Link an in-game name to your account (moderators: to anyone) |
 | /aoe unlink           | Remove a linked in-game name                            |
 | /aoe names            | Show the in-game names linked to a member               |
-| /replay upload        | Analyse an attached recorded game (.aoe2record or .zip); `summary:False` only saves player stats |
+| /aoe stat             | A player's record from analysed games: flank/pocket, APM, results against Elo, best position/army style/strategy, individual and team luck |
+| /aoe civs             | Civ win rates from analysed games, overall or for one map, best civs by Elo range, position and map |
+| /replay auto_replay_off | Moderators: stop automatic game breakdowns of reported matches in this channel |
+| /replay auto_replay_on  | Moderators: turn automatic game breakdowns back on                      |
+| /replay auto_lookup_off | Moderators: post uploaded games without looking them up on World's Edge (no game links) |
+| /replay auto_lookup_on  | Moderators: look up uploaded games again to link the download and match pages |
+| /replay upload        | Analyse an attached recorded game (.aoe2record or .zip); `summary:False` only saves player stats. With a forum set as `replay_forum`, reported matches are also analysed automatically |
 
 #### Miscellaneous
 | command               | description                                             |

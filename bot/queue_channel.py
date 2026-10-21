@@ -295,8 +295,27 @@ class QueueChannel:
 				"replay_forum",
 				display="Replay forum",
 				section="Replays",
-				description="Forum channel (or text channel) where /replay upload posts game breakdowns. "
-					"Leave empty to post them in this queue channel."
+				description="Forum channel (or text channel) where game breakdowns are posted. With a forum channel, "
+					"the bot also finds, analyses and posts the recorded game of every reported match automatically. "
+					"Leave empty to post /replay upload breakdowns in this queue channel."
+			),
+			Variables.BoolVar(
+				"replay_auto",
+				display="Automatic game breakdowns",
+				section="Replays",
+				description="Look up, analyse and post the recorded game of every reported match (needs a forum channel "
+					"as the replay forum). Turn off with /replay auto_replay_off.",
+				default=1,
+				notnull=True
+			),
+			Variables.BoolVar(
+				"replay_lookup",
+				display="Game links on uploads",
+				section="Replays",
+				description="Look up uploaded games on World's Edge to link the official download and match pages. "
+					"Turn off with /replay auto_lookup_off to post without links.",
+				default=1,
+				notnull=True
 			),
 			Variables.BoolVar(
 				"replay_ai",

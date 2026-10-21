@@ -8,6 +8,7 @@ from typing import List
 from functools import wraps
 
 from core.utils import get, find
+from core.console import log
 
 import bot
 
@@ -110,8 +111,19 @@ async def report(ctx, match: bot.Match, result, reason):
 		await match.report_loss(ctx, ctx.author, reason, draw_flag=1)
 	elif result == 'abort':
 		await match.report_loss(ctx, ctx.author, reason.strip(), draw_flag=2)
+		return  # an aborted match has no game to look up
 	else:
 		raise bot.Exc.ValueError("Invalid result value.")
+	if match not in bot.active_matches:  # the result is in (a draw waits for both captains)
+		_schedule_replay(match)
+
+
+def _schedule_replay(match):
+	""" Find, analyse and post the recorded game in the background (only with a replay forum set). """
+	try:
+		bot.replays.schedule(match)
+	except Exception as e:
+		log.error(f"Could not schedule replay analysis for match {match.id}: {e}")
 
 
 async def report_manual(ctx, queue: str, winners: List[Member], losers: List[Member], draw: bool = False):
