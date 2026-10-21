@@ -1966,6 +1966,7 @@ RAID_VILLAGER_WEIGHT = 300  # a villager killed counts like this much army value
 RAID_GAP = 60000      # kills more than a minute apart are separate raids
 LATE_WINDOW = 3 * 60000  # events this close to the end of the analysis count half when picking moments
 ELIMINATED_GAP = 3 * 60000  # stopped giving orders this long before the end without resigning
+DENIED_AGE_SIZE = 10 ** 5   # a denied age-up always makes the key moments (below eliminations)
 
 
 EPISODE_GAP = 5 * 60000  # fights or raids between the same two players less than 5 minutes apart are one moment
@@ -2159,6 +2160,18 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 					start, stop = episode[0][0][0], episode[-1][-1][0]
 					when = f" ({mmss(start)}–{mmss(stop)})" if len(episode) > 1 else ""
 					ev.append((weight, start, f"{name(raider)} raided {name(p)}: {what} killed{when}"))
+
+	# Denied age-ups: an enemy Town Center destroyed while it was researching an age (clicked again later). Always a
+	# major moment, so it ranks just below eliminations.
+	denied = defaultdict(list)  # (victim, age, clicked) -> [(attacker, share of credit)]
+	for p in players:
+		for x in stats[p].get('buildings_destroyed_list', []):
+			for d in x.get('delays', []):
+				denied[(x['victim'], d['age'], d['clicked'], d['again'], x['t'])].append(p)
+	for (victim, age, clicked, again, t), who in denied.items():
+		names = " and ".join(name(p) for p in who)
+		ev.append((DENIED_AGE_SIZE, t, f"{names} denied {name(victim)}'s {age}: Town Center destroyed mid-research "
+			f"(clicked at {mmss(clicked)}, clicked again at {mmss(again)}, {mmss(again - clicked)} lost)"))
 
 	for c in castles:
 		if c['status'] == 'lost':
