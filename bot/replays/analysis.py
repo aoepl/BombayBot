@@ -384,7 +384,6 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['forward_effect'] = round(sum(x['effect'] * x['weight'] for x in mine) / sum(x['weight'] for x in mine), 2) if mine else None
 		stats[p]['forward_structures'] = [dict(kind=x['kind'], t=x['t0'], base=x['base'], built=x['known'], effect=x['effect'],
 			held=x['hold'], presence=x['presence'], gain=x['gain'], push=x['push'], pushes=x['pushes'], trade=x['trade']) for x in mine]
-	forward = _minmax(forward_raw)
 	for p in pids:
 		stats[p]['army'] = army[p]
 	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end)
@@ -446,8 +445,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['focused_minutes'] = len(focused[p]['focused'])
 		stats[p]['outnumbered_trade'] = focused[p]['trade']
 	playstyle(A, players, stats, army, floating, end, trib_out)
-	# Pressure: army on the map 30%, army value sent at the enemy 35%, damage done (enemy army value killed in
-	# fights plus enemy villagers killed) 15%, forward castles, Donjons and towers 20%.
+	# Pressure: army on the map 35%, army value sent at the enemy 40%, damage done (enemy army value killed in
+	# fights plus enemy villagers killed) 15% (shares of 90%), plus a bonus for forward castles, Donjons and towers.
 	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] for p in pids}
 	damage = _minmax(dealt)
 	# Army on the map only matters if it does damage: scale it by damage done per army value, with full
@@ -462,8 +461,12 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	on_map = _minmax({p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
 		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids})
 	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
-	press = {p: _combine([(0.30, None, on_map), (0.35, None, sent), (0.15, None, damage), (0.20, forward_raw, forward)], p)
-		for p in pids}
+	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage)], p) for p in pids}
+	# Forward castles, Donjons and towers only add: up to +1.5, by their cost and effect (see forward_value).
+	for p in pids:
+		bonus = round(FORWARD_BONUS_MAX * min(1.0, forward_raw[p] / FORWARD_BONUS_FULL), 2)
+		stats[p]['forward_bonus'] = bonus
+		press[p] = min(10.0, press[p] + bonus)
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
 	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
 	# orders into that base from 3 minutes before it was placed to 5 minutes after.
@@ -1250,6 +1253,8 @@ FORWARD_AFTER = 15 * 60000   # over up to 15 minutes after (while it stands)
 FORWARD_MIN_ACTIVITY = 5     # less activity than this nearby says nothing about control
 FORWARD_FLOOR = 0.25         # a forward building that did nothing still counts this much of its cost
 CASTLE_ID = 82
+FORWARD_BONUS_MAX = 1.5    # pressure bonus for forward buildings ...
+FORWARD_BONUS_FULL = 3.0   # ... in full at 3 Castles' worth (cost x effect, see forward_value)
 FORWARD_PARTS = dict(held=0.25, area=0.20, ground=0.15, push=0.20, trade=0.20)
 FORWARD_PUSH_RADIUS = 20     # tiles: siege pushing in under the building's cover
 FORWARD_PUSH_FULL = 15       # building attacks / attack-ground orders in its first 15 minutes for full push credit

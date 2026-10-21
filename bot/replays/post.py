@@ -229,7 +229,7 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"orders on them; kills by patrol, attack-move, towers or castles are not seen); army on the map from 8 min: {s['army']['avg_units']} units on average, peak {s['army']['peak_units']}, "
 				f"average unit value {s['army']['unit_value']} (gold weighted most), army value sent at the enemy (its base, units or buildings) "
 				f"{s['army']['value_sent']}; "
-				f"{'forward castles/Donjons/towers worth ' + str(s['forward_value']) + ' Castles (cost-weighted), effect ' + str(s['forward_effect']) + ' of 1 (stood, held position, gained ground, covered siege pushes, denied enemy trade); ' if s.get('forward_effect') is not None else ''}"
+				f"{'forward castles/Donjons/towers worth ' + str(s['forward_value']) + ' Castles (cost-weighted), effect ' + str(s['forward_effect']) + ' of 1 (stood, held position, gained ground, covered siege pushes, denied enemy trade), pressure bonus +' + str(s.get('forward_bonus')) + '; ' if s.get('forward_effect') is not None else ''}"
 				f"attacked units of 2+ enemies at once in {s.get('multi_enemy_minutes', 0)} minutes; "
 				f"own units attacked by 2+ enemies at once in {s.get('focused_minutes', 0)} minutes"
 				f"{' (traded ' + str(s['outnumbered_trade']) + ' of even in those minutes, 1 = even)' if s.get('outnumbered_trade') is not None else ''}"

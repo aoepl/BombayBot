@@ -151,14 +151,15 @@ What the breakdown shows:
   look the same as kills and count in full. Micro weighs value traded (60%), how much fighting the player did (25%)
   and target picking (15%). The Micro label also needs more value killed than lost (1.1 times or better).
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
-  30% average army value on the map from 8:00 on, units scaled by how much damage they did for their size (full
-  credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 35% army
-  value sent at the enemy, 15% damage done (enemy army value killed in fights plus enemy villagers killed, 100
-  each), and 20% forward castles, Donjons and towers (see below). An order counts as sent at the enemy
+  35% average army value on the map from 8:00 on, units scaled by how much damage they did for their size (full
+  credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 40% army
+  value sent at the enemy and 15% damage done (enemy army value killed in fights plus enemy villagers killed, 100
+  each), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
+  bonus only adds: players with no forward buildings, or ones that achieved little, lose nothing for it. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
   army was ordered within a minute (fights in the open count too).
-  Forward castles, Kreposts, Donjons and towers (built in an enemy base) count by cost and by what they did.
-  A Castle is worth 1, a Donjon about 0.33 and a tower about 0.24. A building that achieved nothing still
+  Forward castles, Kreposts, Donjons and towers (built in an enemy base) count by cost and by what they did,
+  and the bonus is full at 3 Castles' worth. A Castle is worth 1, a Donjon about 0.33 and a tower about 0.24. A building that achieved nothing still
   counts a quarter of its cost; the rest comes from its effect (0 to 1):
   * held, 25%: how long it stood, as a share of the rest of the game;
   * held position, 20%: after it went up, the owner's team's share of the activity within 15 tiles (buildings
