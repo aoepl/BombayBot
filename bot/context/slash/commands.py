@@ -1,7 +1,7 @@
 from typing import Callable
 from asyncio import wait_for, shield
 from asyncio.exceptions import TimeoutError as aTimeoutError
-from nextcord import Interaction, SlashOption, Member, TextChannel, Attachment
+from nextcord import Interaction, SlashOption, Member, TextChannel, Attachment, Message
 import traceback
 import time
 
@@ -791,6 +791,18 @@ async def _aoe_civs(
 		interaction: Interaction,
 		map: str = SlashOption(required=False, description="Map name or type (e.g. Arena, Golden Lakes, Closed).")
 ): await run_slash(bot.commands.aoe_civs, interaction=interaction, map=map)
+
+
+# Right-click (or long-press) an analysis post → Apps → Explain analysis. Works in forum threads too, which are not
+# queue channels, so it does not go through run_slash.
+@dc.message_command(name="Explain analysis", **guild_kwargs)
+async def _explain_analysis(interaction: Interaction, message: Message):
+	try:
+		await bot.commands.explain_analysis(interaction, message)
+	except Exception as e:
+		log.error(f"Explain analysis failed: {e}\n{traceback.format_exc()}")
+		if not interaction.response.is_done():
+			await interaction.response.send_message("Could not explain this post.", ephemeral=True)
 
 
 # replay -> ...

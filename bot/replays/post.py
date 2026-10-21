@@ -240,3 +240,152 @@ def text_for_ai(result, map_name=None, lobby=None):
 			)
 	lines.append("Key moments: " + "; ".join(f"{t} {txt}" for t, txt in result['moments']))
 	return "\n".join(lines)
+
+
+# ---------- explain analysis: why each player got their scores (from what the analysis saved with the game)
+
+SCORE_NAMES = dict(exec="Execution", press="Pressure", surv="Survival", team="Team play")
+
+
+def _fmt_score(v):
+	return "—" if v is None else f"{v:g}"
+
+
+def _parts_text(parts):
+	""" One line per part: value → score (lobby range), with its share of the score. """
+	live = [p for p in parts if p.get('score') is not None]
+	total = sum(p['weight'] for p in live) or 1
+	lines = []
+	for p in parts:
+		if p.get('score') is None:
+			line = f"• {p['name']}: {p['value']} — {p.get('note', 'left out')}"
+		else:
+			line = f"• {p['name']} ({round(100 * p['weight'] / total)}%): {p['value']} → **{p['score']:g}**"
+			if p['name'] == "Unplanned floating":
+				line += " (minutes of spending sitting idle)"
+			if p.get('range'):
+				line += f" ({p['range']})"
+			if p.get('note'):
+				line += f"; {p['note']}"
+		lines.append(line)
+	return "\n".join(lines)
+
+
+METHOD = [
+	("Each part is scored 1–10 within this game", "The best player in the lobby on a part gets 10, the worst 1, and the "
+		"rest in proportion. Lower is better for age-up times, the first military unit and floating. A part nobody in "
+		"the game did is left out and its weight spread over the rest."),
+	("Execution: how well the player ran their game", "Weighted average of: **Castle Age click** (or, after an 8+ unit "
+		"Feudal army, Feudal production uptime: Town Centers, Docks and military buildings kept busy); **Imperial Age "
+		"click**; **villager value** (villagers and fishing ships made and kept alive, replacements after attacks "
+		"counting extra); **first military unit** (a quarter weight); **unplanned floating** (minutes of the player's "
+		"own spending sitting in the bank; saving for a 550+ purchase and being near 200 population don't count). "
+		"Plus a bonus up to +1.5 for fighting several enemies at once: up to +0.75 for minutes attacking 2+ enemies' "
+		"units, up to +0.75 for minutes attacked by 2+ enemies (by how well they traded), as a share of the game from 8:00."),
+	("Pressure: how hard the player pushed the enemy", "Weighted average of: **army on the map** 35% (average army "
+		"value from 8:00, units scaled down if they did less damage for their size than the lobby median); **army "
+		"sent at the enemy** 40% (each military unit ordered at an enemy unit, building or base counts once a minute, "
+		"at the player's average unit cost); **damage done** 15% (enemy army value killed in fights plus 100 per "
+		"villager killed). Early army counts ×2 before 15:00 and ×1.5 before 20:00; gold counts 1.5×, stone 1.2×. Plus "
+		"a bonus up to +1.5 for forward castles, Donjons and towers, by cost and effect (stood, held position, gained "
+		"ground, covered siege pushes, denied trade)."),
+	("Survival: holding the base when it was attacked", "Only scored when the base was seriously attacked. Score = 1 + "
+		"held × (4 + 5 × difficulty) + up to 1 for clearing enemy castles. **Held** is the share of new economy buildings "
+		"kept at home after the attack began, less for Town Centers rebuilt elsewhere. **Difficulty** (0–1) is the "
+		"enemy army and castles sent into the base compared with the most-attacked base, plus 0.05 a minute "
+		"attacked by 2+ enemies at once (up to 0.3)."),
+	("Team play: helping allies", "Weighted average of: **tributes sent** 50%; **army orders into allies' bases** 35% "
+		"(defending them); **flares** 15%."),
+	("Overall", "Flank: execution 27%, pressure 36%, survival 27%, team play 10%. Pocket: 40%, 25%, 25%, 10%. "
+		"When survival is not scored, its weight is spread over the other three."),
+]
+
+
+def method_embed():
+	""" How the scores are calculated (the same for every game). """
+	e = Embed(title="How the scores are calculated", color=0x2f7d6d)
+	for name, value in METHOD:
+		e.add_field(name=name, value=value[:1024], inline=False)
+	return e
+
+
+def _sum_text(parts):
+	""" "(a×w + b×w ...) ÷ total = x" for the parts that count. """
+	live = [p for p in parts if p.get('score') is not None]
+	total = sum(p['weight'] for p in live)
+	if not total:
+		return None, None
+	value = sum(p['score'] * p['weight'] for p in live) / total
+	terms = " + ".join(f"{p['score']:g}×{p['weight']:g}" for p in live)
+	return f"({terms}) ÷ {total:g} = {value:.1f}", value
+
+
+def explain_text(name, civ, ex):
+	""" Why one player got their scores, as text for an embed description. """
+	sc = ex['scores']
+	w = ex['overall_weights']
+	overall = " + ".join(f"{SCORE_NAMES[k].lower()} {_fmt_score(sc[k])} × {round(100 * v)}%" for k, v in w.items())
+	out = [f"**Overall {_fmt_score(sc['overall'])}** = {overall} (weights for a {ex.get('seat') or 'player without a seat'}"
+		+ (", survival not scored" if sc['surv'] is None else "") + ")"]
+	b = ex['bonuses']
+
+	out.append(f"\n**Execution {_fmt_score(sc['exec'])}**\n" + _parts_text(ex['exec']))
+	s = b['several']
+	if s['value']:
+		trade = f", traded {s['trade']:g}× an even trade when focused" if s.get('trade') is not None else ""
+		out.append(f"• Bonus +{s['value']:g} for fighting several enemies: attacked 2+ enemies' units in {s['multi']} min, "
+			f"attacked by 2+ enemies in {s['focused']} min{trade}")
+	calc, _ = _sum_text(ex['exec'])
+	if calc:
+		out.append(f"= {calc}" + (f", + {s['value']:g} bonus" if s['value'] else "") + f" → **{_fmt_score(sc['exec'])}**")
+
+	out.append(f"\n**Pressure {_fmt_score(sc['press'])}**\n" + _parts_text(ex['press']))
+	f = b['forward']
+	if f['count']:
+		out.append(f"• Bonus +{f['value']:g} for forward buildings: {f['count']} in enemy bases ({f['built']} seen built), "
+			f"worth {f['worth']:g} Castles by cost, effect {f['effect']:g} of 1 (stood, held position, gained ground, "
+			f"covered siege pushes, denied trade)")
+	calc, _ = _sum_text(ex['press'])
+	if calc:
+		out.append(f"= {calc}" + (f", + {f['value']:g} bonus" if f['value'] else "") + f" → **{_fmt_score(sc['press'])}**")
+
+	sv = ex['surv']
+	if sc['surv'] is None:
+		out.append(f"\n**Survival —** not scored: {sv['note']}, so its weight goes to the other scores")
+	else:
+		level = 'heavy' if sv['difficulty'] >= 0.66 else 'moderate' if sv['difficulty'] >= 0.33 else 'light'
+		cleared = f", +{sv['cleared']:g} for clearing enemy castles" if sv.get('cleared') else ""
+		out.append(f"\n**Survival {_fmt_score(sc['surv'])}**\n• {sv['note']}\n• Held {round(100 * sv['held'])}% of the economy at "
+			f"home ({round(100 * sv['home'])}% of new economy buildings, {sv['moved_tcs']} Town Centers elsewhere) under {level} "
+			f"pressure (difficulty {sv['difficulty']:g} of 1){cleared}.")
+		out.append(f"= 1 + {sv['held']:g} × (4 + 5 × {sv['difficulty']:g})" + (f" + {sv['cleared']:g}" if sv.get('cleared') else "")
+			+ f" → **{_fmt_score(sc['surv'])}**" + (" (capped at 10)" if sc['surv'] >= 10 else ""))
+
+	out.append(f"\n**Team play {_fmt_score(sc['team'])}**\n" + _parts_text(ex['team']))
+	calc, _ = _sum_text(ex['team'])
+	if calc:
+		out.append(f"= {calc} → **{_fmt_score(sc['team'])}**")
+	return "\n".join(out)
+
+
+def explain_embeds(players):
+	"""
+	players: [(name, civ, seat, explain dict)] best overall first. How the scores are calculated first, then one
+	embed per player, packed into messages
+	under Discord's limits (10 embeds and 6000 characters per message). Returns a list of messages (lists of embeds).
+	"""
+	method = method_embed()
+	messages, current, size = [], [method], sum(len(n) + len(v) for n, v in METHOD) + len(method.title)
+	for name, civ, seat, ex in players:
+		title = f"{name} ({civ}{', ' + seat if seat else ''}): {_fmt_score(ex['scores']['overall'])}"
+		text = explain_text(name, civ, ex)[:4000]
+		e = Embed(title=title[:256], description=text, color=0x2f7d6d)
+		n = len(title) + len(text)
+		if current and (size + n > 5800 or len(current) >= 10):
+			messages.append(current)
+			current, size = [], 0
+		current.append(e)
+		size += n
+	if current:
+		messages.append(current)
+	return messages

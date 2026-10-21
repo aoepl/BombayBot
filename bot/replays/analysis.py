@@ -493,7 +493,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	# Survival only counts for players whose base was really attacked: did they keep their
 	# economy at home afterwards, or did they have to rebuild somewhere else?
 	max_in = max(pressure.values()) if pressure else 0
-	survival, survival_note = {}, {}
+	survival, survival_note, surv_detail = {}, {}, {}
 	for p in pids:
 		enemy_castles = sum(1 for c in castles if c['forward'] and c['base'] == p and c['status'] != 'unclear')
 		stats[p]['enemy_castles_in_base'] = enemy_castles
@@ -523,6 +523,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		difficulty = min(1.0, pressure[p] / (0.6 * max_in) + min(FOCUS_DIFFICULTY_MAX, FOCUS_DIFFICULTY * len(focused[p]['focused'])))
 		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0)
 		survival[p] = max(1.0, min(10.0, value))
+		surv_detail[p] = dict(home=round(home, 2), held=round(held, 2), moved_tcs=moved_tcs, difficulty=round(difficulty, 2),
+			cleared=round(min(cleared[p], 1.0), 2), focused=len(focused[p]['focused']), pressure=pressure[p], max_pressure=max_in)
 		n_cleared = stats[p]['enemy_castles_cleared']
 		cleared_txt = f", cleared {n_cleared} enemy castle{'s' if n_cleared != 1 else ''}" if n_cleared else ""
 		n_focus = len(focused[p]['focused'])
@@ -571,6 +573,79 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		sc['overall'] = round(sum(sc[k] * w[k] for k in w) / total_w, 1)
 		stats[p]['scores'] = sc
 		stats[p]['survival_note'] = survival_note[p]
+
+	# ---- why each score is what it is. The recording is not kept, so this is saved with the game for /explain.
+	vill_raw = {p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids}
+	on_map_raw = {p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
+		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids}
+	exec_info = [
+		("Castle Age click", castle_click, mmss, True, False),
+		("Imperial Age click", imp_click, mmss, True, False),
+		("Villager value", vill_raw, lambda v: f"{v:g}", False, True),
+		("First military unit", first_mil, mmss, True, False),
+		("Unplanned floating", floating, lambda v: f"{v:g} min", True, True),
+	]
+	press_info = [
+		("Army on the map", on_map_raw, lambda v: f"{v:,.0f} value", 0.35, on_map),
+		("Army sent at the enemy", {p: army[p]['value_sent'] for p in pids}, lambda v: f"{v:,.0f} value", 0.40, sent),
+		("Damage done", dealt, lambda v: f"{v:,.0f} value", 0.15, damage),
+	]
+	team_info = [
+		("Tributes sent", team_raw[0], lambda v: f"{v:,.0f} resources", 0.5, team_parts[0]),
+		("Army orders helping allies", team_raw[1], lambda v: f"{v:,.0f} orders", 0.35, team_parts[1]),
+		("Flares", team_raw[2], lambda v: f"{v:,.0f}", 0.15, team_parts[2]),
+	]
+
+	def lobby_range(raw, fmt, lower_better):
+		known = [v for v in raw.values() if v is not None]
+		if not known:
+			return None
+		best, worst = (min(known), max(known)) if lower_better else (max(known), min(known))
+		return f"best {fmt(best)}, worst {fmt(worst)}"
+
+	for p in pids:
+		st = stats[p]
+		ex_parts = []
+		for i, (name, raw, fmt, lower_better, always) in enumerate(exec_info):
+			done = always or _did(raw)
+			v = raw.get(p)
+			part = dict(name=name, value=fmt(v) if v is not None else "never", score=round(exec_parts[i][p], 1) if done else None,
+				weight=EXEC_WEIGHTS[i], range=lobby_range(raw, fmt, lower_better))
+			if not done:
+				part['note'] = "nobody did this, so it is left out"
+			if i == 0 and st.get('feudal_units', 0) >= FEUDAL_ARMY_MIN and st.get('feudal_uptime') is not None \
+					and exec_parts[0][p] > _minmax(castle_click, invert=True)[p]:
+				part['note'] = f"scored by Feudal production uptime ({round(st['feudal_uptime'] * 100)}%) instead, after a {st['feudal_units']}-unit Feudal army"
+			if i == 3:
+				part['note'] = "counts a quarter as much as the others"
+			ex_parts.append(part)
+		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w, range=lobby_range(raw, f, False))
+			for n, raw, f, w, sc_ in press_info]
+		pr_parts[0]['note'] = (f"units counted at {round(army[p]['damage_efficiency'] * 100)}% for the damage they did for their size"
+			if army[p]['damage_efficiency'] < 1 else "full credit: the units did at least the lobby's median damage for their size")
+		tm_parts = []
+		for n, raw, f, w, sc_ in team_info:
+			done = _did(raw)
+			part = dict(name=n, value=f(raw[p]), score=round(sc_[p], 1) if done else None, weight=w, range=lobby_range(raw, f, False))
+			if not done:
+				part['note'] = "nobody did this, so it is left out"
+			tm_parts.append(part)
+		fwd = [x for x in structs if x['player'] == p and x['forward']]
+		bonuses = dict(
+			several=dict(value=st['several_bonus'], multi=st['multi_enemy_minutes'], focused=st['focused_minutes'],
+				trade=st['outnumbered_trade']),
+			forward=dict(value=st['forward_bonus'], worth=st.get('forward_value'), effect=st.get('forward_effect'), count=len(fwd),
+				built=sum(1 for x in fwd if x['known'])),
+		)
+		w = dict(weights[players[p]['seat']])
+		if st['scores']['surv'] is None:
+			w.pop('surv')
+		total_w = sum(w.values())
+		st['explain'] = dict(
+			seat=players[p]['seat'], scores=st['scores'], overall_weights={k: round(v / total_w, 3) for k, v in w.items()},
+			exec=ex_parts, press=pr_parts, team=tm_parts, bonuses=bonuses,
+			surv=dict(note=survival_note[p], **surv_detail.get(p, {})),
+		)
 
 	# ---- performance against BombayBot Elo
 	elo_scaled = _minmax({p: players[p]['elo'] for p in pids if players[p]['elo'] is not None})
