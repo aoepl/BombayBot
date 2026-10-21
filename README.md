@@ -167,10 +167,17 @@ What the breakdown shows:
   35% average army value on the map from 8:00 on, units scaled by how much damage they did for their size (full
   credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 40% army
   value sent at the enemy and 15% damage done (enemy army value killed in fights, enemy villagers killed at 100
-  each, and enemy macro disrupted; see below), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
+  each, enemy Town Centers destroyed and enemy macro disrupted; see below), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
   bonus only adds: players with no forward buildings, or ones that achieved little, lose nothing for it. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
   army was ordered within a minute (fights in the open count too).
+  Enemy Town Centers destroyed count their cost plus research lost in them (an age or tech the owner researched
+  again later, such as an Imperial Age in progress) plus units they were making in their last minute. A Town
+  Center counts as destroyed when its owner never used it again and research was lost in it, enemies
+  attack-clicked it 2+ times, or an enemy attack-clicked it with an enemy castle, Donjon or tower within 12 tiles
+  (castle arrows can't be seen). Credit is shared by attack clicks, a nearby castle or tower counting as 5.
+  Age-up times use the last click of each age, so an age lost with its Town Center counts from when it was clicked
+  again.
   Enemy macro disrupted: for every attack on a base (minutes with 10+ enemy army orders into it, first 10 minutes),
   the defender's production uptime during it and the 2 minutes after is compared with the 5 minutes before (Town
   Centers and Docks busy and military queued every minute; military only once they have 120+ villagers). The drop

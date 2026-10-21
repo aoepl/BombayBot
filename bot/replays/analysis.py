@@ -186,7 +186,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		for a in mine:
 			if a['a'] == 'RESEARCH':
 				n = _name('technologies', a['technology_id'])
-				if n in AGES and n not in ages:
+				if n in AGES:  # clicked again (Town Center destroyed or research cancelled): the last click counted
 					ages[n] = a['t']
 		units = Counter()
 		first_military = None
@@ -454,7 +454,12 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p in pids:
 		stats[p]['macro_disrupted'] = round(disrupted[p])
 		stats[p]['macro_disruptions'] = disruptions[p]
-	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] + disrupted[p] for p in pids}
+	# ... and enemy Town Centers destroyed, with any research and units in progress in them.
+	razed, razings = town_centers_destroyed(A, players, structs, pos, end)
+	for p in pids:
+		stats[p]['buildings_destroyed'] = round(razed[p])
+		stats[p]['buildings_destroyed_list'] = razings[p]
+	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] + disrupted[p] + razed[p] for p in pids}
 	damage = _minmax(dealt)
 	# Army on the map only matters if it does damage: scale it by damage done per army value, with full
 	# credit at the lobby median or better and nothing for an army that never hurt anyone.
@@ -628,10 +633,17 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			ex_parts.append(part)
 		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w, range=lobby_range(raw, f, False))
 			for n, raw, f, w, sc_ in press_info]
+		notes = []
+		for x in st.get('buildings_destroyed_list', []):
+			lost = f" with {', '.join(x['research'])} in progress" if x['research'] else ""
+			notes.append(f"{x['value']:,} for {players[x['victim']]['name']}'s Town Center destroyed at {mmss(x['t'])}{lost}")
+		if notes:
+			pr_parts[2]['note'] = "includes " + "; ".join(notes)
 		if st.get('macro_disrupted'):
 			raided = sorted({players[x['victim']]['name'] for x in st['macro_disruptions']})
-			pr_parts[2]['note'] = (f"includes {st['macro_disrupted']:,} of enemy macro disrupted (production that stalled while "
-				f"their army was in {', '.join(raided)}'s base)")
+			text = (f"{st['macro_disrupted']:,} of enemy macro disrupted (production that stalled while their army was in "
+				f"{', '.join(raided)}'s base)")
+			pr_parts[2]['note'] = (pr_parts[2]['note'] + "; " + text) if notes else "includes " + text
 		pr_parts[0]['note'] = (f"units counted at {round(army[p]['damage_efficiency'] * 100)}% for the damage they did for their size"
 			if army[p]['damage_efficiency'] < 1 else "full credit: the units did at least the lobby's median damage for their size")
 		tm_parts = []
@@ -1030,6 +1042,92 @@ def macro_disruption(A, players, vest, timeline_in, into_by, end):
 					share = value * n / total
 					out[a] += share
 					details[a].append(dict(victim=d, start=t0, minutes=round(length), slip=round(slip, 2), value=round(share)))
+	return dict(out), {p: details[p] for p in players}
+
+
+TC_ID = 109
+RAZE_HIT_WINDOW = 3 * 60000  # enemy attack clicks on a Town Center up to 3 minutes before its last use ...
+RAZE_GONE = 5 * 60000        # ... and never used again for 5+ minutes (or the game ends): it was destroyed
+RAZE_IN_PROGRESS = 60000     # units queued in its last minute were lost with it
+RAZE_NEAR = 12               # tiles: enemy castles, Donjons and towers this close can have destroyed it
+RAZE_STRUCT_CLICKS = 5       # a nearby enemy castle counts like 5 attack clicks when sharing credit
+
+
+def town_centers_destroyed(A, players, structs, pos, end):
+	"""
+	Enemy Town Centers destroyed, valued at the Town Center's cost plus research lost with it (an age or tech it
+	was researching that the owner researched again later, e.g. Imperial Age) plus units it was making in its last
+	minute. A Town Center (anything that queued villagers or an age) counts as destroyed when its owner never used
+	it again (5+ minutes before the end) and either research was lost in it, enemies attack-clicked it 2+ times, or
+	an enemy attack-clicked it with an enemy castle, Donjon or tower within 12 tiles. Credit is shared by attack
+	clicks, a nearby castle or tower counting as 5. Returns ({attacker: value}, {attacker: [details]}).
+	"""
+	techs = _costs_all().get('techs', {})
+	owner, first, last, is_tc = {}, {}, {}, set()
+	research = defaultdict(list)   # building -> [(t, tech id)]
+	queued = defaultdict(list)     # building -> [(t, unit id, amount)]
+	for a in A:
+		pid = a.get('player_id')
+		if pid not in players or a['a'] not in ('DE_QUEUE', 'RESEARCH'):
+			continue
+		for o in a.get('object_ids') or []:
+			owner.setdefault(o, pid)
+			first.setdefault(o, a['t'])
+			if a['a'] == 'DE_QUEUE':
+				queued[o].append((a['t'], a['unit_id'], a.get('amount', 1) or 1))
+				if _name('objects', a['unit_id']) == 'Villager':
+					is_tc.add(o)
+			else:
+				research[o].append((a['t'], a.get('technology_id')))
+				if _name('technologies', a.get('technology_id')) in AGES:
+					is_tc.add(o)
+	for a in A:  # the owner's last use of each building (queues, research, gather points, ungarrison...)
+		for o in a.get('object_ids') or []:
+			if o in owner and a.get('player_id') == owner[o]:
+				last[o] = max(last.get(o, 0), a['t'])
+	clicks = defaultdict(Counter)  # building -> attacker -> attack clicks
+	for a in A:
+		t, att = a.get('target_id') or 0, a.get('player_id')
+		if t in is_tc and att in players and players[att]['team_id'] != players[owner[t]]['team_id']:
+			if last[t] - RAZE_HIT_WINDOW <= a['t'] <= last[t] + RAZE_HIT_WINDOW:
+				clicks[t][att] += 1
+	# Where each Town Center stood: the owner's Town Center placement just before it was first used, or their start.
+	placed = defaultdict(list)
+	for a in A:
+		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) == 'Town Center':
+			placed[a['player_id']].append((a['t'], (a['x'], a['y'])))
+	out, details = Counter({p: 0.0 for p in players}), defaultdict(list)
+	for o in is_tc:
+		pid, t_last = owner[o], last[o]
+		if end - t_last < RAZE_GONE:
+			continue  # still in use near the end
+		before = [xy for t, xy in placed[pid] if t <= first[o]]
+		where = before[-1] if before and first[o] > 60000 else pos.get(pid)
+		credit = Counter(clicks[o])
+		n_clicks = sum(clicks[o].values())
+		near = False
+		if where:
+			for x in structs:
+				if players[x['player']]['team_id'] != players[pid]['team_id'] and x['t0'] <= t_last <= x['t1'] \
+						and math.dist((x['x'], x['y']), where) <= RAZE_NEAR:
+					credit[x['player']] += RAZE_STRUCT_CLICKS * x['certainty']
+					near = True
+		if not credit:
+			continue
+		lost_research = [(t, tech) for t, tech in research[o] if any(a['a'] == 'RESEARCH' and a.get('player_id') == pid
+			and a.get('technology_id') == tech and a['t'] > t_last for a in A)]
+		# A Town Center that just stopped being used (villagers full) is not destroyed: it needs research lost in it,
+		# 2+ enemy attack clicks, or an attack click with an enemy castle or tower next to it.
+		if not (lost_research or n_clicks >= 2 or (n_clicks and near)):
+			continue
+		value = unit_value(TC_ID)
+		value += sum(sum(RESOURCE_WEIGHTS.get(k, 1.0) * v for k, v in techs.get(str(tech), {}).items()) for _, tech in lost_research)
+		value += sum(unit_value(u) * n for t, u, n in queued[o] if t_last - RAZE_IN_PROGRESS <= t <= t_last)
+		total = sum(credit.values())
+		lost_names = [_name('technologies', tech) for _, tech in lost_research]
+		for att, n in credit.items():
+			details[att].append(dict(victim=pid, t=t_last, value=round(value * n / total), research=lost_names))
+			out[att] += value * n / total
 	return dict(out), {p: details[p] for p in players}
 
 
