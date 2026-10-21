@@ -511,6 +511,22 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if held >= 0.4 else
 			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
+		stats[p]['base_lost'] = held < 0.4
+	# Who took each lost base: the enemy with the most army orders into it, a castle they built there counting
+	# for BASE_CASTLE_ORDERS orders. Saved as a matchup: winner civ and position beat loser civ and position.
+	base_kills = []
+	for p in pids:
+		if not stats[p].get('base_lost'):
+			continue
+		weight = Counter()
+		for e in pids:
+			if players[e]['team_id'] != players[p]['team_id']:
+				weight[e] = press_matrix[(e, p)] + BASE_CASTLE_ORDERS * sum(
+					1 for c in castles if c['player'] == e and c['base'] == p and c['status'] != 'deleted')
+		if weight and max(weight.values()) > 0:
+			taker = max(weight, key=weight.get)
+			base_kills.append(dict(winner=taker, loser=p, share=round(weight[taker] / sum(weight.values()), 2)))
+			stats[p]['base_lost_to'] = taker
 	team_raw = [{p: trib_out[p] for p in pids}, {p: help_out[p] for p in pids}, {p: stats[p]['flares'] for p in pids}]
 	team_parts = [_minmax(raw) for raw in team_raw]  # parts nobody did (no tributes in the game) are left out
 	weights = {
@@ -561,7 +577,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		)
 
 	return dict(
-		duration=end, players=players, stats=stats, castles=castles, water_weight=water,
+		duration=end, players=players, stats=stats, castles=castles, water_weight=water, base_kills=base_kills,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
 		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end},
 			army, vest, A, end),
@@ -1414,6 +1430,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	)
 
 
+BASE_CASTLE_ORDERS = 50  # a castle in a base counts like this many army orders into it when crediting a lost base
 MOMENTS_MAX = 6  # the 5 biggest events plus the resignation that ends the analysis
 BATTLE_MIN = 500      # army value killed (both players) in 3 minutes that makes a fight worth listing
 RAID_MIN = 3          # villagers of one player killed by one raider in one burst that make a raid worth listing
