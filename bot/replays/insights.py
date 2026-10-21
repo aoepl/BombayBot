@@ -18,7 +18,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 41
+ANALYSIS_VERSION = 42
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -49,6 +49,30 @@ db.ensure_table(dict(
 		dict(cname="at", ctype=db.types.int)
 	],
 	primary_keys=["game_key"]
+))
+
+# One row per base lost in a game: which civ in which position took which civ in which position, on which map.
+db.ensure_table(dict(
+	tname="aoe_matchups",
+	columns=[
+		dict(cname="game_key", ctype=db.types.str),
+		dict(cname="map_name", ctype=db.types.str),
+		dict(cname="map_category", ctype=db.types.str),
+		dict(cname="team_size", ctype=db.types.int),
+		dict(cname="winner_civ", ctype=db.types.str),
+		dict(cname="winner_seat", ctype=db.types.str),
+		dict(cname="winner_name", ctype=db.types.str),
+		dict(cname="winner_user_id", ctype=db.types.int),
+		dict(cname="winner_elo", ctype=db.types.int),
+		dict(cname="loser_civ", ctype=db.types.str),
+		dict(cname="loser_seat", ctype=db.types.str),
+		dict(cname="loser_name", ctype=db.types.str),
+		dict(cname="loser_user_id", ctype=db.types.int),
+		dict(cname="loser_elo", ctype=db.types.int),
+		dict(cname="share", ctype=db.types.float),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["game_key", "loser_name"]
 ))
 
 db.ensure_table(dict(
@@ -183,6 +207,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 			if other and other['game_key'] != key:
 				if key.startswith('we:') and not other['game_key'].startswith('we:'):
 					await db.delete('aoe_game_players', where=dict(game_key=other['game_key']))
+					await db.delete('aoe_matchups', where=dict(game_key=other['game_key']))
 					await db.delete('aoe_games', where=dict(game_key=other['game_key']))
 				else:
 					key = other['game_key']
@@ -244,6 +269,19 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 			))
 		await db.delete('aoe_game_players', where=dict(game_key=key))
 		await db.insert_many('aoe_game_players', rows)
+		# Lost bases: which civ and position took which, on this map.
+		matchups = []
+		for k in result.get('base_kills', []):
+			w, l = players[k['winner']], players[k['loser']]
+			matchups.append(dict(
+				game_key=key, map_name=map_name, map_category=category, team_size=team_size,
+				winner_civ=w['civ'], winner_seat=w.get('seat'), winner_name=w['name'], winner_user_id=w.get('user_id'),
+				winner_elo=w.get('elo'), loser_civ=l['civ'], loser_seat=l.get('seat'), loser_name=l['name'],
+				loser_user_id=l.get('user_id'), loser_elo=l.get('elo'), share=k['share'], at=now
+			))
+		await db.delete('aoe_matchups', where=dict(game_key=key))
+		if matchups:
+			await db.insert_many('aoe_matchups', matchups)
 		log.info(f"Saved replay insights for {key}: {len(rows)} players on {map_name} ({category}).")
 		return key
 	except Exception as e:

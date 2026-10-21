@@ -208,3 +208,7 @@ This program is free software: you can redistribute it and/or modify it under th
 This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 See 'GNU GPLv3.txt' for GNU General Public License.
+
+* Lost bases are saved as matchups (table `aoe_matchups`): when a player's main base falls, the enemy with the
+  most army orders into it (a castle built there counts as 50) is credited, as "winner civ + position took
+  loser civ + position" on that map, with both players' member and Elo.
