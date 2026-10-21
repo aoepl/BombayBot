@@ -103,6 +103,14 @@ What the breakdown shows:
   8+ Feudal military units scores the better of their Castle Age click time and their Feudal production uptime
   (Town Centers and Docks kept busy, military buildings producing every minute), so a late Castle Age after a
   strong Feudal army is not penalised.
+  Execution also gets a bonus of up to +1.5 for fighting several enemies at once, from attack clicks on enemy
+  units (villagers included):
+  * up to +0.75 for minutes spent attacking units of 2 or more enemies (2+ clicks on each in that minute;
+    early minutes count more);
+  * up to +0.75 for minutes in which 2 or more enemies attacked the player's units, each minute counting by how
+    the player traded in it. An even trade against two players earns full credit.
+
+  Both are measured as a share of the game from 8:00, so long games don't hand everyone the full bonus.
 * Villagers killed are estimated: a villager counted as killed is credited to the enemies whose army orders were
   near it, by share of those orders. They count towards micro (value killed) and pressure (damage done).
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
@@ -162,7 +170,8 @@ What the breakdown shows:
   home under pressure and marks players whose main base was destroyed. Holding a heavy attack scores higher
   than holding a light one. Enemy castles and towers built in a base count as pressure, weighted by how much
   enemy army came with them, and clearing them earns a little extra. Players who were never attacked get
-  "—" and their overall score uses the other three.
+  "—" and their overall score uses the other three. Being attacked by 2 or more enemies at once makes the test
+  harder: each such minute adds to the attack's difficulty, up to 0.3.
 * Every score is compared with the player's BombayBot Elo, so the post and the recap show who played above
   or below their Elo. Players are matched to BombayBot members by name. Names linked with `/aoe link` come
   first (a member can link several in-game names; moderators can link names for others). Otherwise the

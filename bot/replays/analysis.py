@@ -430,6 +430,17 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['float_minutes'] = floating[p]
 	exec_parts[2] = _minmax({p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids})
 	exec_parts.append(_minmax(floating, invert=True))
+	# Fighting several enemies at once (execution), and being focused by several (execution by how well the
+	# player traded then, and a harder survival test).
+	multi_raw, focus_raw, focused = several_enemies(A, players, army, villagers, end)
+	# As a share of the game from 8:00, so long games don't hand everyone the full bonus.
+	fight_minutes = max(1.0, end / 60000 - ARMY_FROM)
+	for p in pids:
+		stats[p]['several_bonus'] = round(MULTI_BONUS_MAX * min(1.0, multi_raw[p] / fight_minutes / MULTI_FULL)
+			+ FOCUS_BONUS_MAX * min(1.0, focus_raw[p] / fight_minutes / FOCUS_FULL), 2)
+		stats[p]['multi_enemy_minutes'] = len(focused[p]['multi'])
+		stats[p]['focused_minutes'] = len(focused[p]['focused'])
+		stats[p]['outnumbered_trade'] = focused[p]['trade']
 	playstyle(A, players, stats, army, floating, end, trib_out)
 	# Pressure: army on the map 35%, army value sent at the enemy 40%, damage done (enemy army value killed in
 	# fights plus enemy villagers killed) 15%, forward castles and towers 10%.
@@ -498,11 +509,15 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		# A Town Center next to an ally is an expansion, not a lost base, while the economy stays at home.
 		held = max(0.0, min(1.0, home - (0.1 * moved_tcs if home < 0.85 else 0)))
 		# Holding a light attack is worth less than holding a heavy one.
-		difficulty = min(1.0, pressure[p] / (0.6 * max_in))
+		# Being attacked by two or more enemies at once makes holding harder.
+		difficulty = min(1.0, pressure[p] / (0.6 * max_in) + min(FOCUS_DIFFICULTY_MAX, FOCUS_DIFFICULTY * len(focused[p]['focused'])))
 		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0)
 		survival[p] = max(1.0, min(10.0, value))
 		n_cleared = stats[p]['enemy_castles_cleared']
 		cleared_txt = f", cleared {n_cleared} enemy castle{'s' if n_cleared != 1 else ''}" if n_cleared else ""
+		n_focus = len(focused[p]['focused'])
+		if n_focus:
+			cleared_txt += f", attacked by 2+ enemies at once in {n_focus} minute{'s' if n_focus != 1 else ''}"
 		level = 'heavy' if difficulty >= 0.66 else 'moderate' if difficulty >= 0.33 else 'light'
 		stats[p]['pressure_level'] = level
 		survival_note[p] = (
@@ -535,7 +550,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		None: dict(exec=.32, press=.32, surv=.26, team=.10),
 	}
 	for p in pids:
-		e = _combine(list(zip(EXEC_WEIGHTS, exec_raw, exec_parts)), p)
+		e = min(10.0, _combine(list(zip(EXEC_WEIGHTS, exec_raw, exec_parts)), p) + stats[p]['several_bonus'])
 		t = _combine([(.5, team_raw[0], team_parts[0]), (.35, team_raw[1], team_parts[1]), (.15, team_raw[2], team_parts[2])], p)
 		surv = round(survival[p], 1) if survival[p] is not None else None
 		sc = dict(exec=round(e, 1), press=round(press[p], 1), surv=surv, team=round(t, 1))
@@ -843,6 +858,64 @@ def villager_value(times, attacked_minutes=(), alive=None):
 FLOAT_FROM = 10 * 60000
 # Execution parts: Castle Age timing, Imperial Age click, villager value, first military unit (quarter weight), floating
 EXEC_WEIGHTS = (1.0, 1.0, 1.0, 0.25, 1.0)
+# Execution bonus on top: fighting several enemies at once, and holding when focused by several.
+# Full bonus at a quarter of the minutes from 8:00 spent clicking 2+ enemies' units (early minutes count more) ...
+MULTI_FULL, MULTI_BONUS_MAX = 0.25, 0.75
+# ... and at a fifth of them attacked by 2+ enemies with even trades (each minute counts by how the player traded).
+FOCUS_FULL, FOCUS_BONUS_MAX = 0.2, 0.75
+MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that count as fighting them
+FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
+FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
+
+
+def several_enemies(A, players, army, villagers, end):
+	"""
+	From attack clicks on units (an attack order whose target is a unit an enemy commands):
+	Units (villagers included) belong to whoever first gave them a move, attack or army command.
+	- multi: minutes a player clicked units of 2+ different enemies (MULTI_CLICKS+ each), early minutes
+	  weighted like army (x2 before 15:00, x1.5 before 20:00);
+	- focused: minutes 2+ different enemies clicked the player's units; each counts by how the player traded
+	  in it (army value killed / killed + lost, x2: an even trade against two players is worth full credit,
+	  0.5 when no fight losses were seen).
+	Returns (multi raw, focus raw, {player: dict(multi=set of minutes, focused=set of minutes, trade=...)}).
+	"""
+	owner = {}
+	for a in A:
+		if a.get('player_id') in players and (a['a'] in ARMY_ORDERS or a['a'] in ARMY_COMMANDS):
+			for o in a.get('object_ids') or []:
+				owner.setdefault(o, a['player_id'])
+	clicks = defaultdict(Counter)  # (attacker, victim) -> minute -> clicks
+	for a in A:
+		att = a.get('player_id')
+		t = a.get('target_id') or 0
+		if a['a'] != 'ORDER' or att not in players or t <= 0 or a['t'] > end:
+			continue
+		vic = owner.get(t)
+		if vic in players and players[vic]['team_id'] != players[att]['team_id']:
+			clicks[(att, vic)][int(a['t'] // 60000)] += 1
+	pair = pair_kills(players, army)
+	out, multi_raw, focus_raw = {}, {}, {}
+	for p in players:
+		targets, attackers = defaultdict(set), defaultdict(set)
+		for (att, vic), mins in clicks.items():
+			for m, n in mins.items():
+				if n < MULTI_CLICKS:
+					continue
+				if att == p:
+					targets[m].add(vic)
+				if vic == p:
+					attackers[m].add(att)
+		multi = {m for m, vs in targets.items() if len(vs) >= 2}
+		focused = {m for m, xs in attackers.items() if len(xs) >= 2}
+		trade = 0.0
+		for m in focused:
+			killed = sum(pair[(p, e)].get(m, 0) for e in players if (p, e) in pair)
+			lost = sum(pair[(e, p)].get(m, 0) for e in players if (e, p) in pair)
+			trade += min(2.0, 2 * killed / (killed + lost)) if killed + lost else 0.5
+		multi_raw[p] = round(sum(early_weight(m) for m in multi), 1)
+		focus_raw[p] = round(trade, 1)
+		out[p] = dict(multi=multi, focused=focused, trade=round(trade / len(focused), 2) if focused else None)
+	return multi_raw, focus_raw, out
 
 
 def spending_rate(A, pid, start, end):
