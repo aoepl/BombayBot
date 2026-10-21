@@ -84,27 +84,45 @@ class ReplayError(Exception):
 # ---------- AoE2 profile ids
 
 async def learn_profiles(rec, found):
-	""" Save the profile id of every player whose name matched a member. """
+	"""
+	Save the profile id and in-game name of every player in an uploaded recording, so later reported matches can
+	be found on World's Edge. A player matched to a member is saved against them; an unmatched player is saved by
+	name only (a profile already linked to a member keeps that link) and is picked up when the name is linked with
+	/aoe link later.
+	"""
 	now = int(time.time())
 	for p in rec['players']:
-		info = found.get(p['name'])
-		if info and info.get('user_id') and p.get('profile_id'):
-			try:
-				await db.insert('aoe_profiles', dict(
-					profile_id=p['profile_id'], user_id=info['user_id'], name=p['name'], at=now
-				), on_dublicate="replace")
-			except Exception as e:
-				log.error(f"Could not save AoE2 profile {p['profile_id']}: {e}")
+		if not p.get('profile_id') or p['profile_id'] <= 0:
+			continue  # AI players have no profile
+		info = found.get(p['name']) or {}
+		user_id = info.get('user_id')
+		try:
+			if not user_id:
+				old = await db.select_one(('user_id',), 'aoe_profiles', where=dict(profile_id=p['profile_id']))
+				user_id = old.get('user_id') if old else None
+			await db.insert('aoe_profiles', dict(
+				profile_id=p['profile_id'], user_id=user_id, name=p['name'], at=now
+			), on_dublicate="replace")
+		except Exception as e:
+			log.error(f"Could not save AoE2 profile {p['profile_id']}: {e}")
 
 
 async def profiles_of(user_ids):
-	""" {user_id: [profile ids, most recently seen first]} """
+	"""
+	{user_id: [profile ids, most recently seen first]}: profiles saved against the member, and profiles saved
+	under one of the in-game names they linked with /aoe link.
+	"""
 	wanted = set(user_ids)
-	out = {}
-	rows = await db.select(('profile_id', 'user_id', 'at'), 'aoe_profiles')
-	for r in sorted(rows, key=lambda r: -(r.get('at') or 0)):
+	by_name = {}
+	for r in await db.select(('name_key', 'user_id'), 'aoe_name_links'):
 		if r['user_id'] in wanted:
-			out.setdefault(r['user_id'], []).append(r['profile_id'])
+			by_name[r['name_key']] = r['user_id']
+	out = {}
+	rows = await db.select(('profile_id', 'user_id', 'name', 'at'), 'aoe_profiles')
+	for r in sorted(rows, key=lambda r: -(r.get('at') or 0)):
+		uid = r['user_id'] if r.get('user_id') in wanted else by_name.get(_norm(r.get('name')))
+		if uid and r['profile_id'] not in out.get(uid, []):
+			out.setdefault(uid, []).append(r['profile_id'])
 	return out
 
 
@@ -607,8 +625,9 @@ async def _run(qc, info):
 				log.info(f"Replay for match {info['match_id']}: {e}")
 				if e.args and e.args[0].startswith("No known"):
 					await _notify(qc, f"Couldn't look up the recorded game for match ({info['match_id']}): none of its "
-						"players has a known AoE2 profile yet. The bot learns them from recorded games uploaded with "
-						"`/replay upload` (players matched by name or `/aoe link`). Upload this game to get its breakdown.")
+						"players has a known AoE2 profile yet. Profiles come from recorded games uploaded with `/replay "
+						"upload`, so upload this game to get its breakdown; after that, these players' games are found "
+						"automatically.")
 					return
 			except Exception as e:
 				log.info(f"Replay for match {info['match_id']}: World's Edge not reachable ({e}); will retry.")

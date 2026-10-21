@@ -71,8 +71,10 @@ after `/report loss` (or `/report draw` once both captains agree, or a moderator
 an abort), retrying for about 20 minutes. The bot searches the history of the highest-rated players whose
 AoE2 profile it knows, downloads the highest-rated player's recording and posts the breakdown in the forum,
 mentioning the players. It stops looking as soon as a member uploads that game with `/replay upload`. Profile ids
-are learned from uploaded recordings (each recording lists every player's profile id, saved against the member
-their name matched), so a player needs to appear in one uploaded game first. When the search can't start, the queue
+are learned from uploaded recordings: each recording lists every player's profile id, and all of them are saved with
+the player's in-game name, against the member the name matched when there is one. A player whose name matched no
+member is picked up as soon as the name is linked with `/aoe link`, so earlier uploads count. A reported match is
+found once any one of its players has appeared in an uploaded game. When the search can't start, the queue
 channel is told why: the replay channel isn't a forum channel, or none of the players has a known AoE2 profile yet
 (then upload the game). When it gives up after 20 minutes, it asks for an upload. The log has a `Replay for match
 <id>:` line for every step.
