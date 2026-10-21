@@ -390,15 +390,15 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 				meta[p['profile_id']] = dict(elo=info['elo'], user_id=info['user_id'])
 	key = insights.game_key(filename=filename, rec=rec)
 	footer = f"Uploaded by {get_nick(ctx.author)}"
-	# Analysed already by this version of the bot, with the same Elos: nothing to redo.
-	stale, old_version, saved_key = await _needs_analysis(key, fp, rec, found)
+	# Analysed already by this version of the bot: nothing to redo.
+	stale, old_version, saved_key = await _needs_analysis(key, fp)
 	if not stale:
 		existing = await _live_post(key=saved_key, fingerprint=fp) if summary else None
 		url = existing.get('post_url') if existing else None
 		where = f": {url}" if url else "."
 		what = f"already posted{where}" if existing else "already analysed."
 		await ctx.success(f"This game was {what} It was analysed with the current version of the bot "
-			f"(v{insights.ANALYSIS_VERSION}) and the same Elos, so nothing changed.\n{report}")
+			f"(v{insights.ANALYSIS_VERSION}), so nothing changed.\n{report}")
 		return
 	result = await asyncio.to_thread(analysis.analyze, rec, meta)
 	saved = await insights.save(
@@ -445,11 +445,11 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 		_spawn(_links_later(qc, row, **later))
 
 
-async def _needs_analysis(key, fp, rec, found):
+async def _needs_analysis(key, fp):
 	"""
-	(analyse again?, version it was analysed with, key it is saved under). A game needs analysing when it was
-	never saved, was saved by an older version of the bot (scoring rules changed), or a player's BombayBot Elo
-	match changed since (e.g. after /aoe link).
+	(analyse again?, version it was analysed with, key it is saved under). A game needs analysing only when it
+	was never saved or was saved by an older version of the bot (scoring rules changed). Player or Elo changes
+	since don't count.
 	"""
 	row = None
 	for col, value in (('game_key', key), ('fingerprint', fp)):
@@ -458,15 +458,7 @@ async def _needs_analysis(key, fp, rec, found):
 	if not row:
 		return True, None, key
 	version = row.get('analysis_version')
-	if version is None or version < insights.ANALYSIS_VERSION:
-		return True, version, row['game_key']
-	saved = {r['name']: r.get('elo') for r in await db.select(('name', 'elo'), 'aoe_game_players',
-		where=dict(game_key=row['game_key']))}
-	for p in rec['players']:
-		now = (found.get(p['name']) or {}).get('elo')
-		if p['name'] not in saved or saved[p['name']] != now:
-			return True, version, row['game_key']
-	return False, version, row['game_key']
+	return version is None or version < insights.ANALYSIS_VERSION, version, row['game_key']
 
 
 def _spawn(coro):

@@ -200,9 +200,9 @@ What the breakdown shows:
 * The breakdown covers the game up to the first resignation; the result still counts every resignation.
 * With `summary:False`, `/replay upload` only saves the player stats and posts nothing.
 * Each game is posted once. Uploading it again (even a different player's recording or a renamed file) analyses it
-  again only when the bot's analysis has changed since (a newer version) or a player's BombayBot Elo match changed
-  (for example after `/aoe link`); the existing post and saved stats are then updated, and the reply says which
-  version it was analysed with before. Otherwise the reply links the post and nothing changes. If the post was
+  again only when the bot's analysis has changed since (a newer version); the existing post and saved stats are
+  then updated, and the reply says which version it was analysed with before. Player or Elo changes (for example a
+  name linked with `/aoe link` afterwards) don't trigger a new analysis. Otherwise the reply links the post and nothing changes. If the post was
   deleted, uploading the game again creates a new post.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
