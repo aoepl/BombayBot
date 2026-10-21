@@ -118,11 +118,13 @@ def replay_urls(match):
 
 
 def download_links(match, profile_id):
-	""" Where to get a player's recording: the match's own link, then the official aoe.ms link (fresh redirect). """
-	links = []
+	"""
+	Where to get a player's recording: the official aoe.ms link first (the one the game's stats pages share; it
+	redirects to a fresh download), then the match's own storage link, which can answer HTTP 409.
+	"""
+	links = [replay_link(match['id'], profile_id)]
 	if url := replay_urls(match).get(profile_id):
 		links.append(url)
-	links.append(replay_link(match['id'], profile_id))
 	return links
 
 
