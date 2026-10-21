@@ -690,21 +690,26 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		)
 
 	# ---- performance against BombayBot Elo
-	elo_scaled = _minmax({p: players[p]['elo'] for p in pids if players[p]['elo'] is not None})
-	by_elo = sorted((p for p in pids if players[p]['elo'] is not None), key=lambda p: -players[p]['elo'])
+	# Expected score from Elo: how far the player's Elo is above or below the lobby (in standard deviations), and
+	# where they rank in their own team, with Elos within ELO_SAME_TIER of each other treated as the same level.
+	elos = {p: players[p]['elo'] for p in pids if players[p]['elo'] is not None}
+	expected = expected_scores(elos, {p: players[p]['team_id'] for p in pids},
+		{p: stats[p]['scores']['overall'] for p in pids})
+	by_elo = sorted(elos, key=lambda p: -elos[p])
 	by_score = sorted(pids, key=lambda p: -stats[p]['scores']['overall'])
 	for p in pids:
 		st = stats[p]
 		st['score_rank'] = by_score.index(p) + 1
-		if p not in elo_scaled:
-			st['elo_rank'], st['elo_delta'], st['elo_verdict'] = None, None, None
+		if p not in expected:
+			st['elo_rank'], st['elo_delta'], st['elo_verdict'], st['elo_expected'] = None, None, None, None
 			continue
 		st['elo_rank'] = by_elo.index(p) + 1
-		delta = round(st['scores']['overall'] - elo_scaled[p], 1)
+		st['elo_expected'] = round(expected[p], 1)
+		delta = round(st['scores']['overall'] - expected[p], 1)
 		st['elo_delta'] = delta
 		st['elo_verdict'] = (
-			'well above their Elo' if delta >= 3 else 'above their Elo' if delta >= 1.5 else
-			'well below their Elo' if delta <= -3 else 'below their Elo' if delta <= -1.5 else 'around their Elo'
+			'well above their Elo' if delta >= ELO_WELL else 'above their Elo' if delta >= ELO_ABOVE else
+			'well below their Elo' if delta <= -ELO_WELL else 'below their Elo' if delta <= -ELO_ABOVE else 'around their Elo'
 		)
 
 	# ---- strategy names
@@ -777,6 +782,53 @@ def _vs_best(values):
 	if best <= 0:
 		return {k: 5.0 for k in values}
 	return {k: 1.0 if v is None else 1 + 9 * max(0.0, v) / best for k, v in values.items()}
+
+
+ELO_SAME_TIER = 100   # Elos this close count as the same level
+ELO_MIN_SD = 100      # spread used is at least this, so a very even lobby doesn't turn small gaps into big ones
+ELO_SCORE_PER_SD = 1.5  # one standard deviation of Elo above average: expected to score 1.5 above the lobby average
+ELO_ABOVE, ELO_WELL = 1.5, 3.0  # verdict thresholds: actual minus expected score
+
+
+def elo_tiers(elos):
+	"""
+	{pid: tier Elo}: players sorted by Elo, each joining the current tier when within ELO_SAME_TIER of its average;
+	everyone in a tier gets the tier's average, so a 100-point gap doesn't separate players.
+	"""
+	tiers, cur = [], []
+	for p in sorted(elos, key=lambda p: elos[p]):
+		if cur and elos[p] - sum(elos[q] for q in cur) / len(cur) > ELO_SAME_TIER:
+			tiers.append(cur)
+			cur = []
+		cur.append(p)
+	if cur:
+		tiers.append(cur)
+	return {p: sum(elos[q] for q in t) / len(t) for t in tiers for p in t}
+
+
+def _z(value, values):
+	mean = sum(values) / len(values)
+	sd = math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+	return (value - mean) / max(ELO_MIN_SD, sd)
+
+
+def expected_scores(elos, teams, overall):
+	"""
+	{pid: expected overall score from Elo}: the lobby's average score + 1.5 x the average of two standings, both
+	in standard deviations of (tiered) Elo: against the whole lobby, and against the player's own team (their rank
+	in it). Players without an Elo are left out.
+	"""
+	if len(elos) < 2:
+		return {}
+	tier = elo_tiers(elos)
+	mean_score = sum(overall[p] for p in elos) / len(elos)
+	out = {}
+	for p in elos:
+		lobby = _z(tier[p], list(tier.values()))
+		mates = [tier[q] for q in elos if teams.get(q) == teams.get(p)]
+		team = _z(tier[p], mates) if len(mates) > 1 else lobby
+		out[p] = max(1.0, min(10.0, mean_score + ELO_SCORE_PER_SD * (lobby + team) / 2))
+	return out
 
 
 def _absolute(share):

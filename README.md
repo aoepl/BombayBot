@@ -225,7 +225,11 @@ What the breakdown shows:
   enemy army came with them, and clearing them earns a little extra.  Being attacked by 2 or more enemies at once makes the test
   harder: each such minute adds to the attack's difficulty, up to 0.3.
 * Every score is compared with the player's BombayBot Elo, so the post and the recap show who played above
-  or below their Elo. Players are matched to BombayBot members by name. Names linked with `/aoe link` come
+  or below their Elo. The expected score is the lobby's average overall score plus 1.5 for each standard deviation
+  the player's Elo is above average (minus below), taking the average of two standings: against the whole lobby
+  and against their own team (their rank in it). Elos within 100 of each other count as the same level (players
+  are grouped into tiers that share an average Elo), and the spread used is at least 100. The verdict is actual
+  minus expected: +1.5 above their Elo, +3 well above, −1.5 below, −3 well below, otherwise around their Elo. Players are matched to BombayBot members by name. Names linked with `/aoe link` come
   first (a member can link several in-game names; moderators can link names for others). Otherwise the
   in-game name is compared with the member's BombayBot nick and Discord names, ignoring case, spaces,
   symbols and rating tags. Unmatched players show no Elo.
