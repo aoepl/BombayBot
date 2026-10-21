@@ -280,7 +280,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if a['a'] == 'ORDER' and a['t'] >= b['t'] and a.get('target_id', 0) > 0 and a.get('x') is not None \
 					and math.dist((a['x'], a['y']), (x, y)) < 2.6:
 				cand[a['target_id']] += 1
-		status, oid = 'unclear', None
+		status, oid, lost_at = 'unclear', None, None
 		produced = []
 		for o, _ in cand.most_common(2):
 			r = refs.get(o, [])
@@ -300,11 +300,13 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 				and players[a['player_id']]['team_id'] != players[pid]['team_id']]
 			if enemy_hits and last == max(a['t'] for a in enemy_hits) and end - last > 90000:
 				status = 'lost'
+				lost_at = last
 		trained = Counter(_name('objects', a['unit_id']) for a in produced if a['a'] == 'DE_QUEUE')
 		castles.append(dict(
 			t=b['t'], player=pid, kind=_name('objects', b['building_id']), base=where,
 			forward=where != pid and players[where]['team_id'] != players[pid]['team_id'],
-			status=status, deleted_at=deleted.get(oid), trained=trained.most_common(2), oid=oid
+			status=status, deleted_at=deleted.get(oid), trained=trained.most_common(2), oid=oid,
+			lost_at=lost_at, x=x, y=y, building_id=b['building_id'], act=id(b)
 		))
 
 	# Objects that queue castle units (Trebuchets, Petards, or the unique units a known castle trained) are castles.
@@ -371,16 +373,17 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	# the army value sent into enemy bases, and forward castles and towers.
 	imp_at = {p: stats[p]['ages'].get('Imperial Age') for p in pids}
 	water = water_weight(rec.get('map_name'))
-	army = army_presence(A, players, base_of, villagers, end, offensive, imp_at, water)
-	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up', 'lost', 'deleted'))
-	fwd_towers = Counter()
-	for a in A:
-		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) in TOWERS:
-			if players[base_of(a['x'], a['y'])]['team_id'] != players[a['player_id']]['team_id']:
-				fwd_towers[a['player_id']] += 1
+	structs = structure_list(A, players, castles, base_of, end)
+	army = army_presence(A, players, base_of, villagers, end, offensive, imp_at, water, structs)
 	sent = _minmax({p: army[p]['value_sent'] for p in pids})
-	forward_raw = {p: fwd_up[p] + 0.25 * fwd_towers[p] for p in pids}
-	forward = _minmax(forward_raw)
+	# Forward castles, Donjons and towers count by cost and by what they did: stood, held the area, gained ground.
+	forward_raw = forward_value(A, players, structs, villagers, end)
+	for p in pids:
+		mine = [x for x in structs if x['player'] == p and x['forward']]
+		stats[p]['forward_value'] = round(forward_raw[p], 2)
+		stats[p]['forward_effect'] = round(sum(x['effect'] * x['weight'] for x in mine) / sum(x['weight'] for x in mine), 2) if mine else None
+		stats[p]['forward_structures'] = [dict(kind=x['kind'], t=x['t0'], base=x['base'], built=x['known'], effect=x['effect'],
+			held=x['hold'], presence=x['presence'], gain=x['gain'], push=x['push'], pushes=x['pushes'], trade=x['trade']) for x in mine]
 	for p in pids:
 		stats[p]['army'] = army[p]
 	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end)
@@ -430,22 +433,40 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['float_minutes'] = floating[p]
 	exec_parts[2] = _minmax({p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids})
 	exec_parts.append(_minmax(floating, invert=True))
+	# Fighting several enemies at once (execution), and being focused by several (execution by how well the
+	# player traded then, and a harder survival test).
+	multi_raw, focus_raw, focused = several_enemies(A, players, army, villagers, end)
+	# As a share of the game from 8:00, so long games don't hand everyone the full bonus.
+	fight_minutes = max(1.0, end / 60000 - ARMY_FROM)
+	for p in pids:
+		stats[p]['several_bonus'] = round(MULTI_BONUS_MAX * min(1.0, multi_raw[p] / fight_minutes / MULTI_FULL)
+			+ FOCUS_BONUS_MAX * min(1.0, focus_raw[p] / fight_minutes / FOCUS_FULL), 2)
+		stats[p]['multi_enemy_minutes'] = len(focused[p]['multi'])
+		stats[p]['focused_minutes'] = len(focused[p]['focused'])
+		stats[p]['outnumbered_trade'] = focused[p]['trade']
 	playstyle(A, players, stats, army, floating, end, trib_out)
 	# Pressure: army on the map 35%, army value sent at the enemy 40%, damage done (enemy army value killed in
-	# fights plus enemy villagers killed) 15%, forward castles and towers 10%.
+	# fights plus enemy villagers killed) 15% (shares of 90%), plus a bonus for forward castles, Donjons and towers.
 	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] for p in pids}
 	damage = _minmax(dealt)
 	# Army on the map only matters if it does damage: scale it by damage done per army value, with full
 	# credit at the lobby median or better and nothing for an army that never hurt anyone.
-	per_army = {p: dealt[p] / army[p]['avg_value_on_map'] for p in pids if army[p]['avg_value_on_map']}
+	# Castles and towers are left out of this: their arrows can't be seen as kills, and forward ones are judged
+	# by what they did (forward part).
+	per_army = {p: dealt[p] / army[p]['avg_units_value_on_map'] for p in pids if army[p]['avg_units_value_on_map']}
 	median = sorted(per_army.values())[len(per_army) // 2] if per_army else 0
 	for p in pids:
 		eff = min(1.0, per_army.get(p, 0) / median) if median else 1.0
 		army[p]['damage_efficiency'] = round(eff, 2)
-	on_map = _minmax({p: army[p]['avg_value_on_map'] * army[p]['damage_efficiency'] for p in pids})
+	on_map = _minmax({p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
+		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids})
 	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
-	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage), (0.10, forward_raw, forward)], p)
-		for p in pids}
+	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage)], p) for p in pids}
+	# Forward castles, Donjons and towers only add: up to +1.5, by their cost and effect (see forward_value).
+	for p in pids:
+		bonus = round(FORWARD_BONUS_MAX * min(1.0, forward_raw[p] / FORWARD_BONUS_FULL), 2)
+		stats[p]['forward_bonus'] = bonus
+		press[p] = min(10.0, press[p] + bonus)
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
 	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
 	# orders into that base from 3 minutes before it was placed to 5 minutes after.
@@ -498,11 +519,15 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		# A Town Center next to an ally is an expansion, not a lost base, while the economy stays at home.
 		held = max(0.0, min(1.0, home - (0.1 * moved_tcs if home < 0.85 else 0)))
 		# Holding a light attack is worth less than holding a heavy one.
-		difficulty = min(1.0, pressure[p] / (0.6 * max_in))
+		# Being attacked by two or more enemies at once makes holding harder.
+		difficulty = min(1.0, pressure[p] / (0.6 * max_in) + min(FOCUS_DIFFICULTY_MAX, FOCUS_DIFFICULTY * len(focused[p]['focused'])))
 		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0)
 		survival[p] = max(1.0, min(10.0, value))
 		n_cleared = stats[p]['enemy_castles_cleared']
 		cleared_txt = f", cleared {n_cleared} enemy castle{'s' if n_cleared != 1 else ''}" if n_cleared else ""
+		n_focus = len(focused[p]['focused'])
+		if n_focus:
+			cleared_txt += f", attacked by 2+ enemies at once in {n_focus} minute{'s' if n_focus != 1 else ''}"
 		level = 'heavy' if difficulty >= 0.66 else 'moderate' if difficulty >= 0.33 else 'light'
 		stats[p]['pressure_level'] = level
 		survival_note[p] = (
@@ -535,7 +560,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		None: dict(exec=.32, press=.32, surv=.26, team=.10),
 	}
 	for p in pids:
-		e = _combine(list(zip(EXEC_WEIGHTS, exec_raw, exec_parts)), p)
+		e = min(10.0, _combine(list(zip(EXEC_WEIGHTS, exec_raw, exec_parts)), p) + stats[p]['several_bonus'])
 		t = _combine([(.5, team_raw[0], team_parts[0]), (.35, team_raw[1], team_parts[1]), (.15, team_raw[2], team_parts[2])], p)
 		surv = round(survival[p], 1) if survival[p] is not None else None
 		sc = dict(exec=round(e, 1), press=round(press[p], 1), surv=surv, team=round(t, 1))
@@ -843,6 +868,64 @@ def villager_value(times, attacked_minutes=(), alive=None):
 FLOAT_FROM = 10 * 60000
 # Execution parts: Castle Age timing, Imperial Age click, villager value, first military unit (quarter weight), floating
 EXEC_WEIGHTS = (1.0, 1.0, 1.0, 0.25, 1.0)
+# Execution bonus on top: fighting several enemies at once, and holding when focused by several.
+# Full bonus at a quarter of the minutes from 8:00 spent clicking 2+ enemies' units (early minutes count more) ...
+MULTI_FULL, MULTI_BONUS_MAX = 0.25, 0.75
+# ... and at a fifth of them attacked by 2+ enemies with even trades (each minute counts by how the player traded).
+FOCUS_FULL, FOCUS_BONUS_MAX = 0.2, 0.75
+MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that count as fighting them
+FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
+FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
+
+
+def several_enemies(A, players, army, villagers, end):
+	"""
+	From attack clicks on units (an attack order whose target is a unit an enemy commands):
+	Units (villagers included) belong to whoever first gave them a move, attack or army command.
+	- multi: minutes a player clicked units of 2+ different enemies (MULTI_CLICKS+ each), early minutes
+	  weighted like army (x2 before 15:00, x1.5 before 20:00);
+	- focused: minutes 2+ different enemies clicked the player's units; each counts by how the player traded
+	  in it (army value killed / killed + lost, x2: an even trade against two players is worth full credit,
+	  0.5 when no fight losses were seen).
+	Returns (multi raw, focus raw, {player: dict(multi=set of minutes, focused=set of minutes, trade=...)}).
+	"""
+	owner = {}
+	for a in A:
+		if a.get('player_id') in players and (a['a'] in ARMY_ORDERS or a['a'] in ARMY_COMMANDS):
+			for o in a.get('object_ids') or []:
+				owner.setdefault(o, a['player_id'])
+	clicks = defaultdict(Counter)  # (attacker, victim) -> minute -> clicks
+	for a in A:
+		att = a.get('player_id')
+		t = a.get('target_id') or 0
+		if a['a'] != 'ORDER' or att not in players or t <= 0 or a['t'] > end:
+			continue
+		vic = owner.get(t)
+		if vic in players and players[vic]['team_id'] != players[att]['team_id']:
+			clicks[(att, vic)][int(a['t'] // 60000)] += 1
+	pair = pair_kills(players, army)
+	out, multi_raw, focus_raw = {}, {}, {}
+	for p in players:
+		targets, attackers = defaultdict(set), defaultdict(set)
+		for (att, vic), mins in clicks.items():
+			for m, n in mins.items():
+				if n < MULTI_CLICKS:
+					continue
+				if att == p:
+					targets[m].add(vic)
+				if vic == p:
+					attackers[m].add(att)
+		multi = {m for m, vs in targets.items() if len(vs) >= 2}
+		focused = {m for m, xs in attackers.items() if len(xs) >= 2}
+		trade = 0.0
+		for m in focused:
+			killed = sum(pair[(p, e)].get(m, 0) for e in players if (p, e) in pair)
+			lost = sum(pair[(e, p)].get(m, 0) for e in players if (e, p) in pair)
+			trade += min(2.0, 2 * killed / (killed + lost)) if killed + lost else 0.5
+		multi_raw[p] = round(sum(early_weight(m) for m in multi), 1)
+		focus_raw[p] = round(trade, 1)
+		out[p] = dict(multi=multi, focused=focused, trade=round(trade / len(focused), 2) if focused else None)
+	return multi_raw, focus_raw, out
 
 
 def spending_rate(A, pid, start, end):
@@ -1161,7 +1244,168 @@ def early_weight(minute, imp_at=None):
 	return 1.0
 
 
-def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, water=1.0):
+STRUCT_SAME_TILES = 3        # placements this close ...
+STRUCT_SAME_MS = 60000       # ... and this soon after another by the same player are the same building
+UNSEEN_CERTAINTY = 0.5       # a castle placement never seen built (no units, research or hits) counts half
+FORWARD_RADIUS = 15          # tiles around a forward building whose activity shows who holds the area
+FORWARD_BEFORE = 5 * 60000   # compared with the 5 minutes before it was placed
+FORWARD_AFTER = 15 * 60000   # over up to 15 minutes after (while it stands)
+FORWARD_MIN_ACTIVITY = 5     # less activity than this nearby says nothing about control
+FORWARD_FLOOR = 0.25         # a forward building that did nothing still counts this much of its cost
+CASTLE_ID = 82
+FORWARD_BONUS_MAX = 1.5    # pressure bonus for forward buildings ...
+FORWARD_BONUS_FULL = 3.0   # ... in full at 3 Castles' worth (cost x effect, see forward_value)
+FORWARD_PARTS = dict(held=0.25, area=0.20, ground=0.15, push=0.20, trade=0.20)
+FORWARD_PUSH_RADIUS = 20     # tiles: siege pushing in under the building's cover
+FORWARD_PUSH_FULL = 15       # building attacks / attack-ground orders in its first 15 minutes for full push credit
+FORWARD_TRADE_RADIUS = 10    # tiles from the enemy trade route
+FORWARD_TRADE_FULL = 30      # enemy trade carts made while it stood for full trade credit
+TRADE_ROUTE_MIN = 40         # tiles between two Markets for a trade route
+
+
+def structure_list(A, players, castles, base_of, end):
+	"""
+	Castles (Donjons, Kreposts...) and towers as buildings, not placements: repeated placements by the same
+	player at the same spot within a minute, and castle placements matched to an object already counted, are
+	dropped. Each: player, kind, building_id, x, y, t0 (placed), t1 (lost / deleted / end), known (seen built:
+	units, research or enemy hits), certainty (1, or 0.5 when never seen built), forward and base.
+	Towers are not tracked one by one (they produce nothing), so they stand until the end and count as known.
+	"""
+	out, seen_oids = [], set()
+
+	def repeat(pid, x, y, t):
+		return any(o['player'] == pid and abs(o['t0'] - t) <= STRUCT_SAME_MS and math.dist((o['x'], o['y']), (x, y)) <= STRUCT_SAME_TILES
+			for o in out)
+
+	for c in sorted(castles, key=lambda c: c['t']):
+		if c.get('oid') and c['oid'] in seen_oids:
+			continue
+		if repeat(c['player'], c['x'], c['y'], c['t']):
+			continue
+		if c.get('oid'):
+			seen_oids.add(c['oid'])
+		known = c['status'] in ('up', 'lost', 'deleted')
+		t1 = c.get('lost_at') if c['status'] == 'lost' else c.get('deleted_at') if c['status'] == 'deleted' else end
+		out.append(dict(player=c['player'], kind=c['kind'], building_id=c['building_id'], x=c['x'], y=c['y'], t0=c['t'],
+			t1=t1 or end, known=known, certainty=1.0 if known else UNSEEN_CERTAINTY, forward=c['forward'], base=c['base']))
+	for a in A:
+		if a['a'] != 'BUILD' or a.get('player_id') not in players or _name('objects', a['building_id']) not in TOWERS:
+			continue
+		pid = a['player_id']
+		if repeat(pid, a['x'], a['y'], a['t']):
+			continue
+		where = base_of(a['x'], a['y'])
+		out.append(dict(player=pid, kind=_name('objects', a['building_id']), building_id=a['building_id'], x=a['x'], y=a['y'],
+			t0=a['t'], t1=end, known=True, certainty=1.0, tower=True, base=where,
+			forward=where != pid and players[where]['team_id'] != players[pid]['team_id']))
+	return out
+
+
+def _dist_to_segment(p, a, b):
+	ax, ay = a
+	bx, by = b
+	dx, dy = bx - ax, by - ay
+	if dx == dy == 0:
+		return math.dist(p, a)
+	t = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / (dx * dx + dy * dy)))
+	return math.dist(p, (ax + t * dx, ay + t * dy))
+
+
+def forward_value(A, players, structs, villagers, end):
+	"""
+	{player: forward building value} in Castles' worth: each forward building counts its cost (a Castle = 1,
+	a Donjon about 0.33, a tower about 0.24) times FORWARD_FLOOR + the rest by its effect (0..1):
+	- held (0.25): how long it stood, as a share of the rest of the game (castles; towers are not tracked);
+	- area (0.20): after it went up, the owner's team's share of the activity within 15 tiles (buildings placed
+	  count 3, army orders 1): did they hold the position;
+	- ground (0.15): how much that share rose compared with the 5 minutes before (doubled, up to 1);
+	- push (0.20): the owner's team attacking enemy buildings or using attack-ground (rams, trebuchets, bombards,
+	  mangonels) within 20 tiles in its first 15 minutes standing: it covered siege pushing in (full at 15);
+	- trade (0.20): it stood within 10 tiles of the enemy team's trade route (the line between their Markets 40+
+	  tiles apart) while they made trade carts (full at 30 carts): it denied trade or made it costly. Left out
+	  (weight spread over the rest) when that team made no trade carts while it stood.
+	Never-seen-built placements count half. Writes effect and its parts into each building.
+	"""
+	castle_value = unit_value(CASTLE_ID) or 780
+	events = []  # (t, x, y, player, weight)
+	for a in A:
+		pid = a.get('player_id')
+		if pid not in players or a.get('x') is None or a['x'] <= 0:
+			continue
+		if a['a'] == 'BUILD':
+			events.append((a['t'], a['x'], a['y'], pid, 3))
+		elif a['a'] in ARMY_ORDERS:
+			ids = a.get('object_ids') or []
+			if ids and not all(i in villagers for i in ids):
+				events.append((a['t'], a['x'], a['y'], pid, 1))
+	# Enemy buildings: anything that queued units or research belongs to that player.
+	building_owner = {}
+	for a in A:
+		if a['a'] in ('DE_QUEUE', 'RESEARCH') and a.get('player_id') in players:
+			for o in a.get('object_ids') or []:
+				building_owner.setdefault(o, a['player_id'])
+	siege_orders = []  # (t, x, y, player): attacks on buildings and attack-ground
+	for a in A:
+		pid = a.get('player_id')
+		if pid not in players or a.get('x') is None or a['x'] <= 0:
+			continue
+		target = a.get('target_id') or 0
+		if a['a'] == 'ATTACK_GROUND' or (a['a'] == 'ORDER' and target in building_owner
+				and players[building_owner[target]]['team_id'] != players[pid]['team_id']):
+			siege_orders.append((a['t'], a['x'], a['y'], pid))
+	markets = [(a['t'], a['x'], a['y'], a['player_id']) for a in A if a['a'] == 'BUILD' and a.get('player_id') in players
+		and _name('objects', a['building_id']) == 'Market']
+	carts = [(a['t'], a['player_id'], a.get('amount', 1) or 1) for a in A if a['a'] == 'DE_QUEUE'
+		and a.get('player_id') in players and _name('objects', a['unit_id']) in ('Trade Cart', 'Trade Cog')]
+
+	out = Counter({p: 0.0 for p in players})
+	for x in structs:
+		if not x['forward']:
+			continue
+		team = players[x['player']]['team_id']
+		t0, t1 = x['t0'], x['t1']
+		here = (x['x'], x['y'])
+		stand_end = max(t0 + 60000, t1)
+
+		def control(lo, hi):
+			own = other = 0
+			for t, ex, ey, pid, w in events:
+				if lo <= t < hi and math.dist((ex, ey), here) <= FORWARD_RADIUS:
+					if players[pid]['team_id'] == team:
+						own += w
+					else:
+						other += w
+			return own / (own + other) if own + other >= FORWARD_MIN_ACTIVITY else None
+
+		before = control(t0 - FORWARD_BEFORE, t0)
+		after = control(t0, max(t0 + 60000, min(t1, t0 + FORWARD_AFTER)))
+		presence = after if after is not None else 0.5
+		gain = max(0.0, presence - (before if before is not None else 0.5))
+		parts = {'area': presence, 'ground': min(1.0, 2 * gain)}
+		if x['known'] and not x.get('tower'):
+			parts['held'] = max(0.0, min(1.0, (t1 - t0) / max(60000, end - t0)))
+		push_end = min(stand_end, t0 + FORWARD_AFTER)
+		pushes = sum(1 for t, ex, ey, pid in siege_orders if t0 <= t < push_end and players[pid]['team_id'] == team
+			and math.dist((ex, ey), here) <= FORWARD_PUSH_RADIUS)
+		x['pushes'] = pushes
+		parts['push'] = min(1.0, pushes / FORWARD_PUSH_FULL)
+		enemy_carts = sum(n for t, pid, n in carts if t0 <= t < stand_end and players[pid]['team_id'] != team)
+		if enemy_carts:
+			theirs = [(mx, my) for t, mx, my, pid in markets if t < stand_end and players[pid]['team_id'] != team]
+			near = any(_dist_to_segment(here, m1, m2) <= FORWARD_TRADE_RADIUS
+				for i, m1 in enumerate(theirs) for m2 in theirs[i + 1:] if math.dist(m1, m2) >= TRADE_ROUTE_MIN)
+			parts['trade'] = min(1.0, enemy_carts / FORWARD_TRADE_FULL) if near else 0.0
+		weights = {k: FORWARD_PARTS[k] for k in parts}
+		effect = sum(weights[k] * parts[k] for k in parts) / sum(weights.values())
+		weight = unit_value(x['building_id']) / castle_value * x['certainty']
+		x.update(effect=round(effect, 2), weight=weight, hold=round(parts['held'], 2) if 'held' in parts else None,
+			presence=round(presence, 2), gain=round(gain, 2), push=round(parts['push'], 2),
+			trade=round(parts['trade'], 2) if 'trade' in parts else None)
+		out[x['player']] += weight * (FORWARD_FLOOR + (1 - FORWARD_FLOOR) * effect)
+	return dict(out)
+
+
+def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, water=1.0, structs=None):
 	"""
 	Estimate each player's army on the map over time from the unit ids in their commands.
 	A unit is military if it ever gets an army-only command (formation, stance, patrol, attack-move...)
@@ -1213,10 +1457,16 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 			value_per_unit[m] = total / count if count else 0.0
 			press_value[m] = value_per_unit[m] * (1 - (ships / total if total else 0) * (1 - water))
 		structures = [0.0] * minutes
-		for a in A:
-			if a['a'] == 'BUILD' and a.get('player_id') == pid and _name('objects', a['building_id']) in CASTLES | TOWERS:
-				for m in range(int(a['t'] // 60000) + 1, minutes):
-					structures[m] += unit_value(a['building_id'])
+		if structs is not None:  # castles count while they stand; placements never seen built count half
+			for x in structs:
+				if x['player'] == pid:
+					for m in range(int(x['t0'] // 60000) + 1, min(minutes, int(x['t1'] // 60000) + 1)):
+						structures[m] += unit_value(x['building_id']) * x['certainty']
+		else:
+			for a in A:
+				if a['a'] == 'BUILD' and a.get('player_id') == pid and _name('objects', a['building_id']) in CASTLES | TOWERS:
+					for m in range(int(a['t'] // 60000) + 1, minutes):
+						structures[m] += unit_value(a['building_id'])
 		sent = set()
 		for a in A:
 			if a.get('player_id') == pid and id(a) in offensive:
@@ -1227,6 +1477,7 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 		# A small army early is worth a lot: x2 before 15:00, x1.5 before 20:00 (same as army sent)
 		my_imp = imp_at.get(pid) if isinstance(imp_at, dict) else imp_at
 		on_map = [(alive[m] * press_value[m] + structures[m]) * early_weight(m, my_imp) for m in window]
+		units_on_map = [alive[m] * press_value[m] * early_weight(m, my_imp) for m in window]
 		# Micro inputs: how much the player controls the army, picks targets, splits groups and keeps units alive.
 		army_cmds = [a for a in A if a.get('player_id') == pid and any(i in military[pid] for i in (a.get('object_ids') or []))]
 		army_minutes = max(1.0, (end - min((seen[(pid, i)][0] for i in military[pid]), default=end)) / 60000)
@@ -1267,6 +1518,7 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 			avg_units=round(sum(alive[m] for m in window) / len(window)),
 			peak_units=max(alive) if alive else 0,
 			avg_value_on_map=round(sum(on_map) / len(on_map)),
+			avg_units_value_on_map=round(sum(units_on_map) / len(units_on_map)),
 			unit_value=round(value_per_unit[-1]),
 			value_sent=round(sum(press_value[m] * early_weight(m, (imp_at or {}).get(pid)) for _, m in sent)),
 			units_by_5min=[alive[m] for m in range(0, minutes, 5)],
@@ -1405,7 +1657,8 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	imperial_units = _army_lines(_army_between(A, pid, imp, end)) if imp else []
 	main_units = castle_units or imperial_units
 	fast_imp = bool(imp and imp < 25 * 60000)
-	forward_castles = sum(1 for c in my_castles if c['forward'])
+	# Castles seen built (units, research or enemy hits), each object once: not every placement.
+	forward_castles = len({c.get('oid') for c in my_castles if c['forward'] and c['status'] != 'unclear' and c.get('oid')})
 	tower_creep = st['towers'] >= 8
 
 	parts = []

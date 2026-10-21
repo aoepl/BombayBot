@@ -103,6 +103,14 @@ What the breakdown shows:
   8+ Feudal military units scores the better of their Castle Age click time and their Feudal production uptime
   (Town Centers and Docks kept busy, military buildings producing every minute), so a late Castle Age after a
   strong Feudal army is not penalised.
+  Execution also gets a bonus of up to +1.5 for fighting several enemies at once, from attack clicks on enemy
+  units (villagers included):
+  * up to +0.75 for minutes spent attacking units of 2 or more enemies (2+ clicks on each in that minute;
+    early minutes count more);
+  * up to +0.75 for minutes in which 2 or more enemies attacked the player's units, each minute counting by how
+    the player traded in it. An even trade against two players earns full credit.
+
+  Both are measured as a share of the game from 8:00, so long games don't hand everyone the full bonus.
 * Villagers killed are estimated: a villager counted as killed is credited to the enemies whose army orders were
   near it, by share of those orders. They count towards micro (value killed) and pressure (damage done).
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
@@ -143,12 +151,30 @@ What the breakdown shows:
   look the same as kills and count in full. Micro weighs value traded (60%), how much fighting the player did (25%)
   and target picking (15%). The Micro label also needs more value killed than lost (1.1 times or better).
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
-  35% average army value on the map from 8:00 on, scaled by how much damage that army did for its size (full
+  35% average army value on the map from 8:00 on, units scaled by how much damage they did for their size (full
   credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 40% army
-  value sent at the enemy, 15% damage done (enemy army value killed in fights plus enemy villagers killed, 100
-  each), and 10% forward castles and towers. An order counts as sent at the enemy
+  value sent at the enemy and 15% damage done (enemy army value killed in fights plus enemy villagers killed, 100
+  each), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
+  bonus only adds: players with no forward buildings, or ones that achieved little, lose nothing for it. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
   army was ordered within a minute (fights in the open count too).
+  Forward castles, Kreposts, Donjons and towers (built in an enemy base) count by cost and by what they did,
+  and the bonus is full at 3 Castles' worth. A Castle is worth 1, a Donjon about 0.33 and a tower about 0.24. A building that achieved nothing still
+  counts a quarter of its cost; the rest comes from its effect (0 to 1):
+  * held, 25%: how long it stood, as a share of the rest of the game;
+  * held position, 20%: after it went up, the owner's team's share of the activity within 15 tiles (buildings
+    placed count 3, army orders 1);
+  * gained ground, 15%: how much that share rose compared with the 5 minutes before;
+  * covered a push, 20%: the owner's team attacking enemy buildings or using attack-ground (rams, trebuchets,
+    bombards, mangonels) within 20 tiles in its first 15 minutes (full credit at 15 such orders);
+  * denied trade, 20%: it stood within 10 tiles of the enemy team's trade route (the line between their
+    Markets 40+ tiles apart) while they made trade carts (full credit at 30 carts). Left out when that team
+    made no trade carts.
+
+  Towers aren't tracked one by one, so they skip the held part. Castles are counted as buildings, not
+  placements: repeated placements at the same spot within a minute count once, and placements never seen
+  built (no units, research or enemy hits) count half. In army on the map a castle counts only while it
+  stands, and the damage discount applies to units only (castle and tower arrows can't be seen as kills).
   Warships count for less in pressure where water does not decide the land fight: 0.4 of their value on lake
   maps (4 Lakes, Golden Lakes, Kawasan), 0.7 on coastal maps (Baltic, Mediterranean, Continental...), in full
   on island maps, 0.6 elsewhere. Micro still counts water fights at full value.
@@ -162,7 +188,8 @@ What the breakdown shows:
   home under pressure and marks players whose main base was destroyed. Holding a heavy attack scores higher
   than holding a light one. Enemy castles and towers built in a base count as pressure, weighted by how much
   enemy army came with them, and clearing them earns a little extra. Players who were never attacked get
-  "—" and their overall score uses the other three.
+  "—" and their overall score uses the other three. Being attacked by 2 or more enemies at once makes the test
+  harder: each such minute adds to the attack's difficulty, up to 0.3.
 * Every score is compared with the player's BombayBot Elo, so the post and the recap show who played above
   or below their Elo. Players are matched to BombayBot members by name. Names linked with `/aoe link` come
   first (a member can link several in-game names; moderators can link names for others). Otherwise the
@@ -172,8 +199,11 @@ What the breakdown shows:
   highest BombayBot Elo on each team and the winning team comes first.
 * The breakdown covers the game up to the first resignation; the result still counts every resignation.
 * With `summary:False`, `/replay upload` only saves the player stats and posts nothing.
-* Each game is posted once. Uploading it again (even a different player's recording or a renamed file) links
-  the existing post and refreshes the saved stats. If the post was deleted, uploading the game again creates a new post.
+* Each game is posted once. Uploading it again (even a different player's recording or a renamed file) analyses it
+  again only when the bot's analysis has changed since (a newer version); the existing post and saved stats are
+  then updated, and the reply says which version it was analysed with before. Player or Elo changes (for example a
+  name linked with `/aoe link` afterwards) don't trigger a new analysis. Otherwise the reply links the post and nothing changes. If the post was
+  deleted, uploading the game again creates a new post.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
 
