@@ -786,7 +786,7 @@ def _vs_best(values):
 
 ELO_SAME_TIER = 100   # Elos this close count as the same level
 ELO_MIN_SD = 100      # spread used is at least this, so a very even lobby doesn't turn small gaps into big ones
-ELO_SCORE_PER_SD = 1.5  # one standard deviation of Elo above average: expected to score 1.5 above the lobby average
+ELO_MIN_SCORE_SD = 0.5  # spread of overall scores used is at least this (a lobby where everyone scored the same)
 ELO_ABOVE, ELO_WELL = 1.5, 3.0  # verdict thresholds: actual minus expected score
 
 
@@ -814,20 +814,23 @@ def _z(value, values):
 
 def expected_scores(elos, teams, overall):
 	"""
-	{pid: expected overall score from Elo}: the lobby's average score + 1.5 x the average of two standings, both
-	in standard deviations of (tiered) Elo: against the whole lobby, and against the player's own team (their rank
-	in it). Players without an Elo are left out.
+	{pid: expected overall score from Elo}: the lobby's average score + the player's Elo standing x the spread of
+	the lobby's actual scores, so being one standard deviation above in Elo expects one standard deviation above
+	in score. The standing is the average of two, in standard deviations of (tiered) Elo: against the whole lobby,
+	and against the player's own team (their rank in it). Players without an Elo are left out.
 	"""
 	if len(elos) < 2:
 		return {}
 	tier = elo_tiers(elos)
-	mean_score = sum(overall[p] for p in elos) / len(elos)
+	scores = [overall[p] for p in elos]
+	mean_score = sum(scores) / len(scores)
+	score_sd = max(ELO_MIN_SCORE_SD, math.sqrt(sum((v - mean_score) ** 2 for v in scores) / len(scores)))
 	out = {}
 	for p in elos:
 		lobby = _z(tier[p], list(tier.values()))
 		mates = [tier[q] for q in elos if teams.get(q) == teams.get(p)]
 		team = _z(tier[p], mates) if len(mates) > 1 else lobby
-		out[p] = max(1.0, min(10.0, mean_score + ELO_SCORE_PER_SD * (lobby + team) / 2))
+		out[p] = max(1.0, min(10.0, mean_score + score_sd * (lobby + team) / 2))
 	return out
 
 
