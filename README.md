@@ -221,7 +221,7 @@ What the breakdown shows:
   again only when the bot's analysis has changed since (a newer version); the existing post and saved stats are
   then updated, and the reply says which version it was analysed with before. Player or Elo changes (for example a
   name linked with `/aoe link` afterwards) don't trigger a new analysis. Otherwise the reply links the post and nothing changes. If the post was
-  deleted, uploading the game again creates a new post.
+  deleted, uploading the game again analyses it again and creates a new post.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
 
