@@ -629,8 +629,10 @@ async def _run(qc, info):
 						"upload`, so upload this game to get its breakdown; after that, these players' games are found "
 						"automatically.")
 					return
+			except worldsedge.WorldsEdgeError as e:
+				log.info(f"Replay for match {info['match_id']}: {e}; will retry.")
 			except Exception as e:
-				log.info(f"Replay for match {info['match_id']}: World's Edge not reachable ({e}); will retry.")
+				log.info(f"Replay for match {info['match_id']}: World's Edge not reachable ({type(e).__name__}: {e}); will retry.")
 		if not info['cancelled']:
 			await _notify(qc, f"Couldn't find the recorded game for match ({info['match_id']}) on World's Edge. "
 				f"Upload it with `/replay upload` to get the game breakdown.")
@@ -664,9 +666,23 @@ async def _process(qc, info):
 		return False  # the game is there but no recording was uploaded yet
 
 	profile_user = {pid: uid for uid, pids in links.items() for pid in pids}
-	source = max(urls, key=lambda pid: rating.get(profile_user.get(pid), 0))  # highest-rated player's recording
-	raw = await worldsedge.download(urls[source])
-	rec = await asyncio.to_thread(rec_parser.parse, raw)
+	# Highest-rated known player's recording first, then everyone else's; each from the match's link, then aoe.ms.
+	sources = sorted(urls, key=lambda pid: (pid not in profile_user, -rating.get(profile_user.get(pid), 0)))
+	rec, source, errors = None, None, []
+	for pid in sources:
+		for url in worldsedge.download_links(game, pid):
+			try:
+				raw = await worldsedge.download(url)
+				rec = await asyncio.to_thread(rec_parser.parse, raw)
+				source = pid
+				break
+			except Exception as e:
+				errors.append(f"{pid}: {type(e).__name__}: {e}")
+		if rec:
+			break
+	if not rec:
+		raise worldsedge.WorldsEdgeError(f"game {game['id']} found, but no recording could be downloaded: " + "; ".join(errors[:4]))
+	log.info(f"Replay for match {info['match_id']}: downloaded the recording of profile {source} for game {game['id']}.")
 	fp = insights.fingerprint(rec)
 	if info['cancelled'] or fp in _posting or await _live_post(key=key, fingerprint=fp):
 		return True
