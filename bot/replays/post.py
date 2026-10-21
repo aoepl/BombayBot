@@ -228,7 +228,7 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"enemy villagers and fishing ships killed at least {s.get('villagers_killed', 0)} (only kills from attack "
 				f"orders on them; kills by patrol, attack-move, towers or castles are not seen); army on the map from 8 min: {s['army']['avg_units']} units on average, peak {s['army']['peak_units']}, "
 				f"average unit value {s['army']['unit_value']} (gold weighted most), army value sent at the enemy (its base, units or buildings) "
-				f"{s['army']['value_sent']}; enemy macro disrupted {s.get('macro_disrupted', 0)} (resources of production that stalled while their army was in enemy bases); enemy Town Centers destroyed worth {s.get('buildings_destroyed', 0)} (with research and units lost in them); "
+				f"{s['army']['value_sent']}; enemy macro disrupted {s.get('macro_disrupted', 0)} (resources of production that stalled while their army was in enemy bases); enemy Town Centers destroyed worth {s.get('buildings_destroyed', 0)}; pressure bonus +{s.get('age_delay_bonus', 0)} for enemy age-ups delayed by destroying the Town Center researching them; "
 				f"{'forward castles/Donjons/towers worth ' + str(s['forward_value']) + ' Castles (cost-weighted), effect ' + str(s['forward_effect']) + ' of 1 (stood, held position, gained ground, covered siege pushes, denied enemy trade), pressure bonus +' + str(s.get('forward_bonus')) + '; ' if s.get('forward_effect') is not None else ''}"
 				f"attacked units of 2+ enemies at once in {s.get('multi_enemy_minutes', 0)} minutes; "
 				f"own units attacked by 2+ enemies at once in {s.get('focused_minutes', 0)} minutes"
@@ -286,11 +286,12 @@ METHOD = [
 		"value from 8:00, units scaled down if they did less damage for their size than the lobby median); **army "
 		"sent at the enemy** 40% (each military unit ordered at an enemy unit, building or base counts once a minute, "
 		"at the player's average unit cost); **damage done** 15% (enemy army value killed in fights, 100 per "
-		"villager killed, enemy Town Centers destroyed with any research and units lost in them (e.g. an Imperial Age "
-		"in progress), and enemy macro disrupted: production that stalled while the army was in their base, "
+		"villager killed, enemy Town Centers destroyed (their cost: research and queued units are refunded), and "
+		"enemy macro disrupted: production that stalled while the army was in their base, "
 		"against the 5 minutes before). Early army counts ×2 before 15:00 and ×1.5 before 20:00; gold counts 1.5×, stone 1.2×. Plus "
 		"a bonus up to +1.5 for forward castles, Donjons and towers, by cost and effect (stood, held position, gained "
-		"ground, covered siege pushes, denied trade)."),
+		"ground, covered siege pushes, denied trade), and up to +1 for each enemy age-up delayed by destroying its "
+		"Town Center mid-research (verified by the age being clicked again; full at 4+ minutes lost)."),
 	("Survival: holding the base when it was attacked", "Only scored when the base was seriously attacked. Score = 1 + "
 		"held × (4 + 5 × difficulty) + up to 1 for clearing enemy castles. **Held** is the share of new economy buildings "
 		"kept at home after the attack began, less for Town Centers rebuilt elsewhere. **Difficulty** (0–1) is the "
@@ -347,9 +348,14 @@ def explain_text(name, civ, ex):
 		out.append(f"• Bonus +{f['value']:g} for forward buildings: {f['count']} in enemy bases ({f['built']} seen built), "
 			f"worth {f['worth']:g} Castles by cost, effect {f['effect']:g} of 1 (stood, held position, gained ground, "
 			f"covered siege pushes, denied trade)")
+	ad = b.get('age_delay') or {}
+	for d in ad.get('delays', []):
+		out.append(f"• Bonus +{d['bonus']:g} for delaying {d['victim']}'s {d['age']}: clicked at {d['clicked']}, its Town Center "
+			f"destroyed at {d['destroyed']}, clicked again at {d['again']} ({d['minutes']:g} min lost; full +1 at 4 min)")
 	calc, _ = _sum_text(ex['press'])
 	if calc:
-		out.append(f"= {calc}" + (f", + {f['value']:g} bonus" if f['value'] else "") + f" → **{_fmt_score(sc['press'])}**")
+		extra = (f['value'] or 0) + (ad.get('value') or 0)
+		out.append(f"= {calc}" + (f", + {extra:g} bonus" if extra else "") + f" → **{_fmt_score(sc['press'])}**")
 
 	sv = ex['surv']
 	if sc['surv'] is None:

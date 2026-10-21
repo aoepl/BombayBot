@@ -478,7 +478,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p in pids:
 		bonus = round(FORWARD_BONUS_MAX * min(1.0, forward_raw[p] / FORWARD_BONUS_FULL), 2)
 		stats[p]['forward_bonus'] = bonus
-		press[p] = min(10.0, press[p] + bonus)
+		# Destroying a Town Center with an age-up in progress delays the enemy's age: up to +1 per age delayed.
+		age_bonus = round(sum(d['bonus'] for x in stats[p]['buildings_destroyed_list'] for d in x['delays']), 2)
+		stats[p]['age_delay_bonus'] = age_bonus
+		press[p] = min(10.0, press[p] + bonus + age_bonus)
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
 	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
 	# orders into that base from 3 minutes before it was placed to 5 minutes after.
@@ -635,8 +638,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			for n, raw, f, w, sc_ in press_info]
 		notes = []
 		for x in st.get('buildings_destroyed_list', []):
-			lost = f" with {', '.join(x['research'])} in progress" if x['research'] else ""
-			notes.append(f"{x['value']:,} for {players[x['victim']]['name']}'s Town Center destroyed at {mmss(x['t'])}{lost}")
+			notes.append(f"{x['value']:,} for {players[x['victim']]['name']}'s Town Center destroyed at {mmss(x['t'])}")
 		if notes:
 			pr_parts[2]['note'] = "includes " + "; ".join(notes)
 		if st.get('macro_disrupted'):
@@ -657,6 +659,9 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		bonuses = dict(
 			several=dict(value=st['several_bonus'], multi=st['multi_enemy_minutes'], focused=st['focused_minutes'],
 				trade=st['outnumbered_trade']),
+			age_delay=dict(value=st.get('age_delay_bonus', 0), delays=[dict(victim=players[x['victim']]['name'], age=d['age'],
+				clicked=mmss(d['clicked']), destroyed=mmss(x['t']), again=mmss(d['again']), minutes=d['minutes'], bonus=d['bonus'])
+				for x in st.get('buildings_destroyed_list', []) for d in x['delays']]),
 			forward=dict(value=st['forward_bonus'], worth=st.get('forward_value'), effect=st.get('forward_effect'), count=len(fwd),
 				built=sum(1 for x in fwd if x['known'])),
 		)
@@ -1048,21 +1053,21 @@ def macro_disruption(A, players, vest, timeline_in, into_by, end):
 TC_ID = 109
 RAZE_HIT_WINDOW = 3 * 60000  # enemy attack clicks on a Town Center up to 3 minutes before its last use ...
 RAZE_GONE = 5 * 60000        # ... and never used again for 5+ minutes (or the game ends): it was destroyed
-RAZE_IN_PROGRESS = 60000     # units queued in its last minute were lost with it
+AGE_DELAY_BONUS = 1.0        # pressure bonus for destroying a Town Center with an age-up in progress ...
+AGE_DELAY_FULL = 4 * 60000   # ... in full when the age is delayed 4+ minutes (first click to the click again)
 RAZE_NEAR = 12               # tiles: enemy castles, Donjons and towers this close can have destroyed it
 RAZE_STRUCT_CLICKS = 5       # a nearby enemy castle counts like 5 attack clicks when sharing credit
 
 
 def town_centers_destroyed(A, players, structs, pos, end):
 	"""
-	Enemy Town Centers destroyed, valued at the Town Center's cost plus research lost with it (an age or tech it
-	was researching that the owner researched again later, e.g. Imperial Age) plus units it was making in its last
-	minute. A Town Center (anything that queued villagers or an age) counts as destroyed when its owner never used
+	Enemy Town Centers destroyed, valued at the Town Center's cost (research and queued units in it are refunded).
+	An age-up in progress when it fell (the owner clicked the same age again later) is recorded as a delay: first
+	click to the click again, for the age delay pressure bonus. A Town Center (anything that queued villagers or an age) counts as destroyed when its owner never used
 	it again (5+ minutes before the end) and either research was lost in it, enemies attack-clicked it 2+ times, or
 	an enemy attack-clicked it with an enemy castle, Donjon or tower within 12 tiles. Credit is shared by attack
 	clicks, a nearby castle or tower counting as 5. Returns ({attacker: value}, {attacker: [details]}).
 	"""
-	techs = _costs_all().get('techs', {})
 	owner, first, last, is_tc = {}, {}, {}, set()
 	research = defaultdict(list)   # building -> [(t, tech id)]
 	queued = defaultdict(list)     # building -> [(t, unit id, amount)]
@@ -1114,20 +1119,31 @@ def town_centers_destroyed(A, players, structs, pos, end):
 					near = True
 		if not credit:
 			continue
-		lost_research = [(t, tech) for t, tech in research[o] if any(a['a'] == 'RESEARCH' and a.get('player_id') == pid
-			and a.get('technology_id') == tech and a['t'] > t_last for a in A)]
+		# Research in progress when it fell, shown by the owner researching the same thing again later. The game
+		# refunds it, so it is not damage; an age-up lost this way is a delay (see the age delay bonus).
+		lost_research = []
+		for t, tech in research[o]:
+			if t > t_last:
+				continue
+			again = min((a['t'] for a in A if a['a'] == 'RESEARCH' and a.get('player_id') == pid
+				and a.get('technology_id') == tech and a['t'] > t_last), default=None)
+			if again is not None:
+				lost_research.append((t, tech, again))
 		# A Town Center that just stopped being used (villagers full) is not destroyed: it needs research lost in it,
 		# 2+ enemy attack clicks, or an attack click with an enemy castle or tower next to it.
 		if not (lost_research or n_clicks >= 2 or (n_clicks and near)):
 			continue
-		value = unit_value(TC_ID)
-		value += sum(sum(RESOURCE_WEIGHTS.get(k, 1.0) * v for k, v in techs.get(str(tech), {}).items()) for _, tech in lost_research)
-		value += sum(unit_value(u) * n for t, u, n in queued[o] if t_last - RAZE_IN_PROGRESS <= t <= t_last)
+		value = unit_value(TC_ID)  # research and queued units are refunded when a building falls
 		total = sum(credit.values())
-		lost_names = [_name('technologies', tech) for _, tech in lost_research]
+		ages_lost = [(_name('technologies', tech), click, again) for click, tech, again in lost_research
+			if _name('technologies', tech) in AGES]
 		for att, n in credit.items():
-			details[att].append(dict(victim=pid, t=t_last, value=round(value * n / total), research=lost_names))
-			out[att] += value * n / total
+			share = n / total
+			delays = [dict(age=age, clicked=click, again=again, minutes=round((again - click) / 60000, 1),
+				bonus=round(share * AGE_DELAY_BONUS * min(1.0, (again - click) / AGE_DELAY_FULL), 2)) for age, click, again in ages_lost]
+			details[att].append(dict(victim=pid, t=t_last, value=round(value * share), research=[d['age'] for d in delays],
+				delays=delays))
+			out[att] += value * share
 	return dict(out), {p: details[p] for p in players}
 
 

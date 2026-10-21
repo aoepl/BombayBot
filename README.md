@@ -171,9 +171,11 @@ What the breakdown shows:
   bonus only adds: players with no forward buildings, or ones that achieved little, lose nothing for it. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
   army was ordered within a minute (fights in the open count too).
-  Enemy Town Centers destroyed count their cost plus research lost in them (an age or tech the owner researched
-  again later, such as an Imperial Age in progress) plus units they were making in their last minute. A Town
-  Center counts as destroyed when its owner never used it again and research was lost in it, enemies
+  Enemy Town Centers destroyed count their cost (research and queued units in them are refunded by the game). A
+  Town Center destroyed with an age-up in progress (verified by the owner clicking the same age again later) also
+  gives a pressure bonus of up to +1 per age delayed, in full when the age was delayed 4+ minutes from the first
+  click to the click again, shared like the Town Center. A Town Center counts as destroyed when its owner never
+  used it again and research was lost in it, enemies
   attack-clicked it 2+ times, or an enemy attack-clicked it with an enemy castle, Donjon or tower within 12 tiles
   (castle arrows can't be seen). Credit is shared by attack clicks, a nearby castle or tower counting as 5.
   Age-up times use the last click of each age, so an age lost with its Town Center counts from when it was clicked
