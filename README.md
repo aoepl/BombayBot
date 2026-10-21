@@ -177,6 +177,20 @@ What the breakdown shows:
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
 
+### Draft logic (not in Discord yet)
+`bot/replays/draft.py` recommends the next civ pick for a map from the analysed games, for use once enough games
+are saved. Each option is rated 0–1 (0.5 = average) from:
+* strength of the civ in that seat (flank or pocket): wins (60%) and overall scores (40%), counting games on this
+  map fully, the same map type half and any map 0.2; every estimate starts from 6 games of "average", so a
+  civ needs real results to move;
+* matchups from lost bases against the enemy civs picked so far (same seat counts fully, the other seat half); a
+  base taken by a civ whose team still lost counts 1.5x;
+* fit for the player's Elo range (how the civ does there compared with all its games).
+The pick is the option with the best value plus half of what it denies the enemy (their best slot's value with
+it minus without it). Any format works: bans (the civs left), pick order (helpers for A-B-A-B and A-B-B-A),
+seats and players with Elo. The starting rating is neutral; community votes (the civ voting sheet) can be added
+through `Prior` later.
+
 ### Player insights (saved for later)
 Every recorded game uploaded with `/replay upload` is saved for
 future features such as suggesting civs and seats for a map. Nothing reads it yet; it builds up as games are played.

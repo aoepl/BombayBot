@@ -70,6 +70,7 @@ db.ensure_table(dict(
 		dict(cname="loser_user_id", ctype=db.types.int),
 		dict(cname="loser_elo", ctype=db.types.int),
 		dict(cname="share", ctype=db.types.float),
+		dict(cname="winner_team_won", ctype=db.types.bool),
 		dict(cname="at", ctype=db.types.int)
 	],
 	primary_keys=["game_key", "loser_name"]
@@ -277,7 +278,8 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				game_key=key, map_name=map_name, map_category=category, team_size=team_size,
 				winner_civ=w['civ'], winner_seat=w.get('seat'), winner_name=w['name'], winner_user_id=w.get('user_id'),
 				winner_elo=w.get('elo'), loser_civ=l['civ'], loser_seat=l.get('seat'), loser_name=l['name'],
-				loser_user_id=l.get('user_id'), loser_elo=l.get('elo'), share=k['share'], at=now
+				loser_user_id=l.get('user_id'), loser_elo=l.get('elo'), share=k['share'],
+				winner_team_won=w.get('won'), at=now
 			))
 		await db.delete('aoe_matchups', where=dict(game_key=key))
 		if matchups:
