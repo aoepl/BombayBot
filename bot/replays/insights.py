@@ -19,7 +19,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 44
+ANALYSIS_VERSION = 45
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -178,6 +178,8 @@ db.ensure_table(dict(
 		dict(cname="focused_minutes", ctype=db.types.int),
 		dict(cname="outnumbered_trade", ctype=db.types.float),
 		dict(cname="several_bonus", ctype=db.types.float),
+		dict(cname="forward_value", ctype=db.types.float),
+		dict(cname="forward_effect", ctype=db.types.float),
 		dict(cname="pressure_dealt", ctype=db.types.int),
 		dict(cname="playstyle", ctype=db.types.str),
 		dict(cname="macro_score", ctype=db.types.float),
@@ -302,6 +304,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				elo_verdict=s.get('elo_verdict'), fight_vs_elo=s.get('fight_vs_elo'), fight_value=s.get('fight_value'),
 				multi_enemy_minutes=s.get('multi_enemy_minutes'), focused_minutes=s.get('focused_minutes'),
 				outnumbered_trade=s.get('outnumbered_trade'), several_bonus=s.get('several_bonus'),
+				forward_value=s.get('forward_value'), forward_effect=s.get('forward_effect'),
 				pressure_dealt=s.get('press_out'),
 				playstyle=s.get('playstyle'), macro_score=s.get('macro'), micro_score=s.get('micro'),
 				army_apm=s['army'].get('army_apm'), targeted_share=s['army'].get('targeted_share'),
