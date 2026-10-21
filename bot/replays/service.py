@@ -540,9 +540,29 @@ def _auto_enabled(qc):
 
 
 def schedule(match):
-	""" Called after /report loss or draw (never abort). Runs in the background so reporting is never slowed down. """
-	if not _auto_enabled(match.qc) or match.id in _pending:
+	"""
+	Called after a match result is reported (loss, agreed draw, or a moderator's report; never abort). Runs in the
+	background so reporting is never slowed down.
+	"""
+	if match.id in _pending:
 		return
+	forum = getattr(match.qc.cfg, 'replay_forum', None)
+	if not bool(getattr(match.qc.cfg, 'replay_auto', 1)):
+		log.info(f"Replay for match {match.id}: automatic breakdowns are off in this channel (replay_auto).")
+		return
+	if not isinstance(forum, ForumChannel):
+		# Only a forum channel turns this on. Say so when a replay channel is set, since then it looks like it should work.
+		log.info(f"Replay for match {match.id}: no automatic breakdown, replay_forum is "
+			f"{'not set' if forum is None else 'not a forum channel'}.")
+		if forum is not None:
+			try:
+				asyncio.get_running_loop().create_task(_notify(match.qc, f"No automatic game breakdown for match ({match.id}): "
+					"the replay channel is not a forum channel. Set a forum channel as replay_forum, or upload the game "
+					"with `/replay upload`."))
+			except RuntimeError:  # not called from the bot's event loop: the log line above is enough
+				pass
+		return
+	log.info(f"Replay for match {match.id}: looking for the recorded game on World's Edge.")
 	info = dict(
 		match_id=match.id,
 		qc_id=match.qc.id,
@@ -581,9 +601,14 @@ async def _run(qc, info):
 			try:
 				if await _process(qc, info):
 					return
+				log.info(f"Replay for match {info['match_id']}: not on World's Edge yet (players {sorted(info['profile_ids'])}); "
+					"will retry.")
 			except ReplayError as e:
 				log.info(f"Replay for match {info['match_id']}: {e}")
 				if e.args and e.args[0].startswith("No known"):
+					await _notify(qc, f"Couldn't look up the recorded game for match ({info['match_id']}): none of its "
+						"players has a known AoE2 profile yet. The bot learns them from recorded games uploaded with "
+						"`/replay upload` (players matched by name or `/aoe link`). Upload this game to get its breakdown.")
 					return
 			except Exception as e:
 				log.info(f"Replay for match {info['match_id']}: World's Edge not reachable ({e}); will retry.")
