@@ -84,27 +84,45 @@ class ReplayError(Exception):
 # ---------- AoE2 profile ids
 
 async def learn_profiles(rec, found):
-	""" Save the profile id of every player whose name matched a member. """
+	"""
+	Save the profile id and in-game name of every player in an uploaded recording, so later reported matches can
+	be found on World's Edge. A player matched to a member is saved against them; an unmatched player is saved by
+	name only (a profile already linked to a member keeps that link) and is picked up when the name is linked with
+	/aoe link later.
+	"""
 	now = int(time.time())
 	for p in rec['players']:
-		info = found.get(p['name'])
-		if info and info.get('user_id') and p.get('profile_id'):
-			try:
-				await db.insert('aoe_profiles', dict(
-					profile_id=p['profile_id'], user_id=info['user_id'], name=p['name'], at=now
-				), on_dublicate="replace")
-			except Exception as e:
-				log.error(f"Could not save AoE2 profile {p['profile_id']}: {e}")
+		if not p.get('profile_id') or p['profile_id'] <= 0:
+			continue  # AI players have no profile
+		info = found.get(p['name']) or {}
+		user_id = info.get('user_id')
+		try:
+			if not user_id:
+				old = await db.select_one(('user_id',), 'aoe_profiles', where=dict(profile_id=p['profile_id']))
+				user_id = old.get('user_id') if old else None
+			await db.insert('aoe_profiles', dict(
+				profile_id=p['profile_id'], user_id=user_id, name=p['name'], at=now
+			), on_dublicate="replace")
+		except Exception as e:
+			log.error(f"Could not save AoE2 profile {p['profile_id']}: {e}")
 
 
 async def profiles_of(user_ids):
-	""" {user_id: [profile ids, most recently seen first]} """
+	"""
+	{user_id: [profile ids, most recently seen first]}: profiles saved against the member, and profiles saved
+	under one of the in-game names they linked with /aoe link.
+	"""
 	wanted = set(user_ids)
-	out = {}
-	rows = await db.select(('profile_id', 'user_id', 'at'), 'aoe_profiles')
-	for r in sorted(rows, key=lambda r: -(r.get('at') or 0)):
+	by_name = {}
+	for r in await db.select(('name_key', 'user_id'), 'aoe_name_links'):
 		if r['user_id'] in wanted:
-			out.setdefault(r['user_id'], []).append(r['profile_id'])
+			by_name[r['name_key']] = r['user_id']
+	out = {}
+	rows = await db.select(('profile_id', 'user_id', 'name', 'at'), 'aoe_profiles')
+	for r in sorted(rows, key=lambda r: -(r.get('at') or 0)):
+		uid = r['user_id'] if r.get('user_id') in wanted else by_name.get(_norm(r.get('name')))
+		if uid and r['profile_id'] not in out.get(uid, []):
+			out.setdefault(uid, []).append(r['profile_id'])
 	return out
 
 
@@ -540,9 +558,29 @@ def _auto_enabled(qc):
 
 
 def schedule(match):
-	""" Called after /report loss or draw (never abort). Runs in the background so reporting is never slowed down. """
-	if not _auto_enabled(match.qc) or match.id in _pending:
+	"""
+	Called after a match result is reported (loss, agreed draw, or a moderator's report; never abort). Runs in the
+	background so reporting is never slowed down.
+	"""
+	if match.id in _pending:
 		return
+	forum = getattr(match.qc.cfg, 'replay_forum', None)
+	if not bool(getattr(match.qc.cfg, 'replay_auto', 1)):
+		log.info(f"Replay for match {match.id}: automatic breakdowns are off in this channel (replay_auto).")
+		return
+	if not isinstance(forum, ForumChannel):
+		# Only a forum channel turns this on. Say so when a replay channel is set, since then it looks like it should work.
+		log.info(f"Replay for match {match.id}: no automatic breakdown, replay_forum is "
+			f"{'not set' if forum is None else 'not a forum channel'}.")
+		if forum is not None:
+			try:
+				asyncio.get_running_loop().create_task(_notify(match.qc, f"No automatic game breakdown for match ({match.id}): "
+					"the replay channel is not a forum channel. Set a forum channel as replay_forum, or upload the game "
+					"with `/replay upload`."))
+			except RuntimeError:  # not called from the bot's event loop: the log line above is enough
+				pass
+		return
+	log.info(f"Replay for match {match.id}: looking for the recorded game on World's Edge.")
 	info = dict(
 		match_id=match.id,
 		qc_id=match.qc.id,
@@ -581,9 +619,15 @@ async def _run(qc, info):
 			try:
 				if await _process(qc, info):
 					return
+				log.info(f"Replay for match {info['match_id']}: not on World's Edge yet (players {sorted(info['profile_ids'])}); "
+					"will retry.")
 			except ReplayError as e:
 				log.info(f"Replay for match {info['match_id']}: {e}")
 				if e.args and e.args[0].startswith("No known"):
+					await _notify(qc, f"Couldn't look up the recorded game for match ({info['match_id']}): none of its "
+						"players has a known AoE2 profile yet. Profiles come from recorded games uploaded with `/replay "
+						"upload`, so upload this game to get its breakdown; after that, these players' games are found "
+						"automatically.")
 					return
 			except Exception as e:
 				log.info(f"Replay for match {info['match_id']}: World's Edge not reachable ({e}); will retry.")

@@ -99,6 +99,8 @@ async def report_admin(ctx, match_id: int, winner_team=None, draw=False, abort=F
 		await match.cancel(ctx, reason=reason.strip())
 	else:
 		await match.report_win(ctx, winner_team, draw)
+		if match not in bot.active_matches:
+			_schedule_replay(match)
 
 
 @author_match
