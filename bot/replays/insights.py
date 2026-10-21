@@ -19,7 +19,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 46
+ANALYSIS_VERSION = 49
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -181,6 +181,9 @@ db.ensure_table(dict(
 		dict(cname="forward_value", ctype=db.types.float),
 		dict(cname="forward_effect", ctype=db.types.float),
 		dict(cname="forward_bonus", ctype=db.types.float),
+		dict(cname="macro_disrupted", ctype=db.types.int),
+		dict(cname="buildings_destroyed", ctype=db.types.int),
+		dict(cname="age_delay_bonus", ctype=db.types.float),
 		dict(cname="explain", ctype=db.types.text),  # JSON: why the player got each score (/explain)
 		dict(cname="pressure_dealt", ctype=db.types.int),
 		dict(cname="playstyle", ctype=db.types.str),
@@ -307,6 +310,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				multi_enemy_minutes=s.get('multi_enemy_minutes'), focused_minutes=s.get('focused_minutes'),
 				outnumbered_trade=s.get('outnumbered_trade'), several_bonus=s.get('several_bonus'),
 				forward_value=s.get('forward_value'), forward_effect=s.get('forward_effect'), forward_bonus=s.get('forward_bonus'),
+				macro_disrupted=s.get('macro_disrupted'), buildings_destroyed=s.get('buildings_destroyed'), age_delay_bonus=s.get('age_delay_bonus'),
 				explain=json.dumps(s['explain']) if s.get('explain') else None,
 				pressure_dealt=s.get('press_out'),
 				playstyle=s.get('playstyle'), macro_score=s.get('macro'), micro_score=s.get('micro'),

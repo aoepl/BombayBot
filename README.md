@@ -166,11 +166,25 @@ What the breakdown shows:
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
   35% average army value on the map from 8:00 on, units scaled by how much damage they did for their size (full
   credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 40% army
-  value sent at the enemy and 15% damage done (enemy army value killed in fights plus enemy villagers killed, 100
-  each), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
+  value sent at the enemy and 15% damage done (enemy army value killed in fights, enemy villagers killed at 100
+  each, enemy Town Centers destroyed and enemy macro disrupted; see below), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
   bonus only adds: players with no forward buildings, or ones that achieved little, lose nothing for it. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
   army was ordered within a minute (fights in the open count too).
+  Enemy Town Centers destroyed count their cost (research and queued units in them are refunded by the game). A
+  Town Center destroyed with an age-up in progress (verified by the owner clicking the same age again later) also
+  gives a pressure bonus of up to +1 per age delayed, in full when the age was delayed 4+ minutes from the first
+  click to the click again, shared like the Town Center. A Town Center counts as destroyed when its owner never
+  used it again and research was lost in it, enemies
+  attack-clicked it 2+ times, or an enemy attack-clicked it with an enemy castle, Donjon or tower within 12 tiles
+  (castle arrows can't be seen). Credit is shared by attack clicks, a nearby castle or tower counting as 5.
+  Age-up times use the last click of each age, so an age lost with its Town Center counts from when it was clicked
+  again.
+  Enemy macro disrupted: for every attack on a base (minutes with 10+ enemy army orders into it, first 10 minutes),
+  the defender's production uptime during it and the 2 minutes after is compared with the 5 minutes before (Town
+  Centers and Docks busy and military queued every minute; military only once they have 120+ villagers). The drop
+  × the attack's length × what the defender was spending a minute before is the production it cost them, credited
+  to the attackers by their share of army orders into that base.
   Forward castles, Kreposts, Donjons and towers (built in an enemy base) count by cost and by what they did,
   and the bonus is full at 3 Castles' worth. A Castle is worth 1, a Donjon about 0.33 and a tower about 0.24. A building that achieved nothing still
   counts a quarter of its cost; the rest comes from its effect (0 to 1):
@@ -216,7 +230,7 @@ What the breakdown shows:
   again only when the bot's analysis has changed since (a newer version); the existing post and saved stats are
   then updated, and the reply says which version it was analysed with before. Player or Elo changes (for example a
   name linked with `/aoe link` afterwards) don't trigger a new analysis. Otherwise the reply links the post and nothing changes. If the post was
-  deleted, uploading the game again creates a new post.
+  deleted, uploading the game again analyses it again and creates a new post.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
 
