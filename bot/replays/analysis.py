@@ -241,6 +241,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	press_out, press_in, help_out = Counter(), Counter(), Counter()
 	press_matrix = Counter()
 	timeline_in = defaultdict(Counter)  # defender -> minute -> orders
+	into_by = defaultdict(Counter)  # (attacker, defender) -> minute -> army orders into the defender's base
 	team_into = defaultdict(Counter)  # (attacking team, defender) -> minute -> orders
 	attack_times = defaultdict(list)  # attacker -> times of army orders into enemy bases
 	for a in A:
@@ -261,6 +262,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			press_in[b] += 1
 			press_matrix[(pid, b)] += 1
 			timeline_in[b][int(a['t'] // 60000)] += 1
+			into_by[(pid, b)][int(a['t'] // 60000)] += 1
 			team_into[(players[pid]['team_id'], b)][int(a['t'] // 60000)] += 1
 		elif b != pid:
 			help_out[pid] += 1
@@ -447,7 +449,12 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	playstyle(A, players, stats, army, floating, end, trib_out)
 	# Pressure: army on the map 35%, army value sent at the enemy 40%, damage done (enemy army value killed in
 	# fights plus enemy villagers killed) 15% (shares of 90%), plus a bonus for forward castles, Donjons and towers.
-	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] for p in pids}
+	# Damage also counts the enemy macro an attack disrupted: production that stalled while the army was in their base.
+	disrupted, disruptions = macro_disruption(A, players, vest, timeline_in, into_by, end)
+	for p in pids:
+		stats[p]['macro_disrupted'] = round(disrupted[p])
+		stats[p]['macro_disruptions'] = disruptions[p]
+	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] + disrupted[p] for p in pids}
 	damage = _minmax(dealt)
 	# Army on the map only matters if it does damage: scale it by damage done per army value, with full
 	# credit at the lobby median or better and nothing for an army that never hurt anyone.
@@ -621,6 +628,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			ex_parts.append(part)
 		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w, range=lobby_range(raw, f, False))
 			for n, raw, f, w, sc_ in press_info]
+		if st.get('macro_disrupted'):
+			raided = sorted({players[x['victim']]['name'] for x in st['macro_disruptions']})
+			pr_parts[2]['note'] = (f"includes {st['macro_disrupted']:,} of enemy macro disrupted (production that stalled while "
+				f"their army was in {', '.join(raided)}'s base)")
 		pr_parts[0]['note'] = (f"units counted at {round(army[p]['damage_efficiency'] * 100)}% for the damage they did for their size"
 			if army[p]['damage_efficiency'] < 1 else "full credit: the units did at least the lobby's median damage for their size")
 		tm_parts = []
@@ -951,6 +962,75 @@ FOCUS_FULL, FOCUS_BONUS_MAX = 0.2, 0.75
 MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that count as fighting them
 FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
 FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
+
+
+DISRUPT_BEFORE = 5 * 60000   # production in the 5 minutes before an attack is the defender's normal
+DISRUPT_AFTER = 2 * 60000    # ... compared with during the attack and the 2 minutes after
+DISRUPT_GAP = 1              # attacked minutes this far apart are one attack
+DISRUPT_MAX = 10 * 60000     # an attack counts its first 10 minutes at most
+
+
+def _mil_times(A, pid):
+	return [a['t'] for a in A if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid
+		and _name('objects', a['unit_id']) not in NOT_ARMY and _name('objects', a['unit_id']) not in WORKER_TRAIN]
+
+
+def macro_disruption(A, players, vest, timeline_in, into_by, end):
+	"""
+	Enemy macro an attack disrupted. For every attack on a base (minutes with ATTACK_MINUTE_ORDERS+ enemy army
+	orders into it, gaps of a minute or less joined, first 10 minutes): the defender's production uptime (Town
+	Centers and Docks busy, military queued every minute; military only once they have 120+ villagers) during it and
+	the 2 minutes after, against the 5 minutes before. The drop
+	times the attack's length times what the defender was spending a minute before it is the resources they did
+	not turn into units, research and buildings. It is credited to the attackers by their share of army orders
+	into the base during the attack. Returns ({attacker: value}, {attacker: [dict(victim, start, minutes, slip,
+	value)]}).
+	"""
+	out = Counter({p: 0.0 for p in players})
+	details = defaultdict(list)
+	for d in players:
+		minutes = sorted(m for m, n in timeline_in[d].items() if n >= ATTACK_MINUTE_ORDERS)
+		episodes, cur = [], []
+		for m in minutes:
+			if cur and m - cur[-1] > DISRUPT_GAP + 1:
+				episodes.append(cur)
+				cur = []
+			cur.append(m)
+		if cur:
+			episodes.append(cur)
+		if not episodes:
+			continue
+		mil = _mil_times(A, d)
+		for ep in episodes:
+			t0, t1 = ep[0] * 60000, min(end, (ep[-1] + 1) * 60000)
+			if t0 - DISRUPT_BEFORE < 0:
+				continue
+			t1 = min(t1, t0 + DISRUPT_MAX)  # a long siege shows in survival and lost bases, not here
+			alive = vest[d].get('alive') or []
+			full = alive and alive[min(len(alive) - 1, ep[0])] >= VILLAGER_FULL
+			if full:  # Town Centers going idle at a full villager count is normal: judge military production only
+				before = _steady([t for t in mil if t0 - DISRUPT_BEFORE <= t < t0], t0 - DISRUPT_BEFORE, t0)
+				during = _steady([t for t in mil if t0 <= t < t1 + DISRUPT_AFTER], t0, min(end, t1 + DISRUPT_AFTER))
+			else:
+				before = production_uptime(vest[d]['busy'], vest[d]['first_use'], mil, t0 - DISRUPT_BEFORE, t0)
+				during = production_uptime(vest[d]['busy'], vest[d]['first_use'], mil, t0, min(end, t1 + DISRUPT_AFTER))
+			if before is None or during is None or before <= during:
+				continue
+			slip = before - during
+			rate = spending_rate(A, d, t0 - DISRUPT_BEFORE, t0)
+			length = (t1 - t0) / 60000
+			value = slip * length * rate
+			orders = {a: sum(into_by[(a, d)].get(m, 0) for m in ep) for a in players
+				if players[a]['team_id'] != players[d]['team_id']}
+			total = sum(orders.values())
+			if not total or value <= 0:
+				continue
+			for a, n in orders.items():
+				if n:
+					share = value * n / total
+					out[a] += share
+					details[a].append(dict(victim=d, start=t0, minutes=round(length), slip=round(slip, 2), value=round(share)))
+	return dict(out), {p: details[p] for p in players}
 
 
 def several_enemies(A, players, army, villagers, end):

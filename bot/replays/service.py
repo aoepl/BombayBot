@@ -393,8 +393,10 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 	footer = f"Uploaded by {get_nick(ctx.author)}"
 	# Analysed already by this version of the bot: nothing to redo.
 	stale, old_version, saved_key = await _needs_analysis(key, fp)
+	existing = await _live_post(key=saved_key, fingerprint=fp) if summary else None
+	if summary and not existing:
+		stale = True  # the post was deleted (or never made): analyse and post it again
 	if not stale:
-		existing = await _live_post(key=saved_key, fingerprint=fp) if summary else None
 		url = existing.get('post_url') if existing else None
 		where = f": {url}" if url else "."
 		what = f"already posted{where}" if existing else "already analysed."
