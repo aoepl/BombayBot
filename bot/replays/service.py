@@ -388,8 +388,19 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 		for p in rec['players']:
 			if p['name'] == name:
 				meta[p['profile_id']] = dict(elo=info['elo'], user_id=info['user_id'])
-	result = await asyncio.to_thread(analysis.analyze, rec, meta)
 	key = insights.game_key(filename=filename, rec=rec)
+	footer = f"Uploaded by {get_nick(ctx.author)}"
+	# Analysed already by this version of the bot, with the same Elos: nothing to redo.
+	stale, old_version, saved_key = await _needs_analysis(key, fp, rec, found)
+	if not stale:
+		existing = await _live_post(key=saved_key, fingerprint=fp) if summary else None
+		url = existing.get('post_url') if existing else None
+		where = f": {url}" if url else "."
+		what = f"already posted{where}" if existing else "already analysed."
+		await ctx.success(f"This game was {what} It was analysed with the current version of the bot "
+			f"(v{insights.ANALYSIS_VERSION}) and the same Elos, so nothing changed.\n{report}")
+		return
+	result = await asyncio.to_thread(analysis.analyze, rec, meta)
 	saved = await insights.save(
 		result, key, map_name=rec.get('map_name'), channel_id=qc.id, source='upload',
 		uploaded_by=ctx.author.id, fingerprint=fp
@@ -406,13 +417,14 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 			_spawn(_links_later(qc, None, **later))  # still find the World's Edge id, so the game is known by it
 		return
 
-	footer = f"Uploaded by {get_nick(ctx.author)}"
 	existing = await _live_post(key=key, fingerprint=fp)
 	if existing or key in _posting or fp in _posting:
 		url = existing.get('post_url') if existing else None
 		where = f": {url}" if url else "."
+		why = (f"re-analysed with the newer bot version (v{old_version} → v{insights.ANALYSIS_VERSION})"
+			if old_version is not None and old_version < insights.ANALYSIS_VERSION else "updated with the latest Elo and stats")
 		if existing and await update_post(qc, existing, result, title, rec.get('map_name'), footer=footer, links=links):
-			await ctx.success(f"This game was already posted, so the post was updated with the latest Elo and stats{where}\n{report}")
+			await ctx.success(f"This game was already posted, so the post was {why}{where}\n{report}")
 			if lookup and not links:
 				_spawn(_links_later(qc, existing, **later))
 		else:
@@ -431,6 +443,30 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 		row = dict(channel_id=posted['channel_id'], thread_id=posted.get('thread_id'), message_id=posted.get('message_id'),
 			post_url=posted.get('url'))
 		_spawn(_links_later(qc, row, **later))
+
+
+async def _needs_analysis(key, fp, rec, found):
+	"""
+	(analyse again?, version it was analysed with, key it is saved under). A game needs analysing when it was
+	never saved, was saved by an older version of the bot (scoring rules changed), or a player's BombayBot Elo
+	match changed since (e.g. after /aoe link).
+	"""
+	row = None
+	for col, value in (('game_key', key), ('fingerprint', fp)):
+		if value and not row:
+			row = await db.select_one(('game_key', 'analysis_version'), 'aoe_games', where={col: value})
+	if not row:
+		return True, None, key
+	version = row.get('analysis_version')
+	if version is None or version < insights.ANALYSIS_VERSION:
+		return True, version, row['game_key']
+	saved = {r['name']: r.get('elo') for r in await db.select(('name', 'elo'), 'aoe_game_players',
+		where=dict(game_key=row['game_key']))}
+	for p in rec['players']:
+		now = (found.get(p['name']) or {}).get('elo')
+		if p['name'] not in saved or saved[p['name']] != now:
+			return True, version, row['game_key']
+	return False, version, row['game_key']
 
 
 def _spawn(coro):
