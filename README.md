@@ -151,24 +151,29 @@ What the breakdown shows:
   look the same as kills and count in full. Micro weighs value traded (60%), how much fighting the player did (25%)
   and target picking (15%). The Micro label also needs more value killed than lost (1.1 times or better).
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
-  35% average army value on the map from 8:00 on, scaled by how much damage that army did for its size (full
-  credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 40% army
+  30% average army value on the map from 8:00 on, units scaled by how much damage they did for their size (full
+  credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 35% army
   value sent at the enemy, 15% damage done (enemy army value killed in fights plus enemy villagers killed, 100
-  each), and 10% forward castles and towers (see below). An order counts as sent at the enemy
+  each), and 20% forward castles, Donjons and towers (see below). An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
   army was ordered within a minute (fights in the open count too).
   Forward castles, Kreposts, Donjons and towers (built in an enemy base) count by cost and by what they did.
   A Castle is worth 1, a Donjon about 0.33 and a tower about 0.24. A building that achieved nothing still
   counts a quarter of its cost; the rest comes from its effect (0 to 1):
-  * held: how long it stood, as a share of the rest of the game;
-  * held the area: after it went up, the owner's team's share of the activity within 15 tiles (buildings placed
-    count 3, army orders 1);
-  * gained ground: how much that share rose compared with the 5 minutes before.
+  * held, 25%: how long it stood, as a share of the rest of the game;
+  * held position, 20%: after it went up, the owner's team's share of the activity within 15 tiles (buildings
+    placed count 3, army orders 1);
+  * gained ground, 15%: how much that share rose compared with the 5 minutes before;
+  * covered a push, 20%: the owner's team attacking enemy buildings or using attack-ground (rams, trebuchets,
+    bombards, mangonels) within 20 tiles in its first 15 minutes (full credit at 15 such orders);
+  * denied trade, 20%: it stood within 10 tiles of the enemy team's trade route (the line between their
+    Markets 40+ tiles apart) while they made trade carts (full credit at 30 carts). Left out when that team
+    made no trade carts.
 
-  Effect is 0.4 held + 0.3 area + 0.3 ground; towers, which are not tracked one by one, use area and ground
-  only. Castles are counted as buildings, not placements: repeated placements at the same spot within a minute
-  count once, and placements never seen built (no units, research or enemy hits) count half. In army on the
-  map, a castle counts only while it stands.
+  Towers aren't tracked one by one, so they skip the held part. Castles are counted as buildings, not
+  placements: repeated placements at the same spot within a minute count once, and placements never seen
+  built (no units, research or enemy hits) count half. In army on the map a castle counts only while it
+  stands, and the damage discount applies to units only (castle and tower arrows can't be seen as kills).
   Warships count for less in pressure where water does not decide the land fight: 0.4 of their value on lake
   maps (4 Lakes, Golden Lakes, Kawasan), 0.7 on coastal maps (Baltic, Mediterranean, Continental...), in full
   on island maps, 0.6 elsewhere. Micro still counts water fights at full value.
