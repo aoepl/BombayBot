@@ -50,10 +50,13 @@ Reports over the games analysed in the queue channel (uploads and automatic brea
 * **Explain analysis**: right-click (or long-press) a game analysis post → Apps → Explain analysis. It works on
   the post or on any message in its thread, including in the replay forum. The bot replies with why each player
   got each score:
-  * every part of execution, pressure, survival and team play, with the player's value, its 1–10 score, the
+  * first, how the scores are calculated: what each of execution, pressure, survival and team play measures and
+    from which parts, how parts become 1–10 scores, the bonuses and the overall weights;
+  * then for each player, the calculation: every part of execution, pressure, survival and team play, with the player's value, its 1–10 score, the
     lobby's best and worst, and its share of the score;
   * the bonuses (fighting several enemies, forward buildings) and any parts left out because nobody did them;
-  * how the overall score weighs them for the player's position.
+  * the arithmetic, for example "(8.3×1 + 10×1 + 1.8×1 + 5.7×0.25 + 10×1) ÷ 4.25 = 7.4, + 0.91 bonus → 8.3", and how
+    the overall score weighs the four for the player's position.
 
   In a queue channel, replying `!explain` to the post does the same. Games analysed before this was added need
   uploading again (they are re-analysed with the newer version).
