@@ -93,7 +93,7 @@ What the breakdown shows:
   minutes apart are merged into one line with the time span: fights between two players (500+
   army value killed in 3 minutes, so a sea fight and a land fight at the same time stay apart), raids (3+
   villagers of one player killed by one raider in one burst, kills under a minute apart; events in the last 3
-  minutes before the game is decided count half when picking), castles destroyed, players eliminated (orders
+  minutes before the game is decided count half when picking), denied age-ups (an enemy Town Center destroyed while researching an age, clicked again later; always listed), castles destroyed, players eliminated (orders
   stop well before the end with no resignation, e.g. a regicide king killed) and the resignation that ends the analysis.
 * Each player gets a strategy name: opening → Castle Age army → Imperial Age army → extras, for example
   "Fast Castle → Monks + Temple Guard → Imp: Monks + Spearmen/Halbs → 3 forward castles".
