@@ -19,7 +19,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 51
+ANALYSIS_VERSION = 52
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -184,7 +184,9 @@ db.ensure_table(dict(
 		dict(cname="macro_disrupted", ctype=db.types.int),
 		dict(cname="buildings_destroyed", ctype=db.types.int),
 		dict(cname="age_delay_bonus", ctype=db.types.float),
-		dict(cname="explain", ctype=db.types.text),  # JSON: why the player got each score (/explain)
+		# JSON: why the player got each score (Explain analysis). MEDIUMTEXT: "text" is only VARCHAR(2000) on MySQL,
+		# too short for it (the earlier "explain" column of that type is no longer used).
+		dict(cname="explain_json", ctype=db.types.dict),
 		dict(cname="pressure_dealt", ctype=db.types.int),
 		dict(cname="playstyle", ctype=db.types.str),
 		dict(cname="macro_score", ctype=db.types.float),
@@ -293,7 +295,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				user_id=p.get('user_id'), name=p['name'], map_name=map_name, map_category=category,
 				team_size=team_size, civ=p['civ'], civ_id=p['civ_id'], team=p['team_id'], seat=p['seat'],
 				won=p['won'], elo=p.get('elo'), tg_rating=p.get('rating'),
-				strategy=s['strategy'], opening=parts.get('opening'), boom=parts.get('boom'), fish_boom=parts.get('fish_boom'), feudal_boom=parts.get('feudal_boom'),
+				strategy=(s['strategy'] or '')[:191], opening=parts.get('opening'), boom=parts.get('boom'), fish_boom=parts.get('fish_boom'), feudal_boom=parts.get('feudal_boom'),
 				main_units=", ".join(parts.get('main_units', [])), fast_imp=parts.get('fast_imp'),
 				feudal_units=", ".join(parts.get('feudal_units', [])), feudal_attack=parts.get('feudal_attack'),
 				forward_towers=parts.get('forward_towers'), castle_units=", ".join(parts.get('castle_units', [])),
@@ -311,7 +313,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				outnumbered_trade=s.get('outnumbered_trade'), several_bonus=s.get('several_bonus'),
 				forward_value=s.get('forward_value'), forward_effect=s.get('forward_effect'), forward_bonus=s.get('forward_bonus'),
 				macro_disrupted=s.get('macro_disrupted'), buildings_destroyed=s.get('buildings_destroyed'), age_delay_bonus=s.get('age_delay_bonus'),
-				explain=json.dumps(s['explain']) if s.get('explain') else None,
+				explain_json=json.dumps(s['explain']) if s.get('explain') else None,
 				pressure_dealt=s.get('press_out'),
 				playstyle=s.get('playstyle'), macro_score=s.get('macro'), micro_score=s.get('micro'),
 				army_apm=s['army'].get('army_apm'), targeted_share=s['army'].get('targeted_share'),
@@ -324,8 +326,12 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				base_note=(s.get('survival_note') or '')[:2000], tributes_sent=s.get('trib_out'),
 				tributes_received=s.get('trib_in'), analysis_version=ANALYSIS_VERSION, at=now
 			))
-		await db.delete('aoe_game_players', where=dict(game_key=key))
-		await db.insert_many('aoe_game_players', rows)
+		# Replace in place (key: game and player) rather than delete first, so a failed write keeps the old stats.
+		await db.insert_many('aoe_game_players', rows, on_dublicate="replace")
+		kept = {r['profile_id'] for r in rows}
+		for old in await db.select(('game_key', 'profile_id'), 'aoe_game_players', where=dict(game_key=key)):
+			if old['profile_id'] not in kept:
+				await db.delete('aoe_game_players', where=dict(game_key=key, profile_id=old['profile_id']))
 		# Lost bases: which civ and position took which, on this map.
 		matchups = []
 		for k in result.get('base_kills', []):
