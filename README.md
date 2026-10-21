@@ -47,6 +47,16 @@ Reports over the games analysed in the queue channel (uploads and automatic brea
 * `/aoe civs [map]`: win rate of every civ, overall or on one map (name or type, e.g. `Arena`, `Golden Lakes`,
   `Closed`), and the best civs (2+ games) by BombayBot Elo range (under 1400, 1400–1599, 1600–1799, 1800+), by
   position (flank, pocket) and by map.
+* **Explain analysis**: right-click (or long-press) a game analysis post → Apps → Explain analysis. It works on
+  the post or on any message in its thread, including in the replay forum. The bot replies with why each player
+  got each score:
+  * every part of execution, pressure, survival and team play, with the player's value, its 1–10 score, the
+    lobby's best and worst, and its share of the score;
+  * the bonuses (fighting several enemies, forward buildings) and any parts left out because nobody did them;
+  * how the overall score weighs them for the player's position.
+
+  In a queue channel, replying `!explain` to the post does the same. Games analysed before this was added need
+  uploading again (they are re-analysed with the newer version).
 
 ### Game breakdowns from recorded games
 Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).

@@ -240,3 +240,89 @@ def text_for_ai(result, map_name=None, lobby=None):
 			)
 	lines.append("Key moments: " + "; ".join(f"{t} {txt}" for t, txt in result['moments']))
 	return "\n".join(lines)
+
+
+# ---------- explain analysis: why each player got their scores (from what the analysis saved with the game)
+
+SCORE_NAMES = dict(exec="Execution", press="Pressure", surv="Survival", team="Team play")
+
+
+def _fmt_score(v):
+	return "—" if v is None else f"{v:g}"
+
+
+def _parts_text(parts):
+	""" One line per part: value → score (lobby range), with its share of the score. """
+	live = [p for p in parts if p.get('score') is not None]
+	total = sum(p['weight'] for p in live) or 1
+	lines = []
+	for p in parts:
+		if p.get('score') is None:
+			line = f"• {p['name']}: {p['value']} — {p.get('note', 'left out')}"
+		else:
+			line = f"• {p['name']} ({round(100 * p['weight'] / total)}%): {p['value']} → **{p['score']:g}**"
+			if p['name'] == "Unplanned floating":
+				line += " (minutes of spending sitting idle)"
+			if p.get('range'):
+				line += f" ({p['range']})"
+			if p.get('note'):
+				line += f"; {p['note']}"
+		lines.append(line)
+	return "\n".join(lines)
+
+
+def explain_text(name, civ, ex):
+	""" Why one player got their scores, as text for an embed description. """
+	sc = ex['scores']
+	w = ex['overall_weights']
+	overall = " + ".join(f"{SCORE_NAMES[k].lower()} {_fmt_score(sc[k])} × {round(100 * v)}%" for k, v in w.items())
+	out = [f"**Overall {_fmt_score(sc['overall'])}** = {overall} (weights for a {ex.get('seat') or 'player without a seat'})"]
+	b = ex['bonuses']
+
+	out.append(f"\n**Execution {_fmt_score(sc['exec'])}**\n" + _parts_text(ex['exec']))
+	s = b['several']
+	if s['value']:
+		trade = f", traded {s['trade']:g}× an even trade when focused" if s.get('trade') is not None else ""
+		out.append(f"• Bonus +{s['value']:g} for fighting several enemies: attacked 2+ enemies' units in {s['multi']} min, "
+			f"attacked by 2+ enemies in {s['focused']} min{trade}")
+
+	out.append(f"\n**Pressure {_fmt_score(sc['press'])}**\n" + _parts_text(ex['press']))
+	f = b['forward']
+	if f['count']:
+		out.append(f"• Bonus +{f['value']:g} for forward buildings: {f['count']} in enemy bases ({f['built']} seen built), "
+			f"worth {f['worth']:g} Castles by cost, effect {f['effect']:g} of 1 (stood, held position, gained ground, "
+			f"covered siege pushes, denied trade)")
+
+	sv = ex['surv']
+	if sc['surv'] is None:
+		out.append(f"\n**Survival —** not scored: {sv['note']}, so its weight goes to the other scores")
+	else:
+		level = 'heavy' if sv['difficulty'] >= 0.66 else 'moderate' if sv['difficulty'] >= 0.33 else 'light'
+		cleared = f", +{sv['cleared']:g} for clearing enemy castles" if sv.get('cleared') else ""
+		out.append(f"\n**Survival {_fmt_score(sc['surv'])}**\n• {sv['note']}\n• Held {round(100 * sv['held'])}% of the economy at "
+			f"home ({round(100 * sv['home'])}% of new economy buildings, {sv['moved_tcs']} Town Centers elsewhere) under {level} "
+			f"pressure (difficulty {sv['difficulty']:g} of 1){cleared}. Score = 1 + held × (4 + 5 × difficulty)")
+
+	out.append(f"\n**Team play {_fmt_score(sc['team'])}**\n" + _parts_text(ex['team']))
+	return "\n".join(out)
+
+
+def explain_embeds(players):
+	"""
+	players: [(name, civ, seat, explain dict)] best overall first. One embed per player, packed into messages
+	under Discord's limits (10 embeds and 6000 characters per message). Returns a list of messages (lists of embeds).
+	"""
+	messages, current, size = [], [], 0
+	for name, civ, seat, ex in players:
+		title = f"{name} ({civ}{', ' + seat if seat else ''}): {_fmt_score(ex['scores']['overall'])}"
+		text = explain_text(name, civ, ex)[:4000]
+		e = Embed(title=title[:256], description=text, color=0x2f7d6d)
+		n = len(title) + len(text)
+		if current and (size + n > 5800 or len(current) >= 10):
+			messages.append(current)
+			current, size = [], 0
+		current.append(e)
+		size += n
+	if current:
+		messages.append(current)
+	return messages

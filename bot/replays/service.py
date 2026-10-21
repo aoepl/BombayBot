@@ -15,6 +15,7 @@ download and the match pages instead. Profile ids are learned from uploaded reco
 lists each player's profile id, saved against the member their name matched.
 """
 import asyncio
+import json
 import re
 import time
 
@@ -459,6 +460,33 @@ async def _needs_analysis(key, fp):
 		return True, None, key
 	version = row.get('analysis_version')
 	return version is None or version < insights.ANALYSIS_VERSION, version, row['game_key']
+
+
+async def explain_post(channel_id, message_id):
+	"""
+	Why each player got their scores, for an analysis post. Works on the post itself (its message, or a forum
+	post's starter message) or any message in its thread. Returns (title, [messages of embeds]).
+	"""
+	rows = []
+	for where in (dict(message_id=message_id), dict(thread_id=message_id), dict(thread_id=channel_id), dict(message_id=channel_id)):
+		if not rows and all(where.values()):
+			rows = await db.select(('game_key', 'post_url'), 'aoe_game_posts', where=where)
+	if not rows:
+		raise ReplayError("That isn't a game analysis post. Use this on a post made by /replay upload (or on a message in its thread).")
+	players, key = [], None
+	for key in {r['game_key'] for r in rows}:
+		players = await db.select(('name', 'civ', 'seat', 'score_overall', 'explain'), 'aoe_game_players', where=dict(game_key=key))
+		if players:
+			break
+	if not players:
+		raise ReplayError("The stats for this game are no longer saved. Upload the recorded game again to analyse it.")
+	if not all(p.get('explain') for p in players):
+		raise ReplayError("This game was analysed before explanations were saved. Upload the recorded game again: "
+			f"it is analysed with the current version (v{insights.ANALYSIS_VERSION}) and then can be explained.")
+	players.sort(key=lambda p: -(p.get('score_overall') or 0))
+	game = await db.select_one(('map_name',), 'aoe_games', where=dict(game_key=key)) or {}
+	title = f"Why each player got their scores{' on ' + game['map_name'] if game.get('map_name') else ''}"
+	return title, post.explain_embeds([(p['name'], p['civ'], p.get('seat'), json.loads(p['explain'])) for p in players])
 
 
 def _spawn(coro):
