@@ -12,13 +12,14 @@ Re-analysing the same game replaces its rows, so uploading a recorded game twice
 double counts. Bump ANALYSIS_VERSION when scoring changes, so old rows can be told apart.
 """
 import hashlib
+import json
 import re
 import time
 
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 42
+ANALYSIS_VERSION = 43
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -74,6 +75,40 @@ db.ensure_table(dict(
 		dict(cname="at", ctype=db.types.int)
 	],
 	primary_keys=["game_key", "loser_name"]
+))
+
+# One row per major fight between two players: what each side fielded (units queued in the 5 minutes before and
+# during it), the army value each killed, and the share the sides' Elos predicted (allies in the fight included).
+db.ensure_table(dict(
+	tname="aoe_fights",
+	columns=[
+		dict(cname="game_key", ctype=db.types.str),
+		dict(cname="idx", ctype=db.types.int),
+		dict(cname="map_name", ctype=db.types.str),
+		dict(cname="map_category", ctype=db.types.str),
+		dict(cname="team_size", ctype=db.types.int),
+		dict(cname="start_s", ctype=db.types.int),
+		dict(cname="a_name", ctype=db.types.str),
+		dict(cname="a_user_id", ctype=db.types.int),
+		dict(cname="a_civ", ctype=db.types.str),
+		dict(cname="a_seat", ctype=db.types.str),
+		dict(cname="a_elo", ctype=db.types.int),
+		dict(cname="a_side", ctype=db.types.str),
+		dict(cname="a_lines", ctype=db.types.str),
+		dict(cname="a_killed", ctype=db.types.int),
+		dict(cname="b_name", ctype=db.types.str),
+		dict(cname="b_user_id", ctype=db.types.int),
+		dict(cname="b_civ", ctype=db.types.str),
+		dict(cname="b_seat", ctype=db.types.str),
+		dict(cname="b_elo", ctype=db.types.int),
+		dict(cname="b_side", ctype=db.types.str),
+		dict(cname="b_lines", ctype=db.types.str),
+		dict(cname="b_killed", ctype=db.types.int),
+		dict(cname="a_share", ctype=db.types.float),
+		dict(cname="expected", ctype=db.types.float),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["game_key", "idx"]
 ))
 
 db.ensure_table(dict(
@@ -137,6 +172,8 @@ db.ensure_table(dict(
 		dict(cname="score_rank", ctype=db.types.int),
 		dict(cname="elo_delta", ctype=db.types.float),
 		dict(cname="elo_verdict", ctype=db.types.str),
+		dict(cname="fight_vs_elo", ctype=db.types.float),
+		dict(cname="fight_value", ctype=db.types.int),
 		dict(cname="pressure_dealt", ctype=db.types.int),
 		dict(cname="playstyle", ctype=db.types.str),
 		dict(cname="macro_score", ctype=db.types.float),
@@ -165,9 +202,10 @@ db.ensure_table(dict(
 
 
 def map_category(map_name):
-	name = (map_name or '').lower()
+	""" Map type from the name; spaces, underscores and symbols ignored ("nCZ_PalisadeArena_1.0" is Semi Closed). """
+	name = re.sub(r'[^0-9a-z]', '', (map_name or '').lower())
 	for category, keys in MAP_CATEGORIES:
-		if any(k in name for k in keys):
+		if any(re.sub(r'[^0-9a-z]', '', k) in name for k in keys):
 			return category
 	return 'Other'
 
@@ -209,6 +247,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				if key.startswith('we:') and not other['game_key'].startswith('we:'):
 					await db.delete('aoe_game_players', where=dict(game_key=other['game_key']))
 					await db.delete('aoe_matchups', where=dict(game_key=other['game_key']))
+					await db.delete('aoe_fights', where=dict(game_key=other['game_key']))
 					await db.delete('aoe_games', where=dict(game_key=other['game_key']))
 				else:
 					key = other['game_key']
@@ -256,7 +295,8 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				late_gold_share=s.get('late_gold_share'),
 				score_exec=sc['exec'], score_pressure=sc['press'], score_survival=sc['surv'], score_team=sc['team'],
 				score_overall=sc['overall'], score_rank=s.get('score_rank'), elo_delta=s.get('elo_delta'),
-				elo_verdict=s.get('elo_verdict'), pressure_dealt=s.get('press_out'),
+				elo_verdict=s.get('elo_verdict'), fight_vs_elo=s.get('fight_vs_elo'), fight_value=s.get('fight_value'),
+				pressure_dealt=s.get('press_out'),
 				playstyle=s.get('playstyle'), macro_score=s.get('macro'), micro_score=s.get('micro'),
 				army_apm=s['army'].get('army_apm'), targeted_share=s['army'].get('targeted_share'),
 				avg_group_size=s['army'].get('avg_group'), units_kept=s['army'].get('units_kept'),
@@ -284,6 +324,23 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 		await db.delete('aoe_matchups', where=dict(game_key=key))
 		if matchups:
 			await db.insert_many('aoe_matchups', matchups)
+		# Fights: which units each side fielded and how it went against Elo.
+		fights = []
+		for i, f in enumerate(result.get('fights', [])):
+			a, b = players[f['a']], players[f['b']]
+			fights.append(dict(
+				game_key=key, idx=i, map_name=map_name, map_category=category, team_size=team_size,
+				start_s=f['start_m'] * 60, a_name=a['name'], a_user_id=a.get('user_id'), a_civ=a['civ'],
+				a_seat=a.get('seat'), a_elo=a.get('elo'), a_side=", ".join(players[q]['name'] for q in f['a_side']),
+				a_lines=json.dumps(f['a_lines']), a_killed=round(f['a_killed']),
+				b_name=b['name'], b_user_id=b.get('user_id'), b_civ=b['civ'], b_seat=b.get('seat'), b_elo=b.get('elo'),
+				b_side=", ".join(players[q]['name'] for q in f['b_side']), b_lines=json.dumps(f['b_lines']),
+				b_killed=round(f['b_killed']), a_share=round(f['a_share'], 3),
+				expected=round(f['expected'], 3) if f['expected'] is not None else None, at=now
+			))
+		await db.delete('aoe_fights', where=dict(game_key=key))
+		if fights:
+			await db.insert_many('aoe_fights', fights)
 		log.info(f"Saved replay insights for {key}: {len(rows)} players on {map_name} ({category}).")
 		return key
 	except Exception as e:
