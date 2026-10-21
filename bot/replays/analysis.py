@@ -576,8 +576,14 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			top_target=max(((players[d]['civ'], n) for (a, d), n in press_matrix.items() if a == p), key=lambda x: x[1], default=None),
 		)
 
+	# ---- fights: what each side fielded, and how they went against Elo
+	fights = fight_records(players, army, A, end)
+	for p, (diff, size) in fight_vs_elo(players, fights).items():
+		stats[p]['fight_vs_elo'], stats[p]['fight_value'] = diff, size
+
 	return dict(
 		duration=end, players=players, stats=stats, castles=castles, water_weight=water, base_kills=base_kills,
+		fights=fights,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
 		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end},
 			army, vest, A, end),
@@ -1456,6 +1462,135 @@ def _episodes(items, time_of):
 	return out
 
 
+def pair_kills(players, army):
+	"""
+	(killer, victim) -> minute -> army value killed. A unit lost while its owner was clearly fighting is credited
+	to the enemies fighting that player then, by their share of orders.
+	"""
+	team_of = {p: players[p]['team_id'] for p in players}
+	pair = defaultdict(Counter)
+	for p in players:
+		for t_last, value in army[p]['_gone']:
+			m = int(t_last // 60000)
+			ks = (m - 1, m, m + 1, m + 2)
+			if max(army[p]['_fight_orders'].get(k, 0) for k in ks) < FIGHT_MIN_ORDERS:
+				continue
+			credit = Counter()
+			for e in players:
+				if team_of[e] != team_of[p]:
+					for k in ks:
+						credit[e] += army[e]['_fights'].get(k, {}).get(p, 0)
+			total = sum(credit.values())
+			for e, n in credit.items():
+				if n:
+					pair[(e, p)][m] += value * n / total
+	return pair
+
+
+def fight_episodes(players, army):
+	"""
+	Major fights per pair of players: 3-minute windows with at least BATTLE_MIN army value killed, windows of a
+	pair less than 5 minutes apart merged into one fight. Each: a, b, a_killed (value a killed of b), b_killed,
+	start_m, end_m (minutes) and windows.
+	"""
+	pair = pair_kills(players, army)
+	fights = []
+	for a, b in {tuple(sorted(k)) for k in pair}:
+		for m in sorted(set(pair[(a, b)]) | set(pair[(b, a)])):
+			ka = sum(pair[(a, b)].get(k, 0) for k in (m, m + 1, m + 2))
+			kb = sum(pair[(b, a)].get(k, 0) for k in (m, m + 1, m + 2))
+			fights.append((ka + kb, m, a, b, ka, kb))
+	used, per_pair = defaultdict(set), defaultdict(list)
+	for size, m, a, b, ka, kb in sorted(fights, key=lambda f: -f[0]):
+		if size < BATTLE_MIN or used[(a, b)] & {m, m + 1, m + 2}:
+			continue
+		used[(a, b)].update(range(m - 2, m + 3))
+		per_pair[(a, b)].append((m, ka, kb))
+	out = []
+	for (a, b), windows in per_pair.items():
+		for episode in _episodes(sorted(windows), lambda w: w[0] * 60000):
+			out.append(dict(a=a, b=b, a_killed=sum(w[1] for w in episode), b_killed=sum(w[2] for w in episode),
+				start_m=episode[0][0], end_m=episode[-1][0], windows=len(episode)))
+	return sorted(out, key=lambda f: f['start_m'])
+
+
+FIGHT_ARMY_BEFORE = 5  # minutes: the units a player queued this long before a fight (and during it) fought in it
+
+
+def _side(players, army, p, enemy, start_m, end_m):
+	"""
+	p and the teammates who clearly fought the same enemy during the fight (FIGHT_MIN_ORDERS orders at them in
+	some minute of it), so one player holding off two armies is seen as 1 against 2.
+	"""
+	side = [p]
+	for q in players:
+		if q != p and players[q]['team_id'] == players[p]['team_id']:
+			if max((army[q]['_fights'].get(m, {}).get(enemy, 0) for m in range(start_m, end_m + 3)), default=0) >= FIGHT_MIN_ORDERS:
+				side.append(q)
+	return side
+
+
+def elo_scale(elos):
+	"""
+	Elo points that make a side 10x as strong, from how spread out this lobby's Elos are: in a lobby where Elos
+	are close, a small gap means more. A gap of one standard deviation (at least 100) is a 62% favourite.
+	"""
+	elos = [e for e in elos if e is not None]
+	if len(elos) < 2:
+		return 400.0
+	mean = sum(elos) / len(elos)
+	sd = max(100.0, math.sqrt(sum((e - mean) ** 2 for e in elos) / len(elos)))
+	return sd / -math.log10(1 / 0.62 - 1)
+
+
+def side_expectation(elos_a, elos_b, scale):
+	""" Expected share of the fight for side a: strength is the sum of 10^(elo/scale) of the players in it. """
+	sa = sum(10 ** (e / scale) for e in elos_a)
+	sb = sum(10 ** (e / scale) for e in elos_b)
+	return sa / (sa + sb) if sa + sb else 0.5
+
+
+def fight_records(players, army, A, end):
+	"""
+	Every major fight with what each side fielded and how it went against Elo: a, b (the pair), a_side / b_side
+	(players on each side, allies included), a_lines / b_lines ({unit: count} queued in the 5 minutes before
+	and during it), a_killed / b_killed, a_share (a's share of the value killed) and expected (a's expected share
+	from Elo, None when an Elo is missing).
+	"""
+	scale = elo_scale([players[p].get('elo') for p in players])
+	out = []
+	for f in fight_episodes(players, army):
+		a, b = f['a'], f['b']
+		t0 = max(0, (f['start_m'] - FIGHT_ARMY_BEFORE) * 60000)
+		t1 = min(end, (f['end_m'] + 3) * 60000)
+		sa, sb = _side(players, army, a, b, f['start_m'], f['end_m']), _side(players, army, b, a, f['start_m'], f['end_m'])
+		elos_a, elos_b = [players[p].get('elo') for p in sa], [players[p].get('elo') for p in sb]
+		expected = side_expectation(elos_a, elos_b, scale) if None not in elos_a + elos_b else None
+		total = f['a_killed'] + f['b_killed']
+		out.append(dict(f, a_side=sa, b_side=sb, a_lines=dict(_army_between(A, a, t0, t1)),
+			b_lines=dict(_army_between(A, b, t0, t1)), a_share=f['a_killed'] / total if total else 0.5, expected=expected,
+			elo_scale=round(scale)))
+	return out
+
+
+def fight_vs_elo(players, fights):
+	"""
+	{player: (average of share of value killed minus the share their side's Elo predicts, army value fought)}:
+	+0.10 means the player's fights went 10 points of share better than Elo expected. Bigger fights count more.
+	"""
+	acc = defaultdict(lambda: [0.0, 0.0])
+	for f in fights:
+		if f['expected'] is None:
+			continue
+		size = f['a_killed'] + f['b_killed']
+		diff = f['a_share'] - f['expected']
+		acc[f['a']][0] += size * diff
+		acc[f['a']][1] += size
+		acc[f['b']][0] -= size * diff
+		acc[f['b']][1] += size
+	return {p: (round(v[0] / v[1], 3), round(v[1])) for p, v in acc.items() if v[1]}
+
+
 def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0):
 	"""
 	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
@@ -1464,52 +1599,17 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 	All estimated from orders: the replay has no kill data.
 	"""
 	name = lambda p: players[p]['name']  # noqa: E731
-	team_of = {p: players[p]['team_id'] for p in players}
 	ev = []  # (size, time, text)
 
-	# Major fights, per pair of players (so a sea fight and a land fight at the same time stay apart): army
-	# value each one killed of the other over 3 minutes. A unit lost while its owner was clearly fighting is
-	# credited to the enemies fighting that player then, by their share of orders.
+	# Major fights, per pair of players (so a sea fight and a land fight at the same time stay apart).
 	if army:
-		pair = defaultdict(Counter)  # (killer, victim) -> minute -> value
-		for p in players:
-			for t_last, value in army[p]['_gone']:
-				m = int(t_last // 60000)
-				ks = (m - 1, m, m + 1, m + 2)
-				if max(army[p]['_fight_orders'].get(k, 0) for k in ks) < FIGHT_MIN_ORDERS:
-					continue
-				credit = Counter()
-				for e in players:
-					if team_of[e] != team_of[p]:
-						for k in ks:
-							credit[e] += army[e]['_fights'].get(k, {}).get(p, 0)
-				total = sum(credit.values())
-				for e, n in credit.items():
-					if n:
-						pair[(e, p)][m] += value * n / total
-		fights = []
-		for a, b in {tuple(sorted(k)) for k in pair}:
-			minutes = sorted(set(pair[(a, b)]) | set(pair[(b, a)]))
-			for m in minutes:
-				ka = sum(pair[(a, b)].get(k, 0) for k in (m, m + 1, m + 2))  # a killed of b
-				kb = sum(pair[(b, a)].get(k, 0) for k in (m, m + 1, m + 2))
-				fights.append((ka + kb, m, a, b, ka, kb))
-		# Every fight window of a pair, then one line per pair covering all its fights.
-		used, per_pair = defaultdict(set), defaultdict(list)
-		for size, m, a, b, ka, kb in sorted(fights, key=lambda f: -f[0]):
-			if size < BATTLE_MIN or used[(a, b)] & {m, m + 1, m + 2}:
-				continue
-			used[(a, b)].update(range(m - 2, m + 3))
-			per_pair[(a, b)].append((m, ka, kb))
-		for (a, b), windows in per_pair.items():
-			for episode in _episodes(sorted(windows), lambda w: w[0] * 60000):
-				ka, kb = sum(w[1] for w in episode), sum(w[2] for w in episode)
-				first, last_m = episode[0][0], episode[-1][0]
-				win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
-				when = f" ({mmss(first * 60000)}–{mmss((last_m + 3) * 60000)})" if len(episode) > 1 else ""
-				late = all(m * 60000 >= end - LATE_WINDOW for m, _, _ in episode) if end else False
-				ev.append(((ka + kb) * (0.5 if late else 1), first * 60000,
-					f"{name(win)} fought {name(lose)}: {round(kw):,} vs {round(kl):,} army value killed{when}"))
+		for f in fight_episodes(players, army):
+			a, b, ka, kb, first, last_m = f['a'], f['b'], f['a_killed'], f['b_killed'], f['start_m'], f['end_m']
+			win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
+			when = f" ({mmss(first * 60000)}–{mmss((last_m + 3) * 60000)})" if f['windows'] > 1 else ""
+			late = first * 60000 >= end - LATE_WINDOW if end else False
+			ev.append(((ka + kb) * (0.5 if late else 1), first * 60000,
+				f"{name(win)} fought {name(lose)}: {round(kw):,} vs {round(kl):,} army value killed{when}"))
 
 	# Raids: one player killing many of another player's villagers or fishing ships in one burst (kills under a
 	# minute apart); bursts on the same player less than 5 minutes apart are one moment.

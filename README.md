@@ -177,11 +177,49 @@ What the breakdown shows:
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
 
+### Draft logic (not in Discord yet)
+`bot/replays/draft.py` recommends civ picks and bans for a map, and plays out or rates a whole draft. Everything is
+measured against Elo, so a civ is not rated well just because good players picked it:
+* a game result is compared with the win chance the teams' Elos gave. The spread of Elos in that lobby sets how
+  much a gap means: one standard deviation (at least 100) is a 62% favourite;
+* a fight is compared with the share of army value killed that the Elos of the players in it predicted. Allies who
+  joined the fight count, so one player holding two armies is judged 1 against 2.
+
+Each option is rated 0–1 (0.5 = average) from:
+* **Strength** of the civ in that seat, against Elo. Games on this map count fully, the same map type 0.5, the
+  same seat elsewhere 0.2 and the other seat 0.1. Every estimate starts from 6 games of the tech tree's guess:
+  how well the civ's best unit lines suit the seat (archers and infantry on the flank, cavalry in the pocket).
+* **Army**: the unit lines the civ fields in that seat, taken from saved fights. The tech tree's best lines for
+  the seat fill in until there are enough fights. Siege and monks count half.
+* **Matchups** against the enemy civs: 60% their usual armies against each other, 40% how well each civ can
+  switch to a counter for the other's army. Unit line matchups start from unit stats with each civ's own
+  Blacksmith and armour upgrades (attack and bonus damage against armour classes, hit points, range, speed,
+  splash, cost) and are corrected by real fights between those lines. Real fights between the two civs and lost
+  bases correct them further; a base taken by a civ whose team still lost counts 1.5x. Same-seat enemies count
+  fully, the other seat half. An enemy slot not picked yet counts as its 6 likeliest picks, at half weight.
+* **Elo range fit** (how the civ does there compared with all its games), and **player fit** (how the player does
+  with this civ compared with their other games).
+
+The pick is the option with the best value plus half of what it denies the enemy. That is the enemy's best slot
+value with the civ minus without it. `ban()` suggests bans (what the enemy would value most). `balance()` rates a
+finished draft: the Elo win chance, the civ edge and both combined. `fair_first_pick()` gives first pick to the
+team with the lower total Elo. Any format works: bans, pick order (A-B-A-B and A-B-B-A helpers), seats and
+players with Elo. Chronicles civs are left out. Community votes (the civ voting sheet) can be added through
+`Prior` later.
+
+Civ tech trees and unit stats come from `bot/replays/techtree.json`, built from the
+[aoe2techtree](https://github.com/SiegeEngineers/aoe2techtree) data. `bot/replays/techtree.py` holds the unit lines,
+line quality per civ (units and upgrades the civ has) and the stat-based counter estimate. Civ bonuses that are not
+in the data, such as Franks cavalry hit points, only show through results.
+
 ### Player insights (saved for later)
 Every recorded game uploaded with `/replay upload` is saved for
 future features such as suggesting civs and seats for a map. Nothing reads it yet; it builds up as games are played.
 
 * `aoe_games`: one row per game (map, map category, team size, length, who uploaded it).
+* `aoe_fights`: one row per major fight between two players: both civs and seats, the players on each side
+  (allies who joined), the units each side queued in the 5 minutes before and during it, army value each killed,
+  and the share their Elos predicted.
 * `aoe_game_players`: one row per player per game: AoE2 profile and the Discord member matched by name, map and map category
   (Open, Semi Closed, Closed, Hybrid, Nomad or Other), civ, seat (flank or pocket), win or loss, BombayBot Elo,
   strategy (opening, Feudal units and whether they attacked, forward towers, boom, Castle Age and Imperial Age
