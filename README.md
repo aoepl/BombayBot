@@ -166,7 +166,8 @@ What the breakdown shows:
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
   35% average army value on the map from 8:00 on, units scaled by how much damage they did, the better of two measures: for their size
   (full credit at the lobby median or better) and in total (against the lobby's most damage) (units plus castles, Kreposts, Donjons and towers), 40% army
-  value sent at the enemy (scaled the same way) and 15% damage done (enemy army value killed in fights, enemy villagers killed at 100
+  value sent at the enemy (scaled the same way, and scored against the game's best: the best gets 10 and
+  the rest their share of it, so half the best is about 5.5) and 15% damage done (enemy army value killed in fights, enemy villagers killed at 100
   each, enemy Town Centers destroyed and enemy macro disrupted; see below), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
   bonus only adds: players with no forward buildings, or ones that achieved little, lose nothing for it. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy

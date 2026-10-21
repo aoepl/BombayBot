@@ -273,7 +273,8 @@ def _parts_text(parts):
 
 METHOD = [
 	("Each part is scored 1–10 within this game", "The best player in the lobby on a part gets 10, the worst 1, and the "
-		"rest in proportion. Lower is better for age-up times, the first military unit and floating. A part nobody in "
+		"rest in proportion. Army sent at the enemy is scored against the best only: the best gets 10 and the rest their "
+		"share of it (half the best ≈ 5.5). Lower is better for age-up times, the first military unit and floating. A part nobody in "
 		"the game did is left out and its weight spread over the rest."),
 	("Execution: how well the player ran their game", "Weighted average of: **Castle Age click** (or, after an 8+ unit "
 		"Feudal army, Feudal production uptime: Town Centers, Docks and military buildings kept busy); **Imperial Age "

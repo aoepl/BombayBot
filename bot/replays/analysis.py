@@ -476,7 +476,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		army[p]['damage_efficiency'] = round(max(for_size, in_total), 2)
 	# Army sent at the enemy is judged the same way: sending a lot that achieves little is not pressure.
 	sent_raw = {p: army[p]['value_sent'] * army[p]['damage_efficiency'] for p in pids}
-	sent = _minmax(sent_raw)
+	sent = _vs_best(sent_raw)  # against the game's best, not stretched between the top and the bottom
 	on_map = _minmax({p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
 		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids})
 	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
@@ -764,6 +764,19 @@ def saving_minutes(A, pid, ages):
 	for t in clicks:
 		out.update(range(int((t - SAVE_WINDOW) // 60000), int(t // 60000) + 1))
 	return out
+
+
+def _vs_best(values):
+	"""
+	Scale a {pid: value} dict to 1..10 against the game's best: the best gets 10 and the rest their share of it
+	(half the best ≈ 5.5), so how far apart players are matters, not only where they sit between top and bottom.
+	None counts as worst.
+	"""
+	known = [v for v in values.values() if v is not None]
+	best = max(known) if known else 0
+	if best <= 0:
+		return {k: 5.0 for k in values}
+	return {k: 1.0 if v is None else 1 + 9 * max(0.0, v) / best for k, v in values.items()}
 
 
 def _absolute(share):
