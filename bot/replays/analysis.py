@@ -377,7 +377,6 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	water = water_weight(rec.get('map_name'))
 	structs = structure_list(A, players, castles, base_of, end)
 	army = army_presence(A, players, base_of, villagers, end, offensive, imp_at, water, structs)
-	sent = _minmax({p: army[p]['value_sent'] for p in pids})
 	# Forward castles, Donjons and towers count by cost and by what they did: stood, held the area, gained ground.
 	forward_raw = forward_value(A, players, structs, villagers, end)
 	for p in pids:
@@ -467,9 +466,17 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	# by what they did (forward part).
 	per_army = {p: dealt[p] / army[p]['avg_units_value_on_map'] for p in pids if army[p]['avg_units_value_on_map']}
 	median = sorted(per_army.values())[len(per_army) // 2] if per_army else 0
+	# ... or by how much damage it did in total compared with the lobby's most: a big army that did a lot of damage is
+	# not cut for being big. The better of the two counts.
+	top_dealt = max(dealt.values()) if dealt else 0
 	for p in pids:
-		eff = min(1.0, per_army.get(p, 0) / median) if median else 1.0
-		army[p]['damage_efficiency'] = round(eff, 2)
+		for_size = min(1.0, per_army.get(p, 0) / median) if median else 1.0
+		in_total = dealt[p] / top_dealt if top_dealt else 1.0
+		army[p]['damage_for_size'], army[p]['damage_in_total'] = round(for_size, 2), round(in_total, 2)
+		army[p]['damage_efficiency'] = round(max(for_size, in_total), 2)
+	# Army sent at the enemy is judged the same way: sending a lot that achieves little is not pressure.
+	sent_raw = {p: army[p]['value_sent'] * army[p]['damage_efficiency'] for p in pids}
+	sent = _minmax(sent_raw)
 	on_map = _minmax({p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
 		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids})
 	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
@@ -505,8 +512,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 				siege_times[b].append(a['t'])
 	pressure = {p: press_in[p] + siege_in[p] for p in pids}
 
-	# Survival only counts for players whose base was really attacked: did they keep their
-	# economy at home afterwards, or did they have to rebuild somewhere else?
+	# Holding position (survival): for players whose base was really attacked, did they keep their economy at home
+	# afterwards, or did they have to rebuild somewhere else? A base the enemy never got into scores HOLD_UNTESTED.
 	max_in = max(pressure.values()) if pressure else 0
 	survival, survival_note, surv_detail = {}, {}, {}
 	for p in pids:
@@ -515,8 +522,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['enemy_castles_cleared'] = sum(1 for c in castles if c['forward'] and c['base'] == p
 			and c['status'] in ('lost', 'deleted'))
 		if not max_in or (pressure[p] < max(50, 0.25 * max_in) and enemy_castles == 0):
-			survival[p] = None
-			survival_note[p] = "base not seriously attacked"
+			# The enemy never got into this base: the position was held (the fighting stayed elsewhere).
+			survival[p] = HOLD_UNTESTED
+			survival_note[p] = "base not seriously attacked: the enemy was kept out"
+			surv_detail[p] = dict(untested=True)
 			continue
 		tl = timeline_in[p]
 		total, cum, pressure_start = sum(tl.values()), 0, None
@@ -602,7 +611,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	]
 	press_info = [
 		("Army on the map", on_map_raw, lambda v: f"{v:,.0f} value", 0.35, on_map),
-		("Army sent at the enemy", {p: army[p]['value_sent'] for p in pids}, lambda v: f"{v:,.0f} value", 0.40, sent),
+		("Army sent at the enemy", sent_raw, lambda v: f"{v:,.0f} value", 0.40, sent),
 		("Damage done", dealt, lambda v: f"{v:,.0f} value", 0.15, damage),
 	]
 	team_info = [
@@ -646,8 +655,13 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			text = (f"{st['macro_disrupted']:,} of enemy macro disrupted (production that stalled while their army was in "
 				f"{', '.join(raided)}'s base)")
 			pr_parts[2]['note'] = (pr_parts[2]['note'] + "; " + text) if notes else "includes " + text
-		pr_parts[0]['note'] = (f"units counted at {round(army[p]['damage_efficiency'] * 100)}% for the damage they did for their size"
-			if army[p]['damage_efficiency'] < 1 else "full credit: the units did at least the lobby's median damage for their size")
+		why = (f"its damage was {round(army[p]['damage_for_size'] * 100)}% of the lobby median for its size and "
+			f"{round(army[p]['damage_in_total'] * 100)}% of the lobby's most in total; the better counts")
+		if army[p]['damage_efficiency'] < 1:
+			pr_parts[1]['note'] = f"{army[p]['value_sent']:,} sent, counted at {round(army[p]['damage_efficiency'] * 100)}%: {why}"
+		pr_parts[0]['note'] = (f"units counted at {round(army[p]['damage_efficiency'] * 100)}%: {why}" if army[p]['damage_efficiency'] < 1
+			else "full credit: " + ("the most damage in the lobby" if army[p]['damage_in_total'] >= 1 else
+				"at least the lobby's median damage for its size"))
 		tm_parts = []
 		for n, raw, f, w, sc_ in team_info:
 			done = _did(raw)
@@ -977,6 +991,7 @@ MULTI_FULL, MULTI_BONUS_MAX = 0.25, 0.75
 # ... and at a fifth of them attacked by 2+ enemies with even trades (each minute counts by how the player traded).
 FOCUS_FULL, FOCUS_BONUS_MAX = 0.2, 0.75
 MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that count as fighting them
+HOLD_UNTESTED = 7.0       # holding position for a base never seriously attacked: the enemy was kept out
 FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
 FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
 

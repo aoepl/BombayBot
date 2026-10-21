@@ -110,8 +110,8 @@ What the breakdown shows:
   A part nobody in the lobby did (no forward castles or towers, no tributes, nobody in Imperial Age) is left
   out and its weight spread over the other parts. Saving for an age-up or an expensive technology (550+
   resources; the 2 minutes before the click) is not a gap in military production. Execution weighs the first military unit at a quarter of the others.
-  Overall weights: flanks execution 27%, pressure 36%, survival 27%, team 10%; pockets 40/25/25/10; others
-  32/32/26/10. When survival is not scored its weight is spread over the rest.
+  Overall weights: flanks execution 27%, pressure 36%, holding position 27%, team 10%; pockets 40/25/25/10;
+  others 32/32/26/10.
   Execution: Castle and Imperial Age timing, villager value, first military unit and floating. A player who made
   8+ Feudal military units scores the better of their Castle Age click time and their Feudal production uptime
   (Town Centers and Docks kept busy, military buildings producing every minute), so a late Castle Age after a
@@ -164,9 +164,9 @@ What the breakdown shows:
   look the same as kills and count in full. Micro weighs value traded (60%), how much fighting the player did (25%)
   and target picking (15%). The Micro label also needs more value killed than lost (1.1 times or better).
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
-  35% average army value on the map from 8:00 on, units scaled by how much damage they did for their size (full
-  credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 40% army
-  value sent at the enemy and 15% damage done (enemy army value killed in fights, enemy villagers killed at 100
+  35% average army value on the map from 8:00 on, units scaled by how much damage they did, the better of two measures: for their size
+  (full credit at the lobby median or better) and in total (against the lobby's most damage) (units plus castles, Kreposts, Donjons and towers), 40% army
+  value sent at the enemy (scaled the same way) and 15% damage done (enemy army value killed in fights, enemy villagers killed at 100
   each, enemy Town Centers destroyed and enemy macro disrupted; see below), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
   bonus only adds: players with no forward buildings, or ones that achieved little, lose nothing for it. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
@@ -211,11 +211,11 @@ What the breakdown shows:
   a cheap one. Units are tracked by their ids in the player's commands (the replay has no kill data), and count
   as on the map until 90 seconds after their owner last commanded them.
   The overall score weighs them by seat (flank or pocket).
-* Survival is only scored for players whose base was seriously attacked: it rewards keeping the economy at
+* Holding position (survival) is scored for every base. A base the enemy never seriously attacked scores 7 (the
+  enemy was kept out). For a base that was seriously attacked: it rewards keeping the economy at
   home under pressure and marks players whose main base was destroyed. Holding a heavy attack scores higher
   than holding a light one. Enemy castles and towers built in a base count as pressure, weighted by how much
-  enemy army came with them, and clearing them earns a little extra. Players who were never attacked get
-  "—" and their overall score uses the other three. Being attacked by 2 or more enemies at once makes the test
+  enemy army came with them, and clearing them earns a little extra.  Being attacked by 2 or more enemies at once makes the test
   harder: each such minute adds to the attack's difficulty, up to 0.3.
 * Every score is compared with the player's BombayBot Elo, so the post and the recap show who played above
   or below their Elo. Players are matched to BombayBot members by name. Names linked with `/aoe link` come

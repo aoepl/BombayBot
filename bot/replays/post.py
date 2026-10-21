@@ -136,7 +136,7 @@ def build_embed(result, title, narrative=None, footer=None, url=None, links=None
 		embed.add_field(name=LINKS_FIELD, value=value, inline=False)
 	embed.add_field(name="Scores", value=score_table(result), inline=False)
 	note = (
-		"Scores are 1–10 relative to this lobby. Survival is only scored when a base was seriously attacked (— otherwise). "
+		"Scores are 1–10 relative to this lobby. Holding position: how a base held under attack, 7 when the enemy was kept out. "
 		"Elo arrows compare each score with the player's BombayBot Elo."
 	)
 	embed.set_footer(text=_clip(f"{footer}\n{note}" if footer else note, 2048))
@@ -148,7 +148,7 @@ def score_table(result):
 	players, stats = result['players'], result['stats']
 	order = sorted(players, key=lambda p: -stats[p]['scores']['overall'])
 	fmt = lambda v: f"{v:>4.1f}" if v is not None else "   —"  # noqa: E731
-	lines = ["Player        Exec Pres Surv Team Total  Mac  Mic W/L"]
+	lines = ["Player        Exec Pres Hold Team Total  Mac  Mic W/L"]
 	for pid in order:
 		p, sc = players[pid], stats[pid]['scores']
 		name = p['name'][:12].ljust(12)
@@ -235,7 +235,7 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"{' (traded ' + str(s['outnumbered_trade']) + ' of even in those minutes, 1 = even)' if s.get('outnumbered_trade') is not None else ''}"
 				f" (execution bonus +{s.get('several_bonus', 0)} for fighting several enemies); tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "
 				f"score {s['scores']['overall']}/10 (exec {s['scores']['exec']}, pressure {s['scores']['press']}, "
-				f"survival {s['scores']['surv'] if s['scores']['surv'] is not None else 'not scored'}, team {s['scores']['team']}); "
+				f"holding position {s['scores']['surv'] if s['scores']['surv'] is not None else 'not scored'}, team {s['scores']['team']}); "
 				f"base: {s['survival_note']}."
 			)
 	lines.append("Key moments: " + "; ".join(f"{t} {txt}" for t, txt in result['moments']))
@@ -244,7 +244,7 @@ def text_for_ai(result, map_name=None, lobby=None):
 
 # ---------- explain analysis: why each player got their scores (from what the analysis saved with the game)
 
-SCORE_NAMES = dict(exec="Execution", press="Pressure", surv="Survival", team="Team play")
+SCORE_NAMES = dict(exec="Execution", press="Pressure", surv="Holding position", team="Team play")
 
 
 def _fmt_score(v):
@@ -283,24 +283,25 @@ METHOD = [
 		"Plus a bonus up to +1.5 for fighting several enemies at once: up to +0.75 for minutes attacking 2+ enemies' "
 		"units, up to +0.75 for minutes attacked by 2+ enemies (by how well they traded), as a share of the game from 8:00."),
 	("Pressure: how hard the player pushed the enemy", "Weighted average of: **army on the map** 35% (average army "
-		"value from 8:00, units scaled down if they did less damage for their size than the lobby median); **army "
+		"value from 8:00; units are scaled down when their damage was low both for their size, against the lobby "
+		"median, and in total, against the lobby's most: the better of the two counts); **army "
 		"sent at the enemy** 40% (each military unit ordered at an enemy unit, building or base counts once a minute, "
-		"at the player's average unit cost); **damage done** 15% (enemy army value killed in fights, 100 per "
+		"at the player's average unit cost, scaled the same way); **damage done** 15% (enemy army value killed in fights, 100 per "
 		"villager killed, enemy Town Centers destroyed (their cost: research and queued units are refunded), and "
 		"enemy macro disrupted: production that stalled while the army was in their base, "
 		"against the 5 minutes before). Early army counts ×2 before 15:00 and ×1.5 before 20:00; gold counts 1.5×, stone 1.2×. Plus "
 		"a bonus up to +1.5 for forward castles, Donjons and towers, by cost and effect (stood, held position, gained "
 		"ground, covered siege pushes, denied trade), and up to +1 for each enemy age-up delayed by destroying its "
 		"Town Center mid-research (verified by the age being clicked again; full at 4+ minutes lost)."),
-	("Survival: holding the base when it was attacked", "Only scored when the base was seriously attacked. Score = 1 + "
-		"held × (4 + 5 × difficulty) + up to 1 for clearing enemy castles. **Held** is the share of new economy buildings "
+	("Holding position: keeping the base", "A base the enemy never seriously attacked scores 7: the position was held "
+		"and the fighting stayed elsewhere. An attacked base scores 1 + held × (4 + 5 × difficulty) + up to 1 for clearing "
+		"enemy castles. **Held** is the share of new economy buildings "
 		"kept at home after the attack began, less for Town Centers rebuilt elsewhere. **Difficulty** (0–1) is the "
 		"enemy army and castles sent into the base compared with the most-attacked base, plus 0.05 a minute "
 		"attacked by 2+ enemies at once (up to 0.3)."),
 	("Team play: helping allies", "Weighted average of: **tributes sent** 50%; **army orders into allies' bases** 35% "
 		"(defending them); **flares** 15%."),
-	("Overall", "Flank: execution 27%, pressure 36%, survival 27%, team play 10%. Pocket: 40%, 25%, 25%, 10%. "
-		"When survival is not scored, its weight is spread over the other three."),
+	("Overall", "Flank: execution 27%, pressure 36%, holding position 27%, team play 10%. Pocket: 40%, 25%, 25%, 10%."),
 ]
 
 
@@ -329,7 +330,7 @@ def explain_text(name, civ, ex):
 	w = ex['overall_weights']
 	overall = " + ".join(f"{SCORE_NAMES[k].lower()} {_fmt_score(sc[k])} × {round(100 * v)}%" for k, v in w.items())
 	out = [f"**Overall {_fmt_score(sc['overall'])}** = {overall} (weights for a {ex.get('seat') or 'player without a seat'}"
-		+ (", survival not scored" if sc['surv'] is None else "") + ")"]
+		+ (", holding position not scored" if sc['surv'] is None else "") + ")"]
 	b = ex['bonuses']
 
 	out.append(f"\n**Execution {_fmt_score(sc['exec'])}**\n" + _parts_text(ex['exec']))
@@ -359,11 +360,13 @@ def explain_text(name, civ, ex):
 
 	sv = ex['surv']
 	if sc['surv'] is None:
-		out.append(f"\n**Survival —** not scored: {sv['note']}, so its weight goes to the other scores")
+		out.append(f"\n**Holding position —** not scored: {sv['note']}, so its weight goes to the other scores")
+	elif sv.get('untested'):
+		out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}, so the base scores the set 7 for a held position")
 	else:
 		level = 'heavy' if sv['difficulty'] >= 0.66 else 'moderate' if sv['difficulty'] >= 0.33 else 'light'
 		cleared = f", +{sv['cleared']:g} for clearing enemy castles" if sv.get('cleared') else ""
-		out.append(f"\n**Survival {_fmt_score(sc['surv'])}**\n• {sv['note']}\n• Held {round(100 * sv['held'])}% of the economy at "
+		out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}\n• Held {round(100 * sv['held'])}% of the economy at "
 			f"home ({round(100 * sv['home'])}% of new economy buildings, {sv['moved_tcs']} Town Centers elsewhere) under {level} "
 			f"pressure (difficulty {sv['difficulty']:g} of 1){cleared}.")
 		out.append(f"= 1 + {sv['held']:g} × (4 + 5 × {sv['difficulty']:g})" + (f" + {sv['cleared']:g}" if sv.get('cleared') else "")
