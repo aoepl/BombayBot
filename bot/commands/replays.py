@@ -232,16 +232,22 @@ def _draft_embed(match, res, model, games, author):
 	ahead = match.teams[0 if edge >= 0 else 1].name
 	civ_line = "Civs: even." if abs(edge) < 0.005 else f"Civs: {ahead} ahead by {abs(edge):.1%}."
 	out = res['excluded']
+	embed.add_field(name="Balance", inline=False,
+		value=f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it.")
+	embed.add_field(name=f"Left out at random: {len(out)} of {res['civ_count']} civs", inline=False,
+		value=(", ".join(out) or "none")[:1024])
+	map_rules = {
+		'Closed': "on a closed map also its siege, gunpowder, towers and power units",
+		'Semi Closed': "on a semi closed map food, cavalry or a strong late game for pockets and aggression for flanks",
+		'Open': "on an open map archers for flanks, cavalry for pockets and eco bonuses for a fast attack",
+		'Hybrid': "on a hybrid map navy, fishing and wood, and for pockets cavalry backed by a fish boom",
+	}.get(res.get('category'))
 	embed.add_field(name="How the draft works", inline=False, value=(
-		f"{len(out)} of the {res['civ_count']} ranked civs were left out at random first, so drafts differ from match to "
-		f"match: {', '.join(out)}.\n"
-		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map and these seats were then split "
+		"Random civs are left out first, so drafts differ from match to match. "
+		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map and these seats are then split "
 		"between the teams, the same number of flank and pocket civs each, so both sides' civs are as even as possible. "
-		"A civ's value is how it does against Elo in this seat and on this kind of map (on closed maps also its siege, "
-		"gunpowder, towers and power units; on semi closed maps food, cavalry or late game for pockets and aggression for "
-		"flanks; on open maps archers for flanks, cavalry for pockets and eco bonuses; on hybrid maps navy, fishing and "
-		"wood, and for pockets cavalry backed by a fish boom) and its matchups against the other team's civs.\n"
-		f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it.")[:1024])
+		"A civ's value is how it does against Elo in this seat and on this kind of map"
+		+ (f" ({map_rules})" if map_rules else "") + " and its matchups against the other team's civs.")[:1024])
 	embed.set_footer(text=f"Drawn by {author}. From {games} analysed game{'s' if games != 1 else ''} in this channel"
 		" plus the tech trees; with few games picks lean on the tech trees.")
 	return embed
