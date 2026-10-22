@@ -980,7 +980,8 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 		balance=balance(model, d), civ_count=len(civs or ranked_civs()))
 
 
-EVEN_ENOUGH = 0.004  # splits this close to the most even one are all fine; one of them is picked at random
+EVEN_TOLERANCE = 0.01  # splits within 1% of the most even one count as even ...
+EVEN_ENOUGH = 0.004    # ... and of those, the ones this close to the best seat fit are picked from at random
 
 
 def fair_split(model: Model, teams, map_name, category=None, rng=None, per_player=False):
@@ -1050,9 +1051,14 @@ def fair_split(model: Model, teams, map_name, category=None, rng=None, per_playe
 		values = [[own(t, i, civ) + MATCHUP_WEIGHT * vs(civ, teams[t][i].seat, lineups[1 - t])
 			for i, civ in placed[t].items()] for t in (0, 1)]
 		edge = sum(values[0]) / len(values[0]) - sum(values[1]) / len(values[1])
-		options.append((abs(edge), edge, placed))
+		fit = sum(own(t, i, civ) for t in (0, 1) for i, civ in placed[t].items())  # civs in seats that suit them
+		options.append((abs(edge), edge, placed, fit))
+	# Among the splits that are about as even as the most even one, take one where the civs suit their seats best
+	# (a team handed three pocket civs and one flank civ would have to play a pocket civ on a flank).
 	best = min(o[0] for o in options)
-	_, edge, placed = rng.choice([o for o in options if o[0] <= best + EVEN_ENOUGH])
+	even = [o for o in options if o[0] <= best + EVEN_TOLERANCE]
+	top_fit = max(o[3] for o in even)
+	_, edge, placed, _ = rng.choice([o for o in even if o[3] >= top_fit - EVEN_ENOUGH])
 	out = [[Slot(s.seat, s.elo, s.name, placed[t][i], s.user_id) for i, s in enumerate(teams[t])] for t in (0, 1)]
 	return out, edge
 
