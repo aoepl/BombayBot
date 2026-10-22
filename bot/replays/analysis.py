@@ -2008,11 +2008,69 @@ def _top_lines(counter, minimum, names=LINE_NAMES, limit=2):
 	return [label for label, c in merged.most_common() if c >= minimum][:limit]
 
 
-def _army_lines(counter, minimum=5):
-	""" Top two unit lines, plus any siege the player made (2 or more) that isn't already listed. """
-	lines = _top_lines(counter, minimum)
+# Upgrade chains: the base unit a line is trained as, and (research, name of the upgraded line) in order. Training
+# is recorded as the base unit even after upgrades, so a stage is named by the upgrades researched by then.
+UPGRADE_NAMES = {
+	'Archer': [('Crossbowman', 'Crossbows'), ('Arbalester', 'Arbalesters')],
+	'Spearman': [('Pikeman', 'Pikemen'), ('Halberdier', 'Halberdiers')],
+	'Scout Cavalry': [('Light Cavalry', 'Light Cavalry'), ('Hussar', 'Hussars'), ('Winged Hussar', 'Winged Hussars')],
+	'Militia': [('Man-at-Arms', 'Men-at-Arms'), ('Long Swordsman', 'Long Swords'), ('Two-Handed Swordsman', 'Two-Handed Swords'),
+		('Champion', 'Champions')],
+	'Skirmisher': [('Elite Skirmisher', 'Elite Skirmishers'), ('Imperial Skirmisher', 'Imperial Skirmishers')],
+	'Knight': [('Cavalier', 'Cavaliers'), ('Paladin', 'Paladins')],
+	'Camel Rider': [('Heavy Camel Rider', 'Heavy Camels'), ('Imperial Camel Rider', 'Imperial Camels')],
+	'Cavalry Archer': [('Heavy Cavalry Archer', 'Heavy Cavalry Archers')],
+	'Eagle Scout': [('Eagle Warrior', 'Eagle Warriors'), ('Elite Eagle Warrior', 'Elite Eagles')],
+	'Battle Elephant': [('Elite Battle Elephant', 'Elite Elephants')],
+	'Steppe Lancer': [('Elite Steppe Lancer', 'Elite Steppe Lancers')],
+	'Battering Ram': [('Capped Ram', 'Capped Rams'), ('Siege Ram', 'Siege Rams')],
+	'Mangonel': [('Onager', 'Onagers'), ('Siege Onager', 'Siege Onagers')],
+	'Scorpion': [('Heavy Scorpion', 'Heavy Scorpions')],
+	'Bombard Cannon': [('Houfnice', 'Houfnices')],
+	'Galley': [('War Galley', 'War Galleys'), ('Galleon', 'Galleons')],
+	'Fire Galley': [('Fire Ship', 'Fire ships'), ('Fast Fire Ship', 'Fast Fire ships')],
+	'Demolition Raft': [('Demolition Ship', 'Demo ships'), ('Heavy Demolition Ship', 'Heavy Demo ships')],
+}
+# Names for a line before any upgrade (clearer than the old 'Scouts/Hussars' style).
+BASE_LINE_NAMES = {'Scout Cavalry': 'Scouts', 'Spearman': 'Spearmen', 'Militia': 'Militia'}
+
+
+# Technologies newer than the name table (found in recorded games; named from the unit each one upgrades to).
+TECH_NAME_FIXES = {
+	905: 'Demolition Ship', 906: 'Fishing Lines', 1392: 'Caciques', 1393: 'Curare', 1451: 'Heavy Mounted Crossbowman',
+	1452: 'Cranequins', 1454: 'Elite Varangian Guard', 1462: 'Elite Hearth Troop', 1464: 'Shield Wall',
+	1473: 'Vendel Legacy', 1482: 'Elite Jomsviking', 1483: "Northmen's Fury", 1484: 'Hamask',
+}
+
+
+def _tech_name(idx):
+	return TECH_NAME_FIXES.get(idx) or _name('technologies', idx)
+
+
+def _researched(A, pid, until):
+	""" Names of the technologies a player clicked before `until`. """
+	return {_tech_name(a['technology_id']) for a in A
+		if a['a'] == 'RESEARCH' and a.get('player_id') == pid and a['t'] < until}
+
+
+def _line_label(unit, researched):
+	""" A trained unit's line, named by its latest upgrade researched ('Archer' -> 'Crossbows'). """
+	label = BASE_LINE_NAMES.get(unit) or LINE_NAMES.get(unit, unit)
+	for tech, name in UPGRADE_NAMES.get(unit, []):
+		if tech in researched:
+			label = name
+	if unit not in UPGRADE_NAMES and f'Elite {unit}' in researched:  # unique units: 'Elite Mangudai'
+		label = f'Elite {label}'
+	return label
+
+
+def _army_lines(counter, minimum=5, researched=None):
+	""" Top two unit lines, plus any siege the player made (2 or more) that isn't already listed; each line named by
+	the upgrades researched by then when `researched` is given. """
+	names = LINE_NAMES if researched is None else {n: _line_label(n, researched) for n in counter}
+	lines = _top_lines(counter, minimum, names)
 	for n, c in counter.most_common():
-		label = LINE_NAMES.get(n, n)
+		label = names.get(n, n)
 		if n in SIEGE and c >= 2 and label not in lines:
 			lines.append(label)
 	return lines
@@ -2129,6 +2187,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	# Castle Age and Imperial Age armies, separately.
 	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
 	imperial_units = _army_lines(_army_between(A, pid, imp, end)) if imp else []
+	# The saved unit lines keep their usual names (drafting and the tech tree match on them); the strategy's name
+	# shows the upgraded forms: 'Crossbows' in Castle Age, 'Arbalesters' in Imperial.
+	castle_names = _army_lines(_army_between(A, pid, castle, imp or end), researched=_researched(A, pid, imp or end)) if castle else []
+	imperial_names = _army_lines(_army_between(A, pid, imp, end), researched=_researched(A, pid, end)) if imp else []
 	main_units = castle_units or imperial_units
 	fast_imp = bool(imp and imp < 25 * 60000)
 	# Castles seen built (units, research or enemy hits), each object once: not every placement.
@@ -2141,10 +2203,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 		parts.append(opening)
 	if boom_label and boom_label not in opening:
 		parts.append(boom_label)
-	if castle_units:
-		parts.append(" + ".join(castle_units))
-	if imperial_units and imperial_units != castle_units:
-		parts.append("Imp: " + " + ".join(imperial_units))
+	if castle_names:
+		parts.append(" + ".join(castle_names))
+	if imperial_names and imperial_names != castle_names:
+		parts.append("Imp: " + " + ".join(imperial_names))
 	extras = []
 	if fast_imp:
 		extras.append("fast Imperial")
