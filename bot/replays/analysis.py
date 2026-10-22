@@ -1188,10 +1188,29 @@ OPPONENT_VILLAGERS = 2   # ... or villagers killed (either way)
 
 def direct_opponents(players, press_matrix, vest, pos=None):
 	"""
-	{player: their direct opponent}: the enemy they fought most head-on in either direction, one side attacking and
-	the other defending counts (OPPONENT_ORDERS+ army orders into one's base, or OPPONENT_VILLAGERS+ villagers
-	killed, by either). With no such fight, the enemy whose start is nearest: the player directly opposite.
+	{player: their direct opponent}.
+	4v4: by position, each flank against the enemy flank on its side, each pocket against the enemy pocket on its
+	side (the nearest enemy in the same seat).
+	Other sizes: the enemy they fought most head-on in either direction, one side attacking and the other defending
+	counts (OPPONENT_ORDERS+ army orders into one's base, or OPPONENT_VILLAGERS+ villagers killed, by either); with
+	no such fight, the enemy whose start is nearest.
 	"""
+	sizes = Counter(players[p]['team_id'] for p in players)
+	if pos and len(sizes) == 2 and all(n == 4 for n in sizes.values()) and all(players[p].get('seat') for p in players):
+		# Each seat has two players per team: pair them across the two possible ways, keeping the one with the
+		# shorter total distance (the flanks, and the pockets, on the same side of the map).
+		out = {}
+		team_a, team_b = list(sizes)
+		for seat in ('Flank', 'Pocket'):
+			mine = [p for p in players if players[p]['team_id'] == team_a and players[p]['seat'] == seat and p in pos]
+			theirs = [p for p in players if players[p]['team_id'] == team_b and players[p]['seat'] == seat and p in pos]
+			if len(mine) != 2 or len(theirs) != 2:
+				continue
+			pairings = [((mine[0], theirs[0]), (mine[1], theirs[1])), ((mine[0], theirs[1]), (mine[1], theirs[0]))]
+			best = min(pairings, key=lambda pr: sum(math.dist(pos[a], pos[b]) for a, b in pr))
+			for a, b in best:
+				out[a], out[b] = b, a
+		return out
 	out = {}
 	for p in players:
 		best, best_n = None, 0
