@@ -668,7 +668,8 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 	A whole draft for a started match. teams: two lists of dicts(name, elo, user_id). In TEAM_CIVS mode each team
 	gets TEAM_CHOICES civs (team average Elo, no player) to choose its players' civs from; in PLAYER_CIVS mode every
 	player gets a seat (assign_seats, from their flank/pocket records) and a civ. Both teams take the best civ
-	left in turn (snake order, the lower total Elo first) from the civs not left out at random.
+	left in turn (snake order, a coin flip for first pick) from the civs not left out at random. Elos still shape
+	which civs suit each player (elo_fit, player_fit) but never which team gets the better civs.
 	-> dict(mode, map, category, teams (Slots with civs), picks, excluded, first, balance)
 	"""
 	rng = rng or random.Random()
@@ -682,7 +683,9 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 			elos = [p['elo'] for p in t if p.get('elo') is not None]
 			avg = round(sum(elos) / len(elos)) if elos else None
 			slots.append([Slot(seat, avg) for seat in seat_layout(len(t), max(len(t), TEAM_CHOICES))])
-	first = fair_first_pick(slots)
+	# Elo is not evened out by civs: the rating change already does that (a favourite gains little and loses more),
+	# so first pick is a coin flip and neither team is given weaker civs for being rated higher.
+	first = rng.randrange(2)
 	d = Draft(map_name, category, pool, slots, pick_order([len(t) for t in slots], first))
 	made, d = simulate(model, d)
 	final, _ = _apply(d)

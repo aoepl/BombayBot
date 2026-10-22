@@ -221,19 +221,17 @@ def _draft_embed(match, res, model, games, author):
 	for i, team in enumerate(res['teams']):
 		why = [f"**{s.civ}** {draft.pick_reason(model, res, i, j)}" for j, s in enumerate(team)]
 		embed.add_field(name=f"Why these civs: {match.teams[i].name}", value="\n".join(why)[:1024], inline=False)
-	b = res['balance']
-	favoured = 0 if b['win'] >= 0.5 else 1
-	chance = b['win'] if favoured == 0 else 1 - b['win']
-	edge = b['civ_edge'] if favoured == 0 else -b['civ_edge']
+	edge = res['balance']['civ_edge']
+	ahead = match.teams[0 if edge >= 0 else 1].name
+	civ_line = "Civs: even." if abs(edge) < 0.005 else f"Civs: {ahead} ahead by {abs(edge):.1%}."
 	out = res['excluded']
 	embed.add_field(name="How the draft works", inline=False, value=(
 		f"{len(out)} of the {res['civ_count']} ranked civs were left out at random first, so drafts differ from match to "
 		f"match: {', '.join(out)}.\n"
-		f"Teams then took the best civ left in turn, {match.teams[res['first']].name} first (lower Elo), in snake order. "
+		f"Teams then took the best civ left in turn, {match.teams[res['first']].name} first (coin flip), in snake order. "
 		"A civ's value is how it does against Elo in this seat and on this kind of map, its matchups against the other "
 		"team's civs and what taking it denies them.\n"
-		f"{match.teams[favoured].name} {chance:.0%} to win (Elo {b['elo'] if favoured == 0 else 1 - b['elo']:.0%}, "
-		f"civs {edge:+.1%}).")[:1024])
+		f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it.")[:1024])
 	embed.set_footer(text=f"Drawn by {author}. From {games} analysed game{'s' if games != 1 else ''} in this channel"
 		" plus the tech trees; with few games picks lean on the tech trees.")
 	return embed

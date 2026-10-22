@@ -299,8 +299,10 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
 * **mode player**: every player gets a seat and a civ. Seats go where the players' own flank and pocket win rates
   (from `/aoe seats`, pulled towards 50% when they have few games) add up best; even splits are random. Picks then
   also count each player's own record with the civ.
-* Teams take the best civ left in turn, A-B-B-A snake order, the team with the lower total Elo first. The post
-  shows each pick, why it was picked, the win chance (Elo plus civ edge) and the civs left out.
+* Teams take the best civ left in turn, A-B-B-A snake order, a coin flip for first pick. Elo is not evened out
+  with civs (the rating change already accounts for it), so a higher rated team never gets weaker civs; Elo only
+  shapes which civs suit each player. The post shows each pick, why it was picked, which team's civs are ahead and
+  the civs left out.
 * One draft per match: asking again shows the same draft, and moderators can redraw it (`redraw`).
 
 Civ tech trees and unit stats come from `bot/replays/techtree.json`, built from the
