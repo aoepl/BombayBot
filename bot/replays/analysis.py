@@ -171,6 +171,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for a in A:
 		if a['a'] in ('BUILD', 'WALL', 'REPAIR'):
 			villagers.update(a.get('object_ids') or [])
+	villagers -= builder_army(A, players)  # Champis and Serjeants build too
 	refs = defaultdict(list)
 	for a in A:
 		for o in a.get('object_ids') or []:
@@ -917,6 +918,43 @@ def fishing_ship_hits(A, players, villagers, end):
 	return hits
 
 
+# Army units that can build one building each: Champis (Mapuche) Outposts, Serjeants (Sicilians) Donjons.
+BUILDER_ARMY = {'Mapuche': 'Outpost', 'Sicilians': 'Donjon'}
+CHAMPI_IDS = {2550: 'Champi Scout', 2552: 'Champi Warrior', 2554: 'Elite Champi Warrior'}  # not in the name table
+BUILDER_ARMY_UNITS = {'Champi Scout': 'Outpost', 'Champi Warrior': 'Outpost', 'Elite Champi Warrior': 'Outpost',
+	'Serjeant': 'Donjon', 'Elite Serjeant': 'Donjon'}
+
+
+def builder_army(A, players):
+	"""
+	Units that built but aren't known villagers. A Champi can build only Outposts and a Serjeant only Donjons, so for
+	players who have them (Mapuche, Sicilians, or anyone who trained them) a unit whose only work was building that
+	one building (no other building, no walls or repairs, never sent to a resource) may be army.
+	"""
+	only = {p: BUILDER_ARMY[v['civ']] for p, v in players.items() if v.get('civ') in BUILDER_ARMY}
+	for a in A:
+		unit = (CHAMPI_IDS.get(a['unit_id']) or _name('objects', a['unit_id'])) if a['a'] == 'DE_QUEUE' else None
+		if unit in BUILDER_ARMY_UNITS and a.get('player_id') in players:
+			only.setdefault(a['player_id'], BUILDER_ARMY_UNITS[unit])
+	if not only:
+		return set()
+	commanded = set()
+	for a in A:
+		commanded.update(a.get('object_ids') or [])
+	built_it, other_work = set(), set()
+	for a in A:
+		building = only.get(a.get('player_id'))
+		if building is None:
+			continue
+		ids = a.get('object_ids') or []
+		if a['a'] == 'BUILD':
+			(built_it if _name('objects', a.get('building_id')) == building else other_work).update(ids)
+		elif a['a'] in ('WALL', 'REPAIR') or (a['a'] == 'ORDER' and (a.get('target_id') or 0) > 0
+				and a['target_id'] not in commanded):  # an order onto a never-commanded object: a resource
+			other_work.update(ids)
+	return built_it - other_work
+
+
 def villager_estimate(A, players, villagers, army_alive, end):
 	"""
 	Estimated economy workers alive per minute: villagers plus fishing ships. The replay has no unit counts, so:
@@ -929,9 +967,12 @@ def villager_estimate(A, players, villagers, army_alive, end):
 	Returns {pid: dict(made=[times], lost=[times], alive=[per minute])}.
 	"""
 	vill = set(villagers)
-	for a in A:  # groups that are mostly known villagers are villagers too
+	# Units given army-only orders (stance, formation, patrol, attack-move, guard, follow) are army.
+	army_ordered = {i for a in A if a['a'] in ARMY_COMMANDS for i in a.get('object_ids') or []} - vill
+	for a in A:  # groups that are mostly known villagers are villagers too, unless army was sent with them
 		ids = a.get('object_ids') or []
-		if a['a'] in ('ORDER', 'MOVE') and ids and sum(i in vill for i in ids) * 2 >= len(ids):
+		if a['a'] in ('ORDER', 'MOVE') and ids and sum(i in vill for i in ids) * 2 >= len(ids) \
+				and not any(i in army_ordered for i in ids):
 			vill.update(ids)
 	owner, last, deleted = {}, {}, {}
 	for a in A:
