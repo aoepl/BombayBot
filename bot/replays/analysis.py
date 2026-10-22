@@ -578,6 +578,9 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			taker = max(weight, key=weight.get)
 			base_kills.append(dict(winner=taker, loser=p, share=round(weight[taker] / sum(weight.values()), 2)))
 			stats[p]['base_lost_to'] = taker
+	# Age-up timings against the direct opponent: two players who delayed each other aren't both punished for late
+	# ages, and a late age that cost the opponent their base was the better plan.
+	opponent_timings(players, stats, exec_parts, {'Castle Age': castle_click, 'Imperial Age': imp_click}, press_matrix, vest)
 	team_raw = [{p: trib_out[p] for p in pids}, {p: help_out[p] for p in pids}, {p: stats[p]['flares'] for p in pids}]
 	team_parts = [_minmax(raw) for raw in team_raw]  # parts nobody did (no tributes in the game) are left out
 	weights = {
@@ -640,6 +643,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if i == 0 and st.get('feudal_units', 0) >= FEUDAL_ARMY_MIN and st.get('feudal_uptime') is not None \
 					and exec_parts[0][p] > _minmax(castle_click, invert=True)[p]:
 				part['note'] = f"scored by Feudal production uptime ({round(st['feudal_uptime'] * 100)}%) instead, after a {st['feudal_units']}-unit Feudal army"
+			if i in (0, 1):
+				age_notes = [n.split(': ', 1)[1] for n in st.get('timing_notes', []) if n.startswith(('Castle Age', 'Imperial Age')[i])]
+				if age_notes:
+					part['note'] = (part.get('note') + '; ' if part.get('note') else '') + age_notes[0]
 			if i == 3:
 				part['note'] = "counts a quarter as much as the others"
 			ex_parts.append(part)
@@ -1173,6 +1180,65 @@ def town_centers_destroyed(A, players, structs, pos, end):
 				delays=delays))
 			out[att] += value * share
 	return dict(out), {p: details[p] for p in players}
+
+
+OPPONENT_ORDERS = 20     # army orders into each other's base that make two players direct opponents ...
+OPPONENT_VILLAGERS = 2   # ... or villagers killed of each other
+
+
+def direct_opponents(players, press_matrix, vest):
+	"""
+	{player: their direct opponent}: the enemy they fought most head-on, when it went both ways (each sent
+	OPPONENT_ORDERS+ army orders into the other's base, or killed OPPONENT_VILLAGERS+ of the other's villagers).
+	"""
+	out = {}
+	for p in players:
+		best, best_n = None, 0
+		for e in players:
+			if players[e]['team_id'] == players[p]['team_id']:
+				continue
+			to_e, to_p = press_matrix[(p, e)], press_matrix[(e, p)]
+			kills_e = vest[e]['killers'].get(p, 0) if vest.get(e) else 0
+			kills_p = vest[p]['killers'].get(e, 0) if vest.get(p) else 0
+			mutual = (to_e >= OPPONENT_ORDERS and to_p >= OPPONENT_ORDERS) or \
+				(kills_e >= OPPONENT_VILLAGERS and kills_p >= OPPONENT_VILLAGERS)
+			n = to_e + to_p + 20 * (kills_e + kills_p)
+			if mutual and n > best_n:
+				best, best_n = e, n
+		if best is not None:
+			out[p] = best
+	return out
+
+
+def opponent_timings(players, stats, exec_parts, clicks, press_matrix, vest):
+	"""
+	Castle and Imperial Age timings judged against the direct opponent (only ever raising a score):
+	- both late (after the lobby's median click, or never): they were delaying each other, so the timing is scored
+	  within the pair, 5.5 when equal and higher for the faster, if that beats the lobby score;
+	- the player was later than the opponent, but the opponent lost their base and the player didn't: the late
+	  timing paid off, so it scores at least the opponent's.
+	Indices: exec_parts[0] Castle Age (may already hold Feudal uptime), exec_parts[1] Imperial Age. Notes go in
+	stats[p]['timing_notes'].
+	"""
+	opp = direct_opponents(players, press_matrix, vest)
+	end = max((t for c in clicks.values() for t in c.values() if t), default=0) + 60000
+	for idx, (age, times) in enumerate(clicks.items()):
+		known = sorted(t for t in times.values() if t)
+		if not known:
+			continue  # nobody clicked it: the part is left out anyway
+		median = known[len(known) // 2]
+		for p, e in opp.items():
+			mine, theirs = times.get(p) or end, times.get(e) or end
+			notes = stats[p].setdefault('timing_notes', [])
+			if mine > median and theirs > median:
+				pair = 5.5 + 4.5 * max(-1.0, min(1.0, (theirs - mine) / max(mine, theirs)))
+				if pair > exec_parts[idx][p]:
+					exec_parts[idx][p] = pair
+					notes.append(f"{age}: scored against direct opponent {players[e]['name']} (both late, delaying each other)")
+			elif mine > theirs and stats[e].get('base_lost') and not stats[p].get('base_lost'):
+				if exec_parts[idx][e] > exec_parts[idx][p]:
+					exec_parts[idx][p] = exec_parts[idx][e]
+					notes.append(f"{age}: scored like direct opponent {players[e]['name']}, who aged up sooner but lost their base")
 
 
 def several_enemies(A, players, army, villagers, end):
