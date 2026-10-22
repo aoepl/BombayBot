@@ -303,10 +303,11 @@ def _winner_text(result):
 MINIMAP = 'minimap.png'
 
 
-async def starting_map(rec):
-	""" PNG of the starting map (resources, Town Centers, walls) for the post, or None. Never fails the upload. """
+async def starting_map(rec, result=None):
+	""" PNG of the map at the start (resources, Town Centers, walls) and, with result, at the end, side by side,
+	for the post; or None. Never fails the upload. """
 	try:
-		return await asyncio.to_thread(minimap.render, rec)
+		return await asyncio.to_thread(minimap.render, rec, result)
 	except Exception as e:  # noqa: BLE001
 		log.error(f"Could not draw the starting map: {e}")
 		return None
@@ -475,7 +476,7 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 		where = f": {url}" if url else "."
 		why = (f"re-analysed with the newer bot version (v{old_version} → v{insights.ANALYSIS_VERSION})"
 			if old_version is not None and old_version < insights.ANALYSIS_VERSION else "updated with the latest Elo and stats")
-		map_png = await starting_map(rec)
+		map_png = await starting_map(rec, result)
 		if existing and await update_post(qc, existing, result, title, rec.get('map_name'), footer=footer, links=links,
 				map_png=map_png):
 			await ctx.success(f"This game was already posted, so the post was {why}{where}\n{report}")
@@ -488,7 +489,7 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 	try:
 		posted = await publish(
 			qc, result, map_name=rec.get('map_name'), title=title,
-			footer=footer, reply_ctx=ctx, reply_extra=report, links=links, map_png=await starting_map(rec),
+			footer=footer, reply_ctx=ctx, reply_extra=report, links=links, map_png=await starting_map(rec, result),
 		)
 		await _record_post(key, fp, posted)
 	finally:
@@ -735,7 +736,7 @@ async def _process(qc, info):
 		posted = await publish(
 			qc, result, map_name=map_name, lobby=game.get('description'), title=post.make_title(result, map_name),
 			footer=f"World's Edge game {game['id']} · recorded game of {source_name}",
-			links=_links(game['id'], [source], urls), mention_ids=sorted(info['user_ids']), map_png=await starting_map(rec),
+			links=_links(game['id'], [source], urls), mention_ids=sorted(info['user_ids']), map_png=await starting_map(rec, result),
 		)
 		await _record_post(key, fp, posted)
 	finally:
