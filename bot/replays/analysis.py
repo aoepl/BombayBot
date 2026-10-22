@@ -1996,6 +1996,26 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 	return out
 
 
+def _feudal_lines(A, pid, t0, t1, army):
+	"""
+	The Feudal Age army lines in the order they were first made, up to three with 3+ units each. Men-at-Arms are
+	always included when the upgrade was researched in Feudal (a handful of them is the whole plan).
+	"""
+	first, merged = {}, Counter()
+	for a in A:
+		if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid and t0 <= a['t'] < t1:
+			n = _name('objects', a['unit_id'])
+			if n in army:
+				label = FEUDAL_NAMES.get(n, n)
+				merged[label] += a.get('amount', 1) or 1
+				first.setdefault(label, a['t'])
+	maa = any(a['a'] == 'RESEARCH' and a.get('player_id') == pid and t0 <= a['t'] < t1
+		and _name('technologies', a['technology_id']) == 'Man-at-Arms' for a in A)
+	keep = [l for l, c in merged.items() if c >= 3 or (l == 'Men-at-Arms' and maa and c >= 1)]
+	keep = sorted(keep, key=lambda l: -merged[l])[:3]
+	return sorted(keep, key=lambda l: first[l])
+
+
 def _army_between(A, pid, t0, t1):
 	""" Units queued by a player from t0 up to (not including) t1, by line. """
 	c = Counter()
@@ -2018,11 +2038,69 @@ def _top_lines(counter, minimum, names=LINE_NAMES, limit=2):
 	return [label for label, c in merged.most_common() if c >= minimum][:limit]
 
 
-def _army_lines(counter, minimum=5):
-	""" Top two unit lines, plus any siege the player made (2 or more) that isn't already listed. """
-	lines = _top_lines(counter, minimum)
+# Upgrade chains: the base unit a line is trained as, and (research, name of the upgraded line) in order. Training
+# is recorded as the base unit even after upgrades, so a stage is named by the upgrades researched by then.
+UPGRADE_NAMES = {
+	'Archer': [('Crossbowman', 'Crossbows'), ('Arbalester', 'Arbalesters')],
+	'Spearman': [('Pikeman', 'Pikemen'), ('Halberdier', 'Halberdiers')],
+	'Scout Cavalry': [('Light Cavalry', 'Light Cavalry'), ('Hussar', 'Hussars'), ('Winged Hussar', 'Winged Hussars')],
+	'Militia': [('Man-at-Arms', 'Men-at-Arms'), ('Long Swordsman', 'Long Swords'), ('Two-Handed Swordsman', 'Two-Handed Swords'),
+		('Champion', 'Champions')],
+	'Skirmisher': [('Elite Skirmisher', 'Elite Skirmishers'), ('Imperial Skirmisher', 'Imperial Skirmishers')],
+	'Knight': [('Cavalier', 'Cavaliers'), ('Paladin', 'Paladins')],
+	'Camel Rider': [('Heavy Camel Rider', 'Heavy Camels'), ('Imperial Camel Rider', 'Imperial Camels')],
+	'Cavalry Archer': [('Heavy Cavalry Archer', 'Heavy Cavalry Archers')],
+	'Eagle Scout': [('Eagle Warrior', 'Eagle Warriors'), ('Elite Eagle Warrior', 'Elite Eagles')],
+	'Battle Elephant': [('Elite Battle Elephant', 'Elite Elephants')],
+	'Steppe Lancer': [('Elite Steppe Lancer', 'Elite Steppe Lancers')],
+	'Battering Ram': [('Capped Ram', 'Capped Rams'), ('Siege Ram', 'Siege Rams')],
+	'Mangonel': [('Onager', 'Onagers'), ('Siege Onager', 'Siege Onagers')],
+	'Scorpion': [('Heavy Scorpion', 'Heavy Scorpions')],
+	'Bombard Cannon': [('Houfnice', 'Houfnices')],
+	'Galley': [('War Galley', 'War Galleys'), ('Galleon', 'Galleons')],
+	'Fire Galley': [('Fire Ship', 'Fire ships'), ('Fast Fire Ship', 'Fast Fire ships')],
+	'Demolition Raft': [('Demolition Ship', 'Demo ships'), ('Heavy Demolition Ship', 'Heavy Demo ships')],
+}
+# Names for a line before any upgrade (clearer than the old 'Scouts/Hussars' style).
+BASE_LINE_NAMES = {'Scout Cavalry': 'Scouts', 'Spearman': 'Spearmen', 'Militia': 'Militia'}
+
+
+# Technologies newer than the name table (found in recorded games; named from the unit each one upgrades to).
+TECH_NAME_FIXES = {
+	905: 'Demolition Ship', 906: 'Fishing Lines', 1392: 'Caciques', 1393: 'Curare', 1451: 'Heavy Mounted Crossbowman',
+	1452: 'Cranequins', 1454: 'Elite Varangian Guard', 1462: 'Elite Hearth Troop', 1464: 'Shield Wall',
+	1473: 'Vendel Legacy', 1482: 'Elite Jomsviking', 1483: "Northmen's Fury", 1484: 'Hamask',
+}
+
+
+def _tech_name(idx):
+	return TECH_NAME_FIXES.get(idx) or _name('technologies', idx)
+
+
+def _researched(A, pid, until):
+	""" Names of the technologies a player clicked before `until`. """
+	return {_tech_name(a['technology_id']) for a in A
+		if a['a'] == 'RESEARCH' and a.get('player_id') == pid and a['t'] < until}
+
+
+def _line_label(unit, researched):
+	""" A trained unit's line, named by its latest upgrade researched ('Archer' -> 'Crossbows'). """
+	label = BASE_LINE_NAMES.get(unit) or LINE_NAMES.get(unit, unit)
+	for tech, name in UPGRADE_NAMES.get(unit, []):
+		if tech in researched:
+			label = name
+	if unit not in UPGRADE_NAMES and f'Elite {unit}' in researched:  # unique units: 'Elite Mangudai'
+		label = f'Elite {label}'
+	return label
+
+
+def _army_lines(counter, minimum=5, researched=None):
+	""" Top two unit lines, plus any siege the player made (2 or more) that isn't already listed; each line named by
+	the upgrades researched by then when `researched` is given. """
+	names = LINE_NAMES if researched is None else {n: _line_label(n, researched) for n in counter}
+	lines = _top_lines(counter, minimum, names)
 	for n, c in counter.most_common():
-		label = LINE_NAMES.get(n, n)
+		label = names.get(n, n)
 		if n in SIEGE and c >= 2 and label not in lines:
 			lines.append(label)
 	return lines
@@ -2074,6 +2152,12 @@ def working_fishing_ships(A, pid, until, villagers=()):
 	return made, min(made, auto + len(ordered))
 
 
+# Castle Age clicked within this long of the Feudal Age click (about 4 minutes after reaching Feudal, the research
+# takes 2:10), with little Feudal army: a Fast Castle. Seen in test games: Fast Castles click up 2.4-6 minutes apart,
+# Feudal openings 10+ minutes apart.
+FAST_CASTLE_GAP = 6.5 * 60000
+
+
 def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villagers=()):
 	""" The strategy as separate parts (for stats later) plus a readable name. """
 	ages = st['ages']
@@ -2088,7 +2172,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 			and _name('objects', a['building_id']) in TOWERS and feudal <= a['t'] < (castle or end)
 			and players[base_of(a['x'], a['y'])]['team_id'] != team)
 	feudal_army = _army_between(A, pid, feudal, castle or end) if feudal else Counter()
-	feudal_units = _top_lines(feudal_army, 3, FEUDAL_NAMES)
+	feudal_units = _feudal_lines(A, pid, feudal, castle or end, feudal_army) if feudal else []
 	feudal_attacks = sum(1 for t in attack_times if feudal and feudal <= t < (castle or end))
 	feudal_attack = feudal_attacks >= 10
 
@@ -2101,17 +2185,25 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 		and (feudal_builds['Farm'] >= FEUDAL_BOOM_FARMS or feudal_builds['Town Center'] >= 1)
 
 	if forward_towers >= 2:
-		opening = "Feudal tower rush"
+		# Named with the units that came with the towers: "Feudal Men-at-Arms + archers + tower rush".
+		opening = "Feudal " + " + ".join(feudal_units + ["tower rush"])
 	elif sum(feudal_army.values()) >= 8:
 		ships = sum(n for u, n in feudal_army.items() if u in WARSHIPS)
 		if ships * 2 >= sum(feudal_army.values()):  # mostly warships: a water opening (sea fights count as attacks)
 			opening = "Feudal water: " + " + ".join(feudal_units or ["warships"])
 		else:
 			opening = "Feudal " + " + ".join(feudal_units or ["army"]) + ("" if feudal_attack else " (defensive)")
-	elif feudal_boom:
-		opening = "Feudal boom"
-	elif feudal and castle and castle - feudal <= 4 * 60000:
+	elif feudal and castle and castle - feudal <= FAST_CASTLE_GAP and not feudal_boom:
 		opening = "Fast Castle"
+	elif feudal and (castle or feudal_boom):
+		# A long Feudal Age with little army: a Feudal boom, named by what it boomed on.
+		_, feudal_fish = working_fishing_ships(A, pid, castle or end, villagers)
+		farms = feudal_builds['Farm'] >= FEUDAL_BOOM_FARMS
+		fish = feudal_fish >= FISH_BOOM_SHIPS
+		opening = ("Feudal farm + fish boom" if farms and fish else "Feudal farm boom" if farms
+			else "Feudal fish boom" if fish else "Feudal boom")
+	elif feudal:
+		opening = "No Castle Age"
 	else:
 		opening = "Standard"
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
@@ -2125,6 +2217,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	# Castle Age and Imperial Age armies, separately.
 	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
 	imperial_units = _army_lines(_army_between(A, pid, imp, end)) if imp else []
+	# The saved unit lines keep their usual names (drafting and the tech tree match on them); the strategy's name
+	# shows the upgraded forms: 'Crossbows' in Castle Age, 'Arbalesters' in Imperial.
+	castle_names = _army_lines(_army_between(A, pid, castle, imp or end), researched=_researched(A, pid, imp or end)) if castle else []
+	imperial_names = _army_lines(_army_between(A, pid, imp, end), researched=_researched(A, pid, end)) if imp else []
 	main_units = castle_units or imperial_units
 	fast_imp = bool(imp and imp < 25 * 60000)
 	# Castles seen built (units, research or enemy hits), each object once: not every placement.
@@ -2135,12 +2231,12 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	# Opening, then the boom as its own stage: "Feudal scouts + spears → farm + fish boom → Knights".
 	if opening != "Standard":
 		parts.append(opening)
-	if boom_label:
+	if boom_label and boom_label not in opening:
 		parts.append(boom_label)
-	if castle_units:
-		parts.append(" + ".join(castle_units))
-	if imperial_units and imperial_units != castle_units:
-		parts.append("Imp: " + " + ".join(imperial_units))
+	if castle_names:
+		parts.append(" + ".join(castle_names))
+	if imperial_names and imperial_names != castle_names:
+		parts.append("Imp: " + " + ".join(imperial_names))
 	extras = []
 	if fast_imp:
 		extras.append("fast Imperial")
