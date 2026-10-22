@@ -19,7 +19,9 @@ import json
 import re
 import time
 
-from nextcord import ForumChannel, DiscordException, NotFound
+from io import BytesIO
+
+from nextcord import ForumChannel, DiscordException, File, NotFound
 
 import bot
 from core.client import dc
@@ -28,7 +30,7 @@ from core.console import log
 from core.database import db
 from core.utils import get_nick
 
-from . import rec_parser, analysis, post, insights, worldsedge
+from . import rec_parser, analysis, post, insights, worldsedge, minimap
 
 # One post per game. game_key/fingerprint match insights.
 db.ensure_table(dict(
@@ -298,8 +300,29 @@ def _winner_text(result):
 	return " & ".join(p['civ'] for p in winners) + " win"
 
 
+MINIMAP = 'minimap.png'
+
+
+async def starting_map(rec, result=None):
+	""" PNG of the map at the start (resources, Town Centers, walls) and, with result, at the end, side by side,
+	for the post; or None. Never fails the upload. """
+	try:
+		return await asyncio.to_thread(minimap.render, rec, result)
+	except Exception as e:  # noqa: BLE001
+		log.error(f"Could not draw the starting map: {e}")
+		return None
+
+
+def _map_file(embed, png):
+	""" Show the starting map as the embed's image: -> the File to send with it (or None). """
+	if not png:
+		return None
+	embed.set_image(url=f'attachment://{MINIMAP}')
+	return File(BytesIO(png), filename=MINIMAP)
+
+
 async def publish(qc, result, map_name=None, lobby=None, title=None, footer=None, reply_ctx=None, reply_extra=None,
-		links=None, mention_ids=None):
+		links=None, mention_ids=None, map_png=None):
 	"""
 	Create the forum post (or, with no forum set, a message in the queue channel). The recording is never
 	attached: the post links to the official download instead.
@@ -311,6 +334,8 @@ async def publish(qc, result, map_name=None, lobby=None, title=None, footer=None
 	if mention_ids:
 		content += " " + " ".join(f"<@{u}>" for u in mention_ids)
 	extra = {}
+	if map_file := _map_file(embed, map_png):
+		extra['file'] = map_file
 
 	forum = getattr(qc.cfg, 'replay_forum', None)
 	if forum is None:
@@ -345,7 +370,7 @@ async def _render(qc, result, title, map_name=None, lobby=None, footer=None, lin
 	return post.build_embed(result, title, narrative=narrative, footer=footer, links=links)
 
 
-async def update_post(qc, row, result, title, map_name=None, footer=None, links=None):
+async def update_post(qc, row, result, title, map_name=None, footer=None, links=None, map_png=None):
 	"""
 	Re-render an existing post with a fresh analysis (new Elo links, new scoring rules).
 	Forum posts: the starter message has the thread's id. Returns True when the post was edited.
@@ -358,7 +383,14 @@ async def update_post(qc, row, result, title, map_name=None, footer=None, links=
 		else:
 			thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
 			msg = await thread.fetch_message(row['thread_id'])
-		await msg.edit(embed=embed)
+		map_file = _map_file(embed, map_png)
+		if map_file:  # replace the old picture (if any), keep any other attachment
+			keep = [a for a in msg.attachments if a.filename != MINIMAP]
+			await msg.edit(embed=embed, file=map_file, attachments=keep)
+		else:
+			if any(a.filename == MINIMAP for a in msg.attachments):
+				embed.set_image(url=f'attachment://{MINIMAP}')  # keep showing the picture already there
+			await msg.edit(embed=embed)
 		if row.get('thread_id'):
 			thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
 			if getattr(thread, 'name', title[:100]) != title[:100]:
@@ -444,7 +476,9 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 		where = f": {url}" if url else "."
 		why = (f"re-analysed with the newer bot version (v{old_version} → v{insights.ANALYSIS_VERSION})"
 			if old_version is not None and old_version < insights.ANALYSIS_VERSION else "updated with the latest Elo and stats")
-		if existing and await update_post(qc, existing, result, title, rec.get('map_name'), footer=footer, links=links):
+		map_png = await starting_map(rec, result)
+		if existing and await update_post(qc, existing, result, title, rec.get('map_name'), footer=footer, links=links,
+				map_png=map_png):
 			await ctx.success(f"This game was already posted, so the post was {why}{where}\n{report}")
 			if lookup and not links:
 				_spawn(_links_later(qc, existing, **later))
@@ -455,7 +489,7 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 	try:
 		posted = await publish(
 			qc, result, map_name=rec.get('map_name'), title=title,
-			footer=footer, reply_ctx=ctx, reply_extra=report, links=links,
+			footer=footer, reply_ctx=ctx, reply_extra=report, links=links, map_png=await starting_map(rec, result),
 		)
 		await _record_post(key, fp, posted)
 	finally:
@@ -702,7 +736,7 @@ async def _process(qc, info):
 		posted = await publish(
 			qc, result, map_name=map_name, lobby=game.get('description'), title=post.make_title(result, map_name),
 			footer=f"World's Edge game {game['id']} · recorded game of {source_name}",
-			links=_links(game['id'], [source], urls), mention_ids=sorted(info['user_ids']),
+			links=_links(game['id'], [source], urls), mention_ids=sorted(info['user_ids']), map_png=await starting_map(rec, result),
 		)
 		await _record_post(key, fp, posted)
 	finally:

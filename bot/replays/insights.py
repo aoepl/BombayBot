@@ -19,7 +19,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 59  # 59: fights in key moments told in units
+ANALYSIS_VERSION = 60  # 60: Champis and Serjeants that build aren't villagers; army sent with villagers stays army
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [

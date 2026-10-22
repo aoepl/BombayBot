@@ -184,6 +184,34 @@ def _clean(payload):
 	return out
 
 
+# Objects on the starting map in the header: a class byte (10 static ... 80 building), the owner (0 = Gaia), the object
+# type, then -1 for "not garrisoned" 4 bytes on. mgz's parse_object reads the rest (instance id and position); its
+# full header parser stops at newer game versions' fields, so the objects are found by this pattern instead.
+_OBJECT = re.compile(rb'(?=[\x0a\x14\x1e\x28\x32\x3c\x46\x50][\x00-\x08]....\xff\xff\xff\xff)', re.S)
+
+
+def map_objects(raw: bytes):
+	""" -> [[owner, instance id, object type, x, y]] of the objects on the starting map (trees, mines, animals,
+	starting Town Centers...). Empty when the header can't be read: the map picture is optional. """
+	try:
+		from mgz.fast import header as mgz_header
+		data = mgz_header.decompress(io.BytesIO(raw)).getvalue()
+	except Exception:  # noqa: BLE001
+		return []
+	seen, out = set(), []
+	for m in _OBJECT.finditer(data):
+		i = m.start()
+		if i + 31 > len(data):
+			break
+		o = mgz_header.parse_object(data, i)
+		x, y = o['position']['x'], o['position']['y']
+		if not (0 < o['instance_id'] < 10 ** 6 and 0 <= x <= 480 and 0 <= y <= 480) or o['instance_id'] in seen:
+			continue
+		seen.add(o['instance_id'])
+		out.append([data[i + 1], o['instance_id'], o['object_id'], round(x, 1), round(y, 1)])
+	return out
+
+
 def parse(data: bytes) -> dict:
 	"""
 	Returns dict(save, duration (ms), players [..], actions [{t, a, ...}], syncs [{t, <player>: {...}}], chat [...])
@@ -222,4 +250,5 @@ def parse(data: bytes) -> dict:
 			except Exception:
 				pass
 
-	return dict(save=save, map_name=map_name, started_at=started_at, duration=t, players=players, actions=actions, syncs=syncs, chat=chat)
+	return dict(save=save, map_name=map_name, started_at=started_at, duration=t, players=players, actions=actions, syncs=syncs, chat=chat,
+		map_objects=map_objects(raw))
