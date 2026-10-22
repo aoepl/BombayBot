@@ -51,6 +51,7 @@
 | /aoe names            | Show the in-game names linked to a member               |
 | /aoe stat             | A player's record from analysed games: flank/pocket, APM, results against Elo, best position/army style/strategy, individual and team luck |
 | /aoe civs             | Civ win rates from analysed games, overall or for one map, best civs by Elo range, position and map |
+| /aoe seats            | How many times each player was flank and pocket (win rate), optionally on one map or map type; with a player: their flank and pocket record by map and civ |
 | /replay auto_replay_off | Moderators: stop automatic game breakdowns of reported matches in this channel |
 | /replay auto_replay_on  | Moderators: turn automatic game breakdowns back on                      |
 | /replay auto_lookup_off | Moderators: post uploaded games without looking them up on World's Edge (no game links) |
