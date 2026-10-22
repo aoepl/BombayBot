@@ -32,6 +32,7 @@ available; balance() says how even the finished draft is. Any format works: bans
 import json
 import math
 import random
+import re
 from collections import defaultdict
 from itertools import combinations
 from dataclasses import dataclass, field
@@ -597,7 +598,7 @@ def ranked_civs():
 # ---------------------------------------------------------------- /aoe draft
 
 TEAM_CIVS, PLAYER_CIVS = 'team', 'player'  # civs per team (players sort them out) / a civ and seat for each player
-EXCLUDE_MIN, EXCLUDE_MAX = 15, 25  # civs left out at random before every draft, so drafts don't repeat
+EXCLUDE_MIN, EXCLUDE_MAX = 20, 35  # civs left out at random before every draft, so drafts don't repeat
 SEAT_PRIOR = 4  # a player's win rate in a seat starts as 4 games at 50%
 TEAM_CHOICES = 6  # civs each team gets to choose from in TEAM_CIVS mode (at least one per player)
 
@@ -672,7 +673,7 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 	"""
 	rng = rng or random.Random()
 	picks = sum(len(t) if mode == PLAYER_CIVS else max(len(t), TEAM_CHOICES) for t in teams)
-	pool, excluded = civ_pool(rng, civs, keep=picks + 2 * FIELD_SIZE)
+	pool, excluded = civ_pool(rng, civs, keep=picks + FIELD_SIZE)
 	if mode == PLAYER_CIVS:
 		slots = [assign_seats(t, records or {}, rng) for t in teams]
 	else:
@@ -686,12 +687,53 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 	made, d = simulate(model, d)
 	final, _ = _apply(d)
 	return dict(mode=mode, map=map_name, category=category, teams=final, picks=made, excluded=excluded, first=first,
-		balance=balance(model, d))
+		balance=balance(model, d), civ_count=len(civs or ranked_civs()))
+
+
+STRONG_MATCHUP = 0.53  # a matchup worth naming in a pick's reason
+GAMES_TO_TRUST = 3     # with fewer games of a civ, a reason says the pick is mostly the tech tree's guess
+
+
+def pick_reason(model: Model, res, team, slot):
+	""" One line on why a civ was picked for a slot of a civ_draft() result: its pick number, what it is good at for
+	the seat, how it did here against Elo, its best matchup against the other team's civs, and denial. """
+	s = res['teams'][team][slot]
+	seat = s.seat.lower() if s.seat else None
+	n = next((i + 1 for i, p in enumerate(res['picks']) if p['team'] == team and p['civ'] == s.civ), None)
+	pick = next((p for p in res['picks'] if p['team'] == team and p['civ'] == s.civ), {})
+	strength, n_map, n_all = model.strength(s.civ, s.seat, res['map'], res.get('category'))
+	lines = main_lines(model, s.civ, s.seat)
+	units = " and ".join(lines[:2])
+	parts = []
+	if n_all >= GAMES_TO_TRUST:
+		parts.append(f"{units}; {strength - 0.5:+.0%} against Elo in {n_all} games here" +
+			(f" ({n_map} on this map)" if n_map else ""))
+	else:
+		parts.append(f"{units} {'suit a ' + seat if seat else 'are strong'} by its tech tree"
+			+ (f" (only {n_all} game{'s' if n_all != 1 else ''} with it here)" if n_all else " (no games with it here yet)"))
+	best = None
+	for e in res['teams'][1 - team]:
+		m, _, _ = model.matchup(s.civ, s.seat, e.civ, e.seat, res['map'], res.get('category'))
+		if best is None or m > best[0]:
+			best = (m, e.civ)
+	if best and best[0] >= STRONG_MATCHUP:
+		parts.append(f"good against {best[1]} ({best[0]:.0%})")
+	if pick.get('denial', 0) >= 0.01:
+		parts.append("also kept it from the other team")
+	return (f"(pick {n}) " if n else "") + "; ".join(parts)
+
 
 
 def main_lines(model: Model, civ, seat, top=2):
-	""" The civ's top fighting unit lines for the seat (siege and monks left out), for showing with a pick. """
+	""" The civ's top fighting unit lines for the seat (siege, monks and heroes left out), for showing with a pick. """
 	army = model.army(civ, seat)
-	lines = [k for k, _ in sorted(army.items(), key=lambda kv: -kv[1])]
-	return ([k for k in lines if k not in SUPPORT_LINES] or lines)[:top]
+	lines, seen = [], set()
+	for k, _ in sorted(army.items(), key=lambda kv: -kv[1]):
+		base = re.sub(r'^(Elite|Heavy|Imperial) ', '', k)  # "Heavy Hei Guang Cavalry" is the same line as "Hei Guang Cavalry"
+		if base not in seen:
+			seen.add(base)
+			lines.append(k)
+	hero = lambda k: sum(((techtree.unit(k) or {}).get('cost') or {}).values()) >= techtree.HERO_COST  # noqa: E731
+	fighting = [k for k in lines if k not in SUPPORT_LINES and not hero(k)]
+	return (fighting or lines)[:top]
 

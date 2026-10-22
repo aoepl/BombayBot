@@ -292,7 +292,7 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
 `Prior` later.
 
 `/aoe draft` runs a whole draft for a started match, on the match's map, from the games analysed in that channel:
-* First 15-25 random ranked civs are left out, so drafts differ from match to match.
+* First 20-35 random ranked civs are left out, so drafts differ from match to match.
 * **mode team**: each team gets 6 civs to choose its players' civs from (one per seat, flanks at the ends and
   pockets between for 3+ players, then extra flank and pocket choices), judged at the team's average Elo; the
   players decide who plays which civ and where.
@@ -300,7 +300,7 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
   (from `/aoe seats`, pulled towards 50% when they have few games) add up best; even splits are random. Picks then
   also count each player's own record with the civ.
 * Teams take the best civ left in turn, A-B-B-A snake order, the team with the lower total Elo first. The post
-  shows each pick with its main units, the win chance (Elo plus civ edge) and the civs left out.
+  shows each pick, why it was picked, the win chance (Elo plus civ edge) and the civs left out.
 * One draft per match: asking again shows the same draft, and moderators can redraw it (`redraw`).
 
 Civ tech trees and unit stats come from `bot/replays/techtree.json`, built from the

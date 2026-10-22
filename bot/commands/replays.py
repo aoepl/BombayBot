@@ -200,7 +200,8 @@ async def aoe_export(ctx, map: str = None, days: int = None, details: bool = Fal
 
 
 def _draft_embed(match, res, model, games, author):
-	""" The draft as an embed: each team's civs (and seats and players in player mode), balance, civs left out. """
+	""" The draft as an embed: each team's civs (and seats and players in player mode), why each civ was picked,
+	the balance and how many civs were left out. """
 	from bot.replays import draft
 	per_player = res['mode'] == draft.PLAYER_CIVS
 	where = f"{res['map']} ({res['category']})" if res.get('category') and res['category'] != 'Other' else res['map']
@@ -209,27 +210,30 @@ def _draft_embed(match, res, model, games, author):
 		f"{draft.TEAM_CHOICES} civs for each team: choose your players' civs from them and decide who plays where.")
 	for i, team in enumerate(res['teams']):
 		t = match.teams[i]
-		players = match.teams[i]
-		elo = round(sum(match.ratings.get(p.id) or 0 for p in players) / len(players)) if players else 0
+		elo = round(sum(match.ratings.get(p.id) or 0 for p in t) / len(t)) if len(t) else 0
 		lines = []
 		for s in team:
-			units = ", ".join(draft.main_lines(model, s.civ, s.seat))
-			seat = f"{s.seat} · " if s.seat else ""
 			if per_player:
-				lines.append(f"{seat}**{s.name}** `〈{s.elo}〉` → **{s.civ}** ({units})")
+				lines.append((f"{s.seat} · " if s.seat else "") + f"**{s.name}** `〈{s.elo}〉` → **{s.civ}**")
 			else:
-				hint = f" · {s.seat.lower()} pick" if s.seat else ""
-				lines.append(f"**{s.civ}**{hint} ({units})")
+				lines.append(f"**{s.civ}**" + (f" · {s.seat.lower()}" if s.seat else ""))
 		embed.add_field(name=f"{t.emoji} {t.name} `〈{elo}〉`", value="\n".join(lines)[:1024], inline=False)
+	for i, team in enumerate(res['teams']):
+		why = [f"**{s.civ}** {draft.pick_reason(model, res, i, j)}" for j, s in enumerate(team)]
+		embed.add_field(name=f"Why these civs: {match.teams[i].name}", value="\n".join(why)[:1024], inline=False)
 	b = res['balance']
 	favoured = 0 if b['win'] >= 0.5 else 1
 	chance = b['win'] if favoured == 0 else 1 - b['win']
 	edge = b['civ_edge'] if favoured == 0 else -b['civ_edge']
-	embed.add_field(name="Balance", inline=False, value=(
+	out = res['excluded']
+	embed.add_field(name="How the draft works", inline=False, value=(
+		f"{len(out)} of the {res['civ_count']} ranked civs were left out at random first, so drafts differ from match to "
+		f"match: {', '.join(out)}.\n"
+		f"Teams then took the best civ left in turn, {match.teams[res['first']].name} first (lower Elo), in snake order. "
+		"A civ's value is how it does against Elo in this seat and on this kind of map, its matchups against the other "
+		"team's civs and what taking it denies them.\n"
 		f"{match.teams[favoured].name} {chance:.0%} to win (Elo {b['elo'] if favoured == 0 else 1 - b['elo']:.0%}, "
-		f"civs {edge:+.1%}). {match.teams[res['first']].name} picked first (lower Elo), then snake order."))
-	embed.add_field(name=f"Left out at random this time ({len(res['excluded'])})", inline=False,
-		value=", ".join(res['excluded'])[:1024] or "none")
+		f"civs {edge:+.1%}).")[:1024])
 	embed.set_footer(text=f"Drawn by {author}. From {games} analysed game{'s' if games != 1 else ''} in this channel"
 		" plus the tech trees; with few games picks lean on the tech trees.")
 	return embed
@@ -238,7 +242,7 @@ def _draft_embed(match, res, model, games, author):
 async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = False):
 	"""
 	Civ draft for your started match: civs for each team to share out (mode team), or a civ and position for every
-	player (mode player). 15-25 random civs are left out first. One draft per match; moderators can redraw.
+	player (mode player). 20-35 random civs are left out first. One draft per match; moderators can redraw.
 	"""
 	import random
 	from bot.replays import draft, insights, summaries
