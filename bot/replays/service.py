@@ -21,7 +21,7 @@ import time
 
 from io import BytesIO
 
-from nextcord import ForumChannel, DiscordException, File, NotFound
+from nextcord import AllowedMentions, ForumChannel, DiscordException, File, NotFound
 
 import bot
 from core.client import dc
@@ -329,18 +329,16 @@ def _no_map_image(embed):
 
 
 async def publish(qc, result, map_name=None, lobby=None, title=None, footer=None, reply_ctx=None, reply_extra=None,
-		links=None, mention_ids=None, map_png=None):
+		links=None, map_png=None):
 	"""
 	Create the forum post (or, with no forum set, a message in the queue channel). The recording is never
-	attached: the post links to the official download instead.
+	attached: the post links to the official download instead. Nobody is tagged: players are not notified.
 	Returns dict(channel_id, thread_id, message_id, url) describing the post.
 	"""
 	title = title or f"{map_name or 'Game'} — {_winner_text(result)}"
 	embed = await _render(qc, result, title, map_name, lobby, footer, links)
 	content = "Discuss the game here."
-	if mention_ids:
-		content += " " + " ".join(f"<@{u}>" for u in mention_ids)
-	extra = {}
+	extra = dict(allowed_mentions=AllowedMentions.none())  # never notify anyone about a replay post
 	if map_file := _map_file(map_png):
 		extra['file'] = map_file
 
@@ -741,7 +739,7 @@ async def _process(qc, info):
 		posted = await publish(
 			qc, result, map_name=map_name, lobby=game.get('description'), title=post.make_title(result, map_name),
 			footer=f"World's Edge game {game['id']} · recorded game of {source_name}",
-			links=_links(game['id'], [source], urls), mention_ids=sorted(info['user_ids']), map_png=await starting_map(rec, result),
+			links=_links(game['id'], [source], urls), map_png=await starting_map(rec, result),
 		)
 		await _record_post(key, fp, posted)
 	finally:
