@@ -2,7 +2,7 @@
 """
 Draft logic: which civ to pick next for a map, from the games the bot has analysed and the civs' tech trees.
 
-Nothing here is wired to Discord yet. With few games saved most ratings stay close to "average" on purpose:
+/aoe draft (civ_draft) uses it once a match has started. With few games saved most ratings stay close to "average" on purpose:
 every estimate is pulled towards a broader one by how few games back it up. Community votes (the civ voting
 sheet) can be plugged in later through `Prior`.
 
@@ -31,7 +31,9 @@ available; balance() says how even the finished draft is. Any format works: bans
 """
 import json
 import math
+import random
 from collections import defaultdict
+from itertools import combinations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
@@ -590,3 +592,99 @@ def fair_first_pick(teams):
 
 def ranked_civs():
 	return [c for c in techtree.civs() if c not in CHRONICLES]
+
+
+# ---------------------------------------------------------------- /aoe draft
+
+TEAM_CIVS, PLAYER_CIVS = 'team', 'player'  # civs per team (players sort them out) / a civ and seat for each player
+EXCLUDE_MIN, EXCLUDE_MAX = 15, 25  # civs left out at random before every draft, so drafts don't repeat
+SEAT_PRIOR = 4  # a player's win rate in a seat starts as 4 games at 50%
+
+
+def seat_layout(size):
+	""" Seats of a team from one end to the other: flanks at the ends, pockets between (none below 3 players). """
+	return ['Flank'] + ['Pocket'] * (size - 2) + ['Flank'] if size >= 3 else [None] * size
+
+
+def civ_pool(rng, civs=None, low=EXCLUDE_MIN, high=EXCLUDE_MAX, keep=0):
+	""" (civs to draft from, civs left out): low..high ranked civs left out at random, at least `keep` kept. """
+	civs = sorted(civs or ranked_civs())
+	k = max(0, min(rng.randint(low, high), len(civs) - keep))
+	out = set(rng.sample(civs, k))
+	return [c for c in civs if c not in out], sorted(out)
+
+
+def seat_record(record, seat):
+	""" (win rate pulled towards 50%, games) of a player in a seat; record is one summaries.seat_stats() value. """
+	st = (record or {}).get('seats', {}).get(seat)
+	if not st or not st['games']:
+		return 0.5, 0
+	return (st['wins'] + SEAT_PRIOR * 0.5) / (st['decided'] + SEAT_PRIOR), st['games']
+
+
+def assign_seats(team, records, rng):
+	"""
+	Seats for one team's players (dicts of name, elo, user_id): the split into flanks and pockets where the
+	players' own records in those seats add up best; even splits are decided at random. -> Slots, end to end.
+	"""
+	layout = seat_layout(len(team))
+	if len(team) < 3:
+		return [Slot(seat, p.get('elo'), p.get('name'), user_id=p.get('user_id')) for seat, p in zip(layout, team)]
+	best = None
+	for flanks in combinations(range(len(team)), 2):
+		score = sum(seat_record(records.get(p.get('user_id')), 'Flank' if i in flanks else 'Pocket')[0]
+			for i, p in enumerate(team))
+		key = (round(score, 6), rng.random())
+		if best is None or key > best[0]:
+			best = (key, flanks)
+	flanks = [team[i] for i in best[1]]
+	pockets = [p for i, p in enumerate(team) if i not in best[1]]
+	return [Slot(seat, p.get('elo'), p.get('name'), user_id=p.get('user_id'))
+		for seat, p in zip(layout, [flanks[0], *pockets, flanks[1]])]
+
+
+def pick_order(sizes, first):
+	""" Snake order (A-B-B-A-A-B...) for teams of these sizes; a full team is skipped. """
+	order, counts, t, step = [], [0, 0], first, 0
+	while len(order) < sum(sizes):
+		if counts[t] < sizes[t]:
+			order.append(t)
+			counts[t] += 1
+		step += 1
+		if step % 2 == 1:  # A, then B B, then A A ...
+			t = 1 - t
+	return order
+
+
+def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=None, records=None, civs=None):
+	"""
+	A whole draft for a started match. teams: two lists of dicts(name, elo, user_id). In TEAM_CIVS mode each team
+	gets civs for its seats (team average Elo, no player), to share out as they like; in PLAYER_CIVS mode every
+	player gets a seat (assign_seats, from their flank/pocket records) and a civ. Both teams take the best civ
+	left in turn (snake order, the lower total Elo first) from the civs not left out at random.
+	-> dict(mode, map, category, teams (Slots with civs), picks, excluded, first, balance)
+	"""
+	rng = rng or random.Random()
+	pool, excluded = civ_pool(rng, civs, keep=sum(len(t) for t in teams) + 2 * FIELD_SIZE)
+	if mode == PLAYER_CIVS:
+		slots = [assign_seats(t, records or {}, rng) for t in teams]
+	else:
+		slots = []
+		for t in teams:
+			elos = [p['elo'] for p in t if p.get('elo') is not None]
+			avg = round(sum(elos) / len(elos)) if elos else None
+			slots.append([Slot(seat, avg) for seat in seat_layout(len(t))])
+	first = fair_first_pick(slots)
+	d = Draft(map_name, category, pool, slots, pick_order([len(t) for t in slots], first))
+	made, d = simulate(model, d)
+	final, _ = _apply(d)
+	return dict(mode=mode, map=map_name, category=category, teams=final, picks=made, excluded=excluded, first=first,
+		balance=balance(model, d))
+
+
+def main_lines(model: Model, civ, seat, top=2):
+	""" The civ's top fighting unit lines for the seat (siege and monks left out), for showing with a pick. """
+	army = model.army(civ, seat)
+	lines = [k for k, _ in sorted(army.items(), key=lambda kv: -kv[1])]
+	return ([k for k in lines if k not in SUPPORT_LINES] or lines)[:top]
+
