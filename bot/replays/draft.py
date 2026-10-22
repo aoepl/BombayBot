@@ -882,7 +882,7 @@ def ranked_civs():
 # ---------------------------------------------------------------- /aoe draft
 
 TEAM_CIVS, PLAYER_CIVS = 'team', 'player'  # civs per team (players sort them out) / a civ and seat for each player
-EXCLUDE_MIN, EXCLUDE_MAX = 25, 35  # civs left out at random before every draft, so drafts don't repeat
+EXCLUDE_MIN, EXCLUDE_MAX = 35, 35  # civs left out at random before every draft, so drafts don't repeat
 SEAT_PRIOR = 4  # a player's win rate in a seat starts as 4 games at 50%
 TEAM_CHOICES = 6  # civs each team gets to choose from in TEAM_CIVS mode (at least one per player)
 

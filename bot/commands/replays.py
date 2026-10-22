@@ -259,7 +259,7 @@ def _draft_embed(match, res, model, games, author):
 async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = False):
 	"""
 	Civ draft for your started match: civs for each team to share out (mode team), or a civ and position for every
-	player (mode player). 25-35 random civs are left out first. One draft per match; moderators can redraw.
+	player (mode player). 35 random civs are left out first. One draft per match; moderators can redraw.
 	"""
 	import random
 	from bot.replays import draft, insights, summaries

@@ -292,7 +292,7 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
 `Prior` later.
 
 `/aoe draft` runs a whole draft for a started match, on the match's map, from the games analysed in that channel:
-* First 25-35 random ranked civs are left out, so drafts differ from match to match.
+* First 35 random ranked civs are left out, so drafts differ from match to match.
 * **mode team**: each team gets 6 civs to choose its players' civs from (one per seat, flanks at the ends and
   pockets between for 3+ players, then extra flank and pocket choices), judged at the team's average Elo; the
   players decide who plays which civ and where.
