@@ -786,6 +786,16 @@ async def _aoe_strats(
 ): await run_slash(bot.commands.aoe_strats, interaction=interaction, player=player)
 
 
+@groups.aoe.subcommand(name='export', description='Moderators: download every analysed game here as one JSON file for an AI.')
+async def _aoe_export(
+		interaction: Interaction,
+		map: str = SlashOption(required=False, description="Only this map or map type (e.g. Arena, Closed)."),
+		days: int = SlashOption(required=False, description="Only games from the last this many days."),
+		details: bool = SlashOption(required=False, default=False,
+			description="Also include each player's full score breakdown (bigger file).")
+): await run_slash(bot.commands.aoe_export, interaction=interaction, map=map, days=days, details=details)
+
+
 @groups.aoe.subcommand(name='civs', description='Civ win rates from analysed games, overall or on one map.')
 async def _aoe_civs(
 		interaction: Interaction,

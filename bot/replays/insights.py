@@ -19,7 +19,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 57
+ANALYSIS_VERSION = 58  # 57: upgraded unit names; 58: lanes saved for /aoe export
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -106,6 +106,44 @@ db.ensure_table(dict(
 		dict(cname="b_killed", ctype=db.types.int),
 		dict(cname="a_share", ctype=db.types.float),
 		dict(cname="expected", ctype=db.types.float),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["game_key", "idx"]
+))
+
+# One row per pair of direct opponents (flank vs flank, pocket vs pocket in 4v4): how their head-to-head went.
+db.ensure_table(dict(
+	tname="aoe_lanes",
+	columns=[
+		dict(cname="game_key", ctype=db.types.str),
+		dict(cname="idx", ctype=db.types.int),
+		dict(cname="map_name", ctype=db.types.str),
+		dict(cname="map_category", ctype=db.types.str),
+		dict(cname="team_size", ctype=db.types.int),
+		dict(cname="seat", ctype=db.types.str),
+		dict(cname="a_name", ctype=db.types.str),
+		dict(cname="a_user_id", ctype=db.types.int),
+		dict(cname="a_civ", ctype=db.types.str),
+		dict(cname="a_seat", ctype=db.types.str),
+		dict(cname="a_elo", ctype=db.types.int),
+		dict(cname="a_won", ctype=db.types.bool),
+		dict(cname="b_name", ctype=db.types.str),
+		dict(cname="b_user_id", ctype=db.types.int),
+		dict(cname="b_civ", ctype=db.types.str),
+		dict(cname="b_seat", ctype=db.types.str),
+		dict(cname="b_elo", ctype=db.types.int),
+		dict(cname="b_won", ctype=db.types.bool),
+		dict(cname="a_army_killed", ctype=db.types.int),
+		dict(cname="b_army_killed", ctype=db.types.int),
+		dict(cname="a_villagers_killed", ctype=db.types.int),
+		dict(cname="b_villagers_killed", ctype=db.types.int),
+		dict(cname="a_base_lost", ctype=db.types.bool),
+		dict(cname="b_base_lost", ctype=db.types.bool),
+		dict(cname="a_castle_s", ctype=db.types.int),
+		dict(cname="b_castle_s", ctype=db.types.int),
+		dict(cname="a_overall", ctype=db.types.float),
+		dict(cname="b_overall", ctype=db.types.float),
+		dict(cname="edge", ctype=db.types.int),
 		dict(cname="at", ctype=db.types.int)
 	],
 	primary_keys=["game_key", "idx"]
@@ -261,6 +299,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 					await db.delete('aoe_game_players', where=dict(game_key=other['game_key']))
 					await db.delete('aoe_matchups', where=dict(game_key=other['game_key']))
 					await db.delete('aoe_fights', where=dict(game_key=other['game_key']))
+					await db.delete('aoe_lanes', where=dict(game_key=other['game_key']))
 					await db.delete('aoe_games', where=dict(game_key=other['game_key']))
 				else:
 					key = other['game_key']
@@ -363,6 +402,24 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 		await db.delete('aoe_fights', where=dict(game_key=key))
 		if fights:
 			await db.insert_many('aoe_fights', fights)
+		# Head-to-head of direct opponents.
+		lanes = []
+		for i, ln in enumerate(result.get('lanes', [])):
+			a, b = players[ln['a']], players[ln['b']]
+			sa, sb = stats[ln['a']], stats[ln['b']]
+			lanes.append(dict(
+				game_key=key, idx=i, map_name=map_name, map_category=category, team_size=team_size, seat=a.get('seat'),
+				a_name=a['name'], a_user_id=a.get('user_id'), a_civ=a['civ'], a_seat=a.get('seat'), a_elo=a.get('elo'), a_won=a['won'],
+				b_name=b['name'], b_user_id=b.get('user_id'), b_civ=b['civ'], b_seat=b.get('seat'), b_elo=b.get('elo'), b_won=b['won'],
+				a_army_killed=ln['a_army_killed'], b_army_killed=ln['b_army_killed'],
+				a_villagers_killed=ln['a_villagers_killed'], b_villagers_killed=ln['b_villagers_killed'],
+				a_base_lost=ln['a_base_lost'], b_base_lost=ln['b_base_lost'],
+				a_castle_s=_secs(sa['ages'].get('Castle Age')), b_castle_s=_secs(sb['ages'].get('Castle Age')),
+				a_overall=sa['scores']['overall'], b_overall=sb['scores']['overall'], edge=ln['edge'], at=now
+			))
+		await db.delete('aoe_lanes', where=dict(game_key=key))
+		if lanes:
+			await db.insert_many('aoe_lanes', lanes)
 		log.info(f"Saved replay insights for {key}: {len(rows)} players on {map_name} ({category}).")
 		return key
 	except Exception as e:
