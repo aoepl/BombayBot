@@ -1,6 +1,8 @@
-__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain']
+__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain', 'aoe_export']
 
-from nextcord import Attachment, Member, Embed, ForumChannel
+from io import BytesIO
+
+from nextcord import Attachment, Member, Embed, ForumChannel, File
 
 from core.utils import get_nick
 
@@ -153,3 +155,17 @@ async def aoe_explain(ctx, *args):
 	for i, embeds in enumerate(messages):
 		await ctx.message.channel.send(content=f"**{title}**" if i == 0 else None, embeds=embeds,
 			reference=ctx.message if i == 0 else None)
+
+
+async def aoe_export(ctx, map: str = None, days: int = None, details: bool = False):
+	""" Moderators: one JSON file of every analysed game in this channel (game cards for an AI), optionally filtered. """
+	ctx.check_perms(ctx.Perms.MODERATOR)
+	from bot.replays import export
+	cards = await export.load_cards(ctx.qc.id, map, days, details)
+	if not cards:
+		raise bot.Exc.NotFoundError("No analysed games" + (f" on {map}" if map else "") +
+			(f" in the last {days} days" if days else "") + " in this channel yet.")
+	data, name = export.export_file(cards, getattr(ctx.channel, 'name', None), dict(map=map, days=days, details=details or None))
+	size = f"{len(data) / 1024:.0f} KB" if len(data) < 1024 * 1024 else f"{len(data) / 1024 / 1024:.1f} MB"
+	await ctx.reply(content=f"{len(cards)} analysed game{'s' if len(cards) != 1 else ''} ({size}). Upload the file to an AI "
+		"and ask, e.g. which civs do best per map type, seat and Elo.", file=File(BytesIO(data), filename=name))
