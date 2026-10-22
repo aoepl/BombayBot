@@ -81,7 +81,8 @@ def render(rec, result=None, dpi=120):
 	panels = [('Start', start)]
 	if result:
 		end = _end(rec, result)
-		end['towns'] = start['towns']  # names where each player started
+		end['towns'] = start['towns']  # names where each player started ...
+		end['towns_lost'] = end.pop('lost_towns')  # ... without the Town Center when it was destroyed
 		panels.append((f"End · {_clock(result['duration'])}", end))
 	fig = Figure(figsize=(8.4 * len(panels) / 1.55 + .6, 5.4), dpi=dpi)
 	FigureCanvasAgg(fig)
@@ -102,7 +103,8 @@ def render(rec, result=None, dpi=120):
 			fig.gca().scatter([], [], s=14, c=grey, marker='o', edgecolors='#2a241b', linewidths=.5),
 			fig.gca().scatter([], [], s=4, c=grey, marker='o', linewidths=0)]
 		handles.append(fig.gca().scatter([], [], s=24, c=STYLE['gold'][0], marker='o', alpha=.3, linewidths=0))
-		labels += ['Buildings', 'Army (last 3 min)', 'Villagers', 'Mined from (end)']
+		handles.append(fig.gca().scatter([], [], s=40, c=grey, marker='X', edgecolors='#2a241b', linewidths=.6))
+		labels += ['Buildings', 'Army (last 3 min)', 'Villagers', 'Mined from (end)', 'Town Center lost']
 	fig.legend(handles, labels, loc='lower center', ncol=len(labels), frameon=False, fontsize=8.5,
 		labelcolor='#dbdee1', handletextpad=.2, columnspacing=1.1)
 	buf = io.BytesIO()
@@ -178,7 +180,8 @@ def _end(rec, result):
 	builders = {i for a in actions if a['a'] in ('BUILD', 'WALL', 'REPAIR') for i in a.get('object_ids') or []}
 	units = [(p, x, y, i in builders) for i, (t, p, x, y) in last.items() if t >= end - END_RECENT]
 	points, faded = _resources_left(rec, actions)
-	return dict(buildings=buildings, lines=lines, units=units, points=points, faded=faded)
+	lost = towns_lost(rec, actions, players, end)
+	return dict(buildings=buildings, lines=lines, units=units, points=points, faded=faded, lost_towns=lost)
 
 
 HIT_GONE = 60000   # enemies stopped hitting a building this long before the end ...
@@ -224,9 +227,7 @@ def _gone_buildings(actions, players, buildings, end):
 			continue
 		t_last, attacker = enemy[-1]
 		k = building_at(*where[tg], attacker, t_last)
-		owner = buildings[k][0]
-		own_later = any(t > t_last and team.get(p) == team.get(owner) for t, p in hs) or used.get(tg, 0) > t_last
-		if end - t_last >= HIT_GONE and not own_later:
+		if _lost(hs, used.get(tg), buildings[k][0], team, end):
 			out.add(k)
 	for a in actions:
 		if a['a'] == 'DELETE':
@@ -236,6 +237,40 @@ def _gone_buildings(actions, players, buildings, end):
 					if k is not None and buildings[k][0] == a.get('player_id'):
 						out.add(k)
 	return out
+
+
+USED_AFTER = 180000   # an attacked building its owner kept using for this long after the last hit still stood
+QUIET_END = 300000    # ... or one still used in the game's last 5 minutes
+
+
+def _lost(hits, last_used, owner, team, end):
+	"""
+	Was an attacked building destroyed? hits: [(t, player)] orders aimed at it. Yes when enemies stopped hitting it a
+	minute or more before the end, the owner's team didn't aim at it after that (repairs), and the owner stopped
+	using it (training, research, gather point) within 3 minutes of the last hit and not in the last 5 minutes.
+	"""
+	enemy = [t for t, p in hits if team.get(p) != team.get(owner)]
+	if not enemy:
+		return False
+	t_last = enemy[-1]
+	if end - t_last < HIT_GONE or any(t > t_last and team.get(p) == team.get(owner) for t, p in hits):
+		return False
+	return last_used is None or (last_used <= t_last + USED_AFTER and end - last_used >= QUIET_END)
+
+
+def towns_lost(rec, actions, players, end):
+	""" Players whose starting Town Center (from the header) was destroyed, by the same rule as other buildings. """
+	team = {p: v.get('team_id', p) for p, v in players.items()}
+	tcs = {inst: owner for owner, inst, t, x, y in rec.get('map_objects') or [] if t == TOWN_CENTER and owner in players}
+	hits, used = {i: [] for i in tcs}, {}
+	for a in actions:
+		if a['a'] == 'ORDER' and a.get('target_id') in tcs and a.get('player_id') in players:
+			hits[a['target_id']].append((a['t'], a['player_id']))
+		if a['a'] in ('DE_QUEUE', 'RESEARCH', 'GATHER_POINT', 'DE_MULTI_GATHERPOINT'):
+			for i in a.get('object_ids') or []:
+				if i in tcs:
+					used[i] = a['t']
+	return {owner for i, owner in tcs.items() if _lost(hits[i], used.get(i), owner, team, end)}
 
 
 def _resources_left(rec, actions):
@@ -297,7 +332,10 @@ def _draw(ax, rec, layers, side):
 	outline = [patheffects.withStroke(linewidth=3, foreground='#fffaf0')]
 	for number, xy in layers.get('towns', {}).items():
 		xs, ys = _turn([xy])
-		ax.scatter(xs, ys, s=150, c=_colour(players[number]), marker='s', edgecolors='#2a241b', linewidths=1.2, zorder=3)
+		if number in layers.get('towns_lost', ()):  # destroyed: a cross where it stood
+			ax.scatter(xs, ys, s=110, c=_colour(players[number]), marker='X', edgecolors='#2a241b', linewidths=.8, zorder=3)
+		else:
+			ax.scatter(xs, ys, s=150, c=_colour(players[number]), marker='s', edgecolors='#2a241b', linewidths=1.2, zorder=3)
 		ax.annotate(players[number]['name'], (xs[0], ys[0]), xytext=(0, 9), textcoords='offset points', ha='center',
 			fontsize=9, fontweight='bold', color='#2a241b', path_effects=outline, zorder=5)
 	ax.set_aspect('equal')
