@@ -735,9 +735,12 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p, (diff, size) in fight_vs_elo(players, fights).items():
 		stats[p]['fight_vs_elo'], stats[p]['fight_value'] = diff, size
 
+	# ---- head-to-head results of direct opponents (flank vs flank, pocket vs pocket in 4v4)
+	lanes = lane_results(players, stats, direct_opponents(players, press_matrix, vest, pos), pair_kills(players, army), vest)
+
 	return dict(
 		duration=end, players=players, stats=stats, castles=castles, water_weight=water, base_kills=base_kills,
-		fights=fights,
+		fights=fights, lanes=lanes,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
 		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end},
 			army, vest, A, end),
@@ -1316,6 +1319,33 @@ def opponent_timings(players, stats, exec_parts, clicks, press_matrix, vest, pos
 				if exec_parts[idx][e] > exec_parts[idx][p]:
 					exec_parts[idx][p] = exec_parts[idx][e]
 					notes.append(f"{age}: scored like direct opponent {players[e]['name']}, who aged up sooner but lost their base")
+
+
+LANE_VILLAGER_VALUE = 100   # a villager killed in the head-to-head counts like 100 army value
+LANE_BASE_LOST = 3000       # losing your base counts like 3000 army value against you
+
+
+def lane_results(players, stats, opponents, pair, vest):
+	"""
+	Head-to-head result of each pair of direct opponents: [dict(a, b, a/b villagers and army value killed of the
+	other, a/b base lost, edge)]. edge > 0 means a came out ahead: army value killed minus lost, villagers killed at
+	LANE_VILLAGER_VALUE, a lost base at LANE_BASE_LOST, all between the two.
+	"""
+	out, seen = [], set()
+	for a, b in opponents.items():
+		if (b, a) in seen or (a, b) in seen:
+			continue
+		seen.add((a, b))
+		army_a = sum(pair[(a, b)].values()) if (a, b) in pair else 0.0  # a killed of b
+		army_b = sum(pair[(b, a)].values()) if (b, a) in pair else 0.0
+		vill_a = vest[b]['killers'].get(a, 0) if vest.get(b) else 0     # villagers a killed of b
+		vill_b = vest[a]['killers'].get(b, 0) if vest.get(a) else 0
+		lost_a, lost_b = bool(stats[a].get('base_lost')), bool(stats[b].get('base_lost'))
+		edge = (army_a - army_b) + LANE_VILLAGER_VALUE * (vill_a - vill_b) + LANE_BASE_LOST * (int(lost_b) - int(lost_a))
+		out.append(dict(a=a, b=b, a_army_killed=round(army_a), b_army_killed=round(army_b),
+			a_villagers_killed=round(vill_a), b_villagers_killed=round(vill_b), a_base_lost=lost_a, b_base_lost=lost_b,
+			edge=round(edge)))
+	return out
 
 
 def several_enemies(A, players, army, villagers, end):
