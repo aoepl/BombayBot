@@ -48,14 +48,12 @@ def army_style(row):
 def strategy_key(row):
 	""" The opening plus the boom, e.g. "Fast Castle, farm boom" (comparable across games). """
 	parts = [row.get('opening') or 'Standard']
-	if row.get('feudal_boom'):
+	if row.get('feudal_boom') and 'boom' not in parts[0]:
 		parts[0] = 'Feudal boom'
-	if row.get('boom') and row.get('fish_boom'):
-		parts.append('farm + fish boom')
-	elif row.get('fish_boom'):
-		parts.append('fish boom')
-	elif row.get('boom'):
-		parts.append('farm boom')
+	boom = ('farm + fish boom' if row.get('boom') and row.get('fish_boom') else 'fish boom' if row.get('fish_boom')
+		else 'farm boom' if row.get('boom') else '')
+	if boom and boom not in parts[0]:  # "Feudal fish boom" already says it
+		parts.append(boom)
 	return ", ".join(parts)
 
 
