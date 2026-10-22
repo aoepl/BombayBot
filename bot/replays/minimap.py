@@ -101,7 +101,8 @@ def render(rec, result=None, dpi=120):
 		handles += [fig.gca().scatter([], [], s=26, c=grey, marker='s', edgecolors='#2a241b', linewidths=.6),
 			fig.gca().scatter([], [], s=14, c=grey, marker='o', edgecolors='#2a241b', linewidths=.5),
 			fig.gca().scatter([], [], s=4, c=grey, marker='o', linewidths=0)]
-		labels += ['Buildings', 'Army (last 3 min)', 'Villagers']
+		handles.append(fig.gca().scatter([], [], s=24, c=STYLE['gold'][0], marker='o', alpha=.3, linewidths=0))
+		labels += ['Buildings', 'Army (last 3 min)', 'Villagers', 'Mined from (end)']
 	fig.legend(handles, labels, loc='lower center', ncol=len(labels), frameon=False, fontsize=8.5,
 		labelcolor='#dbdee1', handletextpad=.2, columnspacing=1.1)
 	buf = io.BytesIO()
@@ -142,33 +143,123 @@ def _start(rec):
 
 
 def _end(rec, result):
-	""" Layers of the end of the game: buildings placed, walls, units' last positions, and where each player started. """
+	"""
+	Layers of the end of the game, estimated from the commands (the recording has no map state):
+	- buildings placed, without the ones destroyed or deleted (see _gone_buildings) and castles never seen built;
+	- walls; units where they were last sent, if they got an order in the last 3 minutes;
+	- resources: trees chopped (clicked, and the trees next to them) and hunt, sheep and relics taken are gone;
+	  gold, stone and berry piles that were gathered from are drawn faded (how much is left can't be told).
+	"""
 	names = reference().get('objects', {})
 	players = {p['number']: p for p in rec.get('players') or []}
 	end = result['duration']
-	# Castles lost, deleted, or never seen built (placed, maybe never finished) aren't standing at the end.
+	actions = [a for a in rec.get('actions') or [] if a['t'] <= end]
 	gone = [(c['player'], c['x'], c['y']) for c in result.get('castles') or [] if c.get('status') in ('lost', 'deleted', 'unclear')]
-	buildings = []  # (player, x, y, name)
+	buildings = []  # [player, x, y, name, t placed]
 	lines = []      # (player, x0, y0, x1, y1, name)
 	last = {}       # unit -> (t, player, x, y)
-	for a in rec.get('actions') or []:
+	for a in actions:
 		p = a.get('player_id')
-		if p not in players or a['t'] > end:
+		if p not in players:
 			continue
 		x, y = a.get('x'), a.get('y')
 		if a['a'] == 'BUILD' and x and x > 0:
 			name = names.get(str(a.get('building_id'))) or ''
 			buildings = [b for b in buildings if not (b[0] == p and abs(b[1] - x) < SAME_SPOT and abs(b[2] - y) < SAME_SPOT)]
-			buildings.append((p, x, y, name))
+			buildings.append((p, x, y, name, a['t']))
 		elif a['a'] == 'WALL' and x and x > 0 and a.get('x_end') is not None:
 			lines.append((p, x, y, a['x_end'], a['y_end'], names.get(str(a.get('building_id'))) or ''))
 		if a['a'] in UNIT_COMMANDS and x and x > 0:
 			for i in a.get('object_ids') or []:
 				last[i] = (a['t'], p, x, y)
-	buildings = [b for b in buildings if not any(g[0] == b[0] and abs(g[1] - b[1]) < 3 and abs(g[2] - b[2]) < 3 for g in gone)]
-	builders = {i for a in rec.get('actions') or [] if a['a'] in ('BUILD', 'WALL', 'REPAIR') for i in a.get('object_ids') or []}
+	destroyed = _gone_buildings(actions, players, buildings, end) | {
+		k for k, b in enumerate(buildings) if any(g[0] == b[0] and abs(g[1] - b[1]) < 3 and abs(g[2] - b[2]) < 3 for g in gone)}
+	buildings = [b[:4] for k, b in enumerate(buildings) if k not in destroyed]
+	builders = {i for a in actions if a['a'] in ('BUILD', 'WALL', 'REPAIR') for i in a.get('object_ids') or []}
 	units = [(p, x, y, i in builders) for i, (t, p, x, y) in last.items() if t >= end - END_RECENT]
-	return dict(buildings=buildings, lines=lines, units=units)
+	points, faded = _resources_left(rec, actions)
+	return dict(buildings=buildings, lines=lines, units=units, points=points, faded=faded)
+
+
+HIT_GONE = 60000   # enemies stopped hitting a building this long before the end ...
+NEAR_SPOT = 2.5    # ... and it stood within this many tiles of the target's position: destroyed
+CHOP = 2.5         # tiles around a clicked tree that were chopped too
+PILE = 2.2         # tiles between tiles of one gold, stone or berry pile
+
+
+def _gone_buildings(actions, players, buildings, end):
+	"""
+	Indexes of buildings destroyed or deleted. Attack orders carry the target's id and position: a target nobody
+	ever gave a unit order to is a building (or wall); the building placed at that spot (by an enemy of the
+	attacker, before the attack) is destroyed when the attacks on it stopped at least a minute before the end and
+	its owner never used it again (training, research, gather point, own units sent into it). Deleted buildings
+	are gone too, when their position is known from an order aimed at them.
+	"""
+	team = {p: v.get('team_id', p) for p, v in players.items()}
+	units = {i for a in actions if a['a'] in UNIT_COMMANDS | {'STANCE', 'FORMATION', 'FOLLOW', 'GUARD'}
+		for i in a.get('object_ids') or []}
+	where, hits, used = {}, {}, {}
+	for a in actions:
+		p, tg = a.get('player_id'), a.get('target_id') or 0
+		if a['a'] in ('DE_QUEUE', 'RESEARCH', 'GATHER_POINT', 'DE_MULTI_GATHERPOINT'):
+			for i in a.get('object_ids') or []:
+				used[i] = a['t']
+		if a['a'] != 'ORDER' or tg <= 0 or tg in units or p not in players or not a.get('x'):
+			continue
+		where[tg] = (a['x'], a['y'])
+		hits.setdefault(tg, []).append((a['t'], p))
+
+	def building_at(x, y, attacker, t):
+		best = None
+		for k, (o, bx, by, _, t0) in enumerate(buildings):
+			if t0 <= t and team.get(o) != team.get(attacker) and abs(bx - x) <= NEAR_SPOT and abs(by - y) <= NEAR_SPOT:
+				if best is None or (bx - x) ** 2 + (by - y) ** 2 < (buildings[best][1] - x) ** 2 + (buildings[best][2] - y) ** 2:
+					best = k
+		return best
+
+	out = set()
+	for tg, hs in hits.items():
+		enemy = [(t, p) for t, p in hs if building_at(*where[tg], p, t) is not None]
+		if not enemy:
+			continue
+		t_last, attacker = enemy[-1]
+		k = building_at(*where[tg], attacker, t_last)
+		owner = buildings[k][0]
+		own_later = any(t > t_last and team.get(p) == team.get(owner) for t, p in hs) or used.get(tg, 0) > t_last
+		if end - t_last >= HIT_GONE and not own_later:
+			out.add(k)
+	for a in actions:
+		if a['a'] == 'DELETE':
+			for i in a.get('object_ids') or []:
+				if i in where and i not in units:
+					k = building_at(*where[i], -1, a['t'])
+					if k is not None and buildings[k][0] == a.get('player_id'):
+						out.add(k)
+	return out
+
+
+def _resources_left(rec, actions):
+	""" -> ({kind: [(x, y)]} still there, {kind: [(x, y)]} gathered from) at the end, estimated from the clicks. """
+	targeted, taken = set(), set()
+	for a in actions:
+		if a.get('target_id'):
+			targeted.add(a['target_id'])
+		taken.update(a.get('object_ids') or [])  # sheep are commanded by whoever has them
+	gaia = [(inst, kind_of(t), x, y) for owner, inst, t, x, y in rec.get('map_objects') or [] if owner == 0]
+	gaia = [g for g in gaia if g[1]]
+	chopped = [(x, y) for inst, kind, x, y in gaia if kind == 'tree' and inst in targeted]
+	mined = [(kind, x, y) for inst, kind, x, y in gaia if kind in ('gold', 'stone', 'berries') and inst in targeted]
+	left, faded = {}, {}
+	for inst, kind, x, y in gaia:
+		if kind in ('hunt', 'livestock', 'relic') and (inst in targeted or inst in taken):
+			continue
+		if kind == 'tree' and any(abs(cx - x) <= CHOP and abs(cy - y) <= CHOP for cx, cy in chopped):
+			continue
+		if kind in ('gold', 'stone', 'berries') and any(k == kind and abs(mx - x) <= PILE and abs(my - y) <= PILE for k, mx, my in mined):
+			faded.setdefault(kind, []).append((x, y))
+			continue
+		left.setdefault(kind, []).append((x, y))
+	return left, faded
 
 
 def _draw(ax, rec, layers, side):
@@ -184,6 +275,9 @@ def _draw(ax, rec, layers, side):
 			edge_colour = '#2a241b' if kind in ('livestock', 'relic') else 'none'
 			ax.scatter(xs, ys, s=area, c=colour, marker=marker, alpha=alpha, linewidths=.5 if edge_colour != 'none' else 0,
 				edgecolors=edge_colour, zorder=1)
+	for kind, pts in layers.get('faded', {}).items():
+		xs, ys = _turn(pts)
+		ax.scatter(xs, ys, s=STYLE[kind][2], c=STYLE[kind][0], marker=STYLE[kind][1], alpha=.3, linewidths=0, zorder=1)
 	for number, pts in layers.get('wall_dots', {}).items():
 		xs, ys = _turn(pts)
 		ax.scatter(xs, ys, s=3, c=_colour(players[number]), marker='s', linewidths=0, zorder=2)
