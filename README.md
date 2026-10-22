@@ -47,6 +47,12 @@ Reports over the games analysed in the queue channel (uploads and automatic brea
 * `/aoe civs [map]`: win rate of every civ, overall or on one map (name or type, e.g. `Arena`, `Golden Lakes`,
   `Closed`), and the best civs (2+ games) by BombayBot Elo range (under 1400, 1400–1599, 1600–1799, 1800+), by
   position (flank, pocket) and by map.
+* `/aoe export [map] [days] [details]` (moderators): one JSON file of every analysed game in the channel, to give an
+  AI, e.g. to ask which civs do best per map type, seat and Elo. Each game is a "card" with its players (civ, seat,
+  team, result, Elo and the gap to it, strategy, unit lines, age-up times, villagers, scores and their parts, army
+  and bonus figures), head-to-head results of direct opponents, lost bases and fights (units each side fielded and
+  the result against Elo). The file starts with a short guide to the fields. `map` keeps one map or map type,
+  `days` only recent games, `details` adds each player's full score breakdown. Bigger than 8 MB, it is gzipped.
 * **Explain analysis**: right-click (or long-press) a game analysis post → Apps → Explain analysis. It works on
   the post or on any message in its thread, including in the replay forum. The bot replies with why each player
   got each score:
