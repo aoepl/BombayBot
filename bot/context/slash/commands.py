@@ -803,6 +803,14 @@ async def _aoe_civs(
 ): await run_slash(bot.commands.aoe_civs, interaction=interaction, map=map)
 
 
+@groups.aoe.subcommand(name='seats', description='How often each player was flank and pocket, with win rates by map and civ.')
+async def _aoe_seats(
+		interaction: Interaction,
+		player: Member = SlashOption(required=False, verify=False, description="One player's record by map and civ."),
+		map: str = SlashOption(required=False, description="Map name or type (e.g. Arena, Golden Lakes, Closed).")
+): await run_slash(bot.commands.aoe_seats, interaction=interaction, player=player, map=map)
+
+
 # Right-click (or long-press) an analysis post → Apps → Explain analysis. Works in forum threads too, which are not
 # queue channels, so it does not go through run_slash.
 @dc.message_command(name="Explain analysis", **guild_kwargs)

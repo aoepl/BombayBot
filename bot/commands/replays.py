@@ -1,4 +1,4 @@
-__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain', 'aoe_export']
+__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain', 'aoe_export', 'aoe_seats']
 
 from io import BytesIO
 
@@ -125,6 +125,33 @@ async def aoe_civs(ctx, map: str = None):
 		embed.add_field(name=name, value=value[:1024], inline=False)
 	embed.set_footer(text=f"{c['games']} analysed games in this channel. Best lists need {summaries.MIN_CIV_GAMES}+ games "
 		"with a civ; win rate (games).")
+	await ctx.reply(embed=embed)
+
+
+async def aoe_seats(ctx, player: Member = None, map: str = None):
+	""" How often each player was flank and pocket (win rate), or one player's record by map and civ. """
+	from bot.replays import summaries
+	stats = summaries.seat_stats(await summaries.load_rows(ctx.qc.id), map)
+	where = f" on {map}" if map else ""
+	if not stats:
+		raise bot.Exc.NotFoundError(f"No analysed team games{where} in this channel yet.")
+	if player:
+		p = stats.get(player.id)
+		if not p:
+			raise bot.Exc.NotFoundError(f"No analysed team games{where} for {get_nick(player)} in this channel yet. "
+				"Their in-game name must be linked (/aoe link).")
+		embed = Embed(title=f"Flank and pocket: {get_nick(player)}{where}")
+		for name, value in summaries.seats_lines(p):
+			embed.add_field(name=name, value=value[:1024], inline=False)
+		embed.set_footer(text="From the team games analysed in this channel: games (win rate). Maps and civs: most played.")
+	else:
+		names = {}
+		for p in stats.values():
+			if p['user_id'] and (m := ctx.channel.guild.get_member(p['user_id'])):
+				names[p['user_id']] = get_nick(m)
+		embed = Embed(title=f"Flank and pocket{where}", description=summaries.seats_table(stats, names)[:4096])
+		embed.set_footer(text=f"Games (win rate) in each position, from {len(stats)} players' team games analysed in "
+			"this channel. Most games first; unlinked in-game names shown as they are.")
 	await ctx.reply(embed=embed)
 
 
