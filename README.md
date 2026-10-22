@@ -299,10 +299,17 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
 * **mode player**: every player gets a seat and a civ. Seats go where the players' own flank and pocket win rates
   (from `/aoe seats`, pulled towards 50% when they have few games) add up best; even splits are random. Picks then
   also count each player's own record with the civ.
-* Teams take the best civ left in turn, A-B-B-A snake order, a coin flip for first pick. Elo is not evened out
-  with civs (the rating change already accounts for it), so a higher rated team never gets weaker civs; Elo only
-  shapes which civs suit each player. The post shows each pick, why it was picked, which team's civs are ahead and
-  the civs left out.
+* A snake draft (coin flip for first pick) finds the strongest civs for the map and seats. They are then split
+  between the teams, the same number of flank and pocket civs each, trying every split, so that both sides' civs
+  are as even as possible (in player mode each civ goes to the player it suits best). Elo is not evened out with
+  civs (the rating change already accounts for it), so a higher rated team never gets weaker civs; Elo only
+  shapes which civs suit each player. The post shows each pick, why it is in the draft, which team's civs are
+  ahead and the civs left out.
+* **Closed maps** (fully on Closed, 60% on Semi Closed, 30% on Hybrid) favour civs that can field siege,
+  gunpowder, towers and expensive power units. `fortress()` scores that from the tech tree: siege lines with Siege
+  Engineers and Chemistry, gunpowder lines (unique ones too), Bombard Tower and tower upgrades, and the best
+  expensive land unit; `CLOSED_BONUS` adds known civ bonuses the data can't show (Spanish, Turks, Bohemians,
+  Hindustanis and Portuguese gunpowder; Celts, Mongols, Ethiopians, Koreans and Slavs siege).
 * One draft per match: asking again shows the same draft, and moderators can redraw it (`redraw`).
 
 Civ tech trees and unit stats come from `bot/replays/techtree.json`, built from the

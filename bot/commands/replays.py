@@ -219,7 +219,7 @@ def _draft_embed(match, res, model, games, author):
 				lines.append(f"**{s.civ}**" + (f" · {s.seat.lower()}" if s.seat else ""))
 		embed.add_field(name=f"{t.emoji} {t.name} `〈{elo}〉`", value="\n".join(lines)[:1024], inline=False)
 	for i, team in enumerate(res['teams']):
-		why = [f"**{s.civ}** {draft.pick_reason(model, res, i, j)}" for j, s in enumerate(team)]
+		why = [f"**{s.civ}**: {draft.pick_reason(model, res, i, j)}" for j, s in enumerate(team)]
 		embed.add_field(name=f"Why these civs: {match.teams[i].name}", value="\n".join(why)[:1024], inline=False)
 	edge = res['balance']['civ_edge']
 	ahead = match.teams[0 if edge >= 0 else 1].name
@@ -228,9 +228,10 @@ def _draft_embed(match, res, model, games, author):
 	embed.add_field(name="How the draft works", inline=False, value=(
 		f"{len(out)} of the {res['civ_count']} ranked civs were left out at random first, so drafts differ from match to "
 		f"match: {', '.join(out)}.\n"
-		f"Teams then took the best civ left in turn, {match.teams[res['first']].name} first (coin flip), in snake order. "
-		"A civ's value is how it does against Elo in this seat and on this kind of map, its matchups against the other "
-		"team's civs and what taking it denies them.\n"
+		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map and these seats were then split "
+		"between the teams, the same number of flank and pocket civs each, so both sides' civs are as even as possible. "
+		"A civ's value is how it does against Elo in this seat and on this kind of map (on closed maps also its siege, "
+		"gunpowder, towers and power units) and its matchups against the other team's civs.\n"
 		f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it.")[:1024])
 	embed.set_footer(text=f"Drawn by {author}. From {games} analysed game{'s' if games != 1 else ''} in this channel"
 		" plus the tech trees; with few games picks lean on the tech trees.")
