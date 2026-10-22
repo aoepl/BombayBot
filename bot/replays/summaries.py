@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Reports over the saved games (insights.py): a player's stats (/aoe stat) and civ statistics (/aoe civs).
+Reports over the saved games (insights.py): a player's stats (/aoe stat), civ statistics (/aoe civs) and flank /
+pocket records (/aoe seats, and seat_stats() for drafting).
 Only games analysed in the asking queue channel are used. Everything here is pure functions over rows, so it
 can be tested without Discord; load_rows() is the only database call.
 """
@@ -165,11 +166,17 @@ def strats_lines(s):
 
 # ---------- /aoe civs
 
+def on_map(rows, map_filter=None):
+	""" Rows on a map or map type (part of the name, any case: "arena", "Closed", "golden lakes"). """
+	if not map_filter:
+		return rows
+	f = map_filter.lower().replace(" ", "")
+	return [r for r in rows if f in (r.get('map_name') or '').lower().replace(" ", "")
+		or f in (r.get('map_category') or '').lower().replace(" ", "")]
+
+
 def civ_summary(rows, map_filter=None):
-	if map_filter:
-		f = map_filter.lower().replace(" ", "")
-		rows = [r for r in rows if f in (r.get('map_name') or '').lower().replace(" ", "")
-			or f in (r.get('map_category') or '').lower().replace(" ", "")]
+	rows = on_map(rows, map_filter)
 	rows = [r for r in rows if r.get('won') is not None and r.get('civ')]
 
 	def table(rs):
@@ -202,3 +209,77 @@ def civs_lines(c):
 	if c['by_map']:
 		lines.append(("Best by map", "\n".join(f"{m}: {fmt(items)}" for m, items in c['by_map'].items())))
 	return lines
+
+
+
+# ---------- /aoe seats (and drafting)
+
+SEATS = ('Flank', 'Pocket')
+
+
+def _player_key(row):
+	""" A player across games: their Discord account when linked, otherwise their in-game name. """
+	return row['user_id'] if row.get('user_id') else f"name:{row.get('name')}"
+
+
+def seat_stats(rows, map_filter=None):
+	"""
+	Flank / pocket record per player, from team games (1v1s have no seat):
+	{player key: dict(name, user_id, games, seats={seat: dict(games, wins, decided,
+	  maps={map: [games, wins, decided]}, civs={civ: [games, wins, decided]})})}
+	The player key is the Discord user id when the in-game name is linked, else "name:<in-game name>".
+	map_filter keeps one map or map type (see on_map). Pure function over load_rows() rows, for drafting too.
+	"""
+	out = {}
+	for r in on_map(rows, map_filter):
+		if r.get('seat') not in SEATS:
+			continue
+		k = _player_key(r)
+		p = out.setdefault(k, dict(name=r.get('name'), user_id=r.get('user_id'), games=0,
+			seats={s: dict(games=0, wins=0, decided=0, maps={}, civs={}) for s in SEATS}))
+		p['name'] = r.get('name') or p['name']  # the latest name they played under
+		p['games'] += 1
+		st = p['seats'][r['seat']]
+		decided = r.get('won') is not None
+		won = 1 if r.get('won') else 0
+		st['games'] += 1
+		st['decided'] += decided
+		st['wins'] += won
+		for table, key in (('maps', r.get('map_name')), ('civs', r.get('civ'))):
+			if key:
+				g = st[table].setdefault(key, [0, 0, 0])
+				g[0] += 1
+				g[1] += won
+				g[2] += decided
+	return out
+
+
+def _seat_cell(st):
+	return f"{st['games']} ({_rate(st['wins'], st['decided'])})" if st['games'] else "—"
+
+
+def seats_table(stats, names=None, limit=30):
+	""" Code-block table of every player's flank and pocket games (win rate), most games first. """
+	rows = sorted(stats.values(), key=lambda p: (-p['games'], str(p['name']).lower()))[:limit]
+	label = lambda p: (names or {}).get(p['user_id']) or p['name'] or '?'  # noqa: E731
+	width = min(18, max([len(label(p)) for p in rows] + [6]))
+	lines = [f"{'Player':<{width}}  {'Flank':>10}  {'Pocket':>10}"]
+	for p in rows:
+		lines.append(f"{label(p)[:width]:<{width}}  {_seat_cell(p['seats']['Flank']):>10}  {_seat_cell(p['seats']['Pocket']):>10}")
+	return "```\n" + "\n".join(lines) + "\n```"
+
+
+def seats_lines(p, top=5):
+	""" One player's flank and pocket record: games and win rate, by map and by civ. """
+	fmt = lambda table: ", ".join(f"{k} {g}x {_rate(w, d)}" for k, (g, w, d) in  # noqa: E731
+		sorted(table.items(), key=lambda kv: (-kv[1][0], kv[0]))[:top]) or "—"
+	lines = []
+	for seat in SEATS:
+		st = p['seats'][seat]
+		if not st['games']:
+			lines.append((seat, "No games in this position yet."))
+			continue
+		lines.append((f"{seat}: {st['games']} game{'s' if st['games'] != 1 else ''}, {_rate(st['wins'], st['decided'])} won",
+			f"**Maps:** {fmt(st['maps'])}\n**Civs:** {fmt(st['civs'])}"))
+	return lines
+
