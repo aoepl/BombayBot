@@ -315,6 +315,9 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
   `semi()` scores each part from the tech tree plus known bonuses (`FOOD_BONUS`, `CAV_BONUS`, `FLANK_BONUS`); a
   civ great at one part counts most. Archer lines missing Bracer, Thumb Ring or Arbalester are marked down
   (`KEY_ARCHER`).
+* **Open maps**: flanks want top archer civs, pockets top cavalry civs, and both an eco bonus for a fast attack.
+  `open_map()` scores archers (`archer_line` plus archer bonuses), melee cavalry (plus `CAV_BONUS`) and eco (early
+  eco upgrades plus `ECO_BONUS`).
 * **Hybrid maps** favour a strong navy and fishing (navy lines, Gillnets, Careening, Dry Dock, Shipwright) and
   wood (lumber upgrades), and a cavalry civ in the pocket that a fish boom pays for. `hybrid()` scores that per
   seat; `HYBRID_BONUS` adds known water and wood bonuses (Japanese, Malay, Italians, Vikings, Dravidians,

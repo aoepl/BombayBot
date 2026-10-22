@@ -114,6 +114,12 @@ FLANK_BONUS = {
 # Archer upgrades that decide the archer war: a civ missing one fields clearly weaker archers.
 KEY_ARCHER = {'Bracer': 0.75, 'Thumb Ring': 0.9, 'Arbalester': 0.7}  # what the line is worth without it
 FEUDAL_TOWER_TECHS = ('Masonry', 'Guard Tower', 'Murder Holes', 'Heated Shot', 'Arson')
+# Open maps: an eco bonus for a fast attack, top archer civs on the flanks and top cavalry civs in the pockets.
+# score: flanks 65 archers / 35 eco; pockets 65 cavalry / 35 eco.
+OPEN_LEAN = {'Open': 1.0}
+OPEN_WEIGHT = 0.3
+# Edit freely: known eco bonuses that speed up an early attack (food bonuses count too).
+ECO_BONUS = FOOD_BONUS | {'Huns', 'Mongols', 'Aztecs', 'Persians', 'Celts', 'Japanese', 'Malians', 'Ethiopians'}
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
 CHRONICLES = {'Achaemenids', 'Athenians', 'Spartans'}  # not in ranked games
 
@@ -327,6 +333,34 @@ def semi(civ, seat=None):
 	return out
 
 
+_OPEN = {}
+
+
+def open_map(civ, seat=None):
+	""" How well a civ suits a seat on an open map, each part 0..1: eco (a known eco bonus, else the early eco
+	upgrades), archers for flanks (archer_line plus a known archer bonus), cavalry for pockets (best melee cavalry
+	line plus a known cavalry bonus). """
+	key = (civ, seat)
+	if key in _OPEN:
+		return _OPEN[key]
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	early = sum(1 for t in ('Double-Bit Axe', 'Horse Collar', 'Wheelbarrow', 'Gold Mining') if t in techs) / 4
+	eco = (1 - BONUS_SHARE) * early + (BONUS_SHARE if civ in ECO_BONUS else 0.0)
+	if seat == 'Pocket':
+		cav = (1 - BONUS_SHARE) * _melee_cavalry(civ) + (BONUS_SHARE if civ in CAV_BONUS else 0.0)
+		out = dict(eco=eco, cavalry=cav, score=0.65 * cav + 0.35 * eco)
+	else:
+		archers = (1 - BONUS_SHARE) * archer_line(civ) + (BONUS_SHARE if FLANK_BONUS.get(civ) == 'archers' else 0.0)
+		out = dict(eco=eco, archers=archers, score=0.65 * archers + 0.35 * eco)
+	_OPEN[key] = out
+	return out
+
+
+def _top_quarter_open(key, seat):
+	vals = sorted((open_map(c, seat).get(key, 0) for c in ranked_civs()), reverse=True)
+	return vals[len(vals) // 4]
+
+
 def _top_quarter_semi(key, seat):
 	vals = sorted((semi(c, seat)[key] for c in ranked_civs()), reverse=True)
 	return vals[len(vals) // 4]
@@ -496,6 +530,17 @@ class Model:
 			self._cache[key] = scores[len(scores) // 2]
 		return lean * HYBRID_WEIGHT * (hybrid(civ, seat)['score'] - self._cache[key])
 
+	def open_strength(self, civ, seat, category):
+		""" Head start on open maps: archers for flanks, cavalry for pockets, an eco bonus for both. """
+		lean = OPEN_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		key = ('median_open', seat)
+		if key not in self._cache:
+			scores = sorted(open_map(c, seat)['score'] for c in ranked_civs())
+			self._cache[key] = scores[len(scores) // 2]
+		return lean * OPEN_WEIGHT * (open_map(civ, seat)['score'] - self._cache[key])
+
 	def semi_strength(self, civ, seat, category):
 		""" Head start on semi closed maps: food, cavalry or late game for pockets, aggression for flanks. """
 		lean = SEMI_LEAN.get(category, 0.0)
@@ -514,7 +559,7 @@ class Model:
 			return self._cache[key]
 		mine = [r for r in self.rows if r['civ'] == civ and r.get('resid') is not None]
 		base = self.tech_strength(civ, seat) + self.closed_strength(civ, category) + self.hybrid_strength(civ, seat, category) + \
-			self.semi_strength(civ, seat, category)
+			self.semi_strength(civ, seat, category) + self.open_strength(civ, seat, category)
 		prior = self.prior(civ, seat, category)
 		if prior is not None:
 			base = prior - 0.5
@@ -1032,6 +1077,17 @@ def pick_reason(model: Model, res, team, slot):
 			('power units', 'power')) if f[key] >= max(CLOSED_STRONG, _top_quarter(key))]
 		if strong:
 			parts.append(f"strong {' and '.join(strong[:2])} for a {res['category'].lower()} map")
+	if OPEN_LEAN.get(res.get('category')):
+		om = open_map(s.civ, s.seat)
+		good = []
+		if 'archers' in om and om['archers'] >= max(CLOSED_STRONG, _top_quarter_open('archers', s.seat)):
+			good.append("a top archer civ")
+		if 'cavalry' in om and om['cavalry'] >= max(CLOSED_STRONG, _top_quarter_open('cavalry', s.seat)):
+			good.append("a top cavalry civ")
+		if s.civ in ECO_BONUS:
+			good.append("an eco bonus for a fast attack")
+		if good:
+			parts.append(f"open map {seat or 'seat'}: " + ", ".join(good))
 	if SEMI_LEAN.get(res.get('category')):
 		sm = semi(s.civ, s.seat)
 		names = (('food', 'a food bonus' if s.civ in FOOD_BONUS else None),
