@@ -104,7 +104,7 @@ SEMI_WEIGHT = 0.3
 FOOD_BONUS = {'Franks', 'Britons', 'Slavs', 'Khmer', 'Chinese', 'Sicilians', 'Poles', 'Burgundians', 'Teutons',
 	'Mayans', 'Hindustanis', 'Lithuanians', 'Gurjaras', 'Vikings'}
 CAV_BONUS = {'Franks', 'Magyars', 'Berbers', 'Huns', 'Lithuanians', 'Cumans', 'Poles', 'Burgundians', 'Bulgarians',
-	'Hindustanis', 'Persians'}
+	'Hindustanis', 'Persians', 'Malians'}
 FLANK_BONUS = {
 	'Britons': 'archers', 'Mayans': 'archers', 'Ethiopians': 'archers', 'Vietnamese': 'archers', 'Italians': 'archers',
 	'Chinese': 'archers', 'Koreans': 'archers',
@@ -114,6 +114,7 @@ FLANK_BONUS = {
 # Archer upgrades that decide the archer war: a civ missing one fields clearly weaker archers.
 KEY_ARCHER = {'Bracer': 0.75, 'Thumb Ring': 0.9, 'Arbalester': 0.7}  # what the line is worth without it
 FEUDAL_TOWER_TECHS = ('Masonry', 'Guard Tower', 'Murder Holes', 'Heated Shot', 'Arson')
+MAA_TOWERS_SHARE = 0.8  # men-at-arms and towers works, but less often than a feudal archer plan
 # Open maps: an eco bonus for a fast attack, top archer civs on the flanks and top cavalry civs in the pockets.
 # score: flanks 65 archers / 35 eco; pockets 65 cavalry / 35 eco.
 OPEN_LEAN = {'Open': 1.0}
@@ -326,7 +327,7 @@ def semi(civ, seat=None):
 		towers = sum(1 for t in FEUDAL_TOWER_TECHS if t in techs) / len(FEUDAL_TOWER_TECHS)
 		maa = (1 - BONUS_SHARE) * (0.6 * techtree.civ_line_quality(civ, 'Militia line') + 0.4 * towers) + \
 			(BONUS_SHARE if bonus == 'infantry' else 0.0)
-		parts = dict(archers=archers, unique=(1 - BONUS_SHARE) * unique, maa_towers=maa)
+		parts = dict(archers=archers, unique=(1 - BONUS_SHARE) * unique, maa_towers=MAA_TOWERS_SHARE * maa)
 	vals = list(parts.values())
 	out = dict(parts, score=0.5 * max(vals) + 0.5 * sum(vals) / len(vals))
 	_SEMI[key] = out
@@ -558,8 +559,11 @@ class Model:
 		if key in self._cache:
 			return self._cache[key]
 		mine = [r for r in self.rows if r['civ'] == civ and r.get('resid') is not None]
-		base = self.tech_strength(civ, seat) + self.closed_strength(civ, category) + self.hybrid_strength(civ, seat, category) + \
-			self.semi_strength(civ, seat, category) + self.open_strength(civ, seat, category)
+		# Map types with their own seat rules (open, semi closed, hybrid) replace the tech tree's generic seat fit.
+		seat_rules = category in OPEN_LEAN or category in SEMI_LEAN or category in HYBRID_LEAN
+		base = (0.0 if seat_rules else self.tech_strength(civ, seat)) + self.closed_strength(civ, category) + \
+			self.hybrid_strength(civ, seat, category) + self.semi_strength(civ, seat, category) + \
+			self.open_strength(civ, seat, category)
 		prior = self.prior(civ, seat, category)
 		if prior is not None:
 			base = prior - 0.5
@@ -981,15 +985,13 @@ EVEN_ENOUGH = 0.004  # splits this close to the most even one are all fine; one 
 
 def fair_split(model: Model, teams, map_name, category=None, rng=None, per_player=False):
 	"""
-	Share the drafted civs between the two teams so that their civs are as even as possible: each team keeps its
-	seats (as many flank and pocket civs as it has flank and pocket slots), every way of splitting the flank civs
-	and the pocket civs is tried, and within a team each civ goes to the player it suits best (per_player).
+	Share the drafted civs between the two teams so that their civs are as even as possible: every way of splitting
+	them is tried, and within a team each civ goes to the seat (and, per_player, the player) it suits best, so a
+	civ drafted for a flank can still end up a pocket.
 	-> (teams of Slots with civs, civ edge of team 0)
 	"""
 	rng = rng or random.Random()
 	seats = sorted({s.seat for t in teams for s in t}, key=str)
-	civs_by_seat = {seat: [s.civ for t in teams for s in t if s.seat == seat] for seat in seats}
-	slots_by_seat = [{seat: [i for i, s in enumerate(t) if s.seat == seat] for seat in seats} for t in teams]
 	base, m_cache = {}, {}
 
 	def own(t, i, civ):  # a civ's value in a slot, apart from the matchups
@@ -1013,24 +1015,36 @@ def fair_split(model: Model, teams, map_name, category=None, rng=None, per_playe
 			weight += face
 		return total / weight if weight else 0.0
 
-	def place(t, chosen):  # {seat: civs} -> {slot index: civ}, each civ with the player it suits best
-		out = {}
-		for seat, civs in chosen.items():
-			idx = slots_by_seat[t][seat]
-			order = civs
-			if per_player and len(civs) <= 6:
-				order = max(permutations(civs), key=lambda o: sum(own(t, i, c) for i, c in zip(idx, o)))
-			out.update(zip(idx, order))
+	placements = {}
+
+	def place(t, civs):  # civs -> {slot index: civ}: every civ in the seat (and, per player, with the player) it suits best
+		key = (t, frozenset(civs))
+		if key in placements:
+			return placements[key]
+		idx = list(range(len(teams[t])))
+		if per_player and len(idx) <= 6:
+			order = max(permutations(civs), key=lambda o: sum(own(t, i, c) for i, c in zip(idx, o)))
+			out = dict(zip(idx, order))
+		else:  # slots of a seat are alike (team average Elo): only which civs go to which seat matters
+			out, best = None, None
+			groups = {seat: [i for i in idx if teams[t][i].seat == seat] for seat in seats}
+			if len(seats) == 1:
+				out = dict(zip(idx, civs))
+			else:
+				a, b = seats
+				for combo in combinations(range(len(civs)), len(groups[a])):
+					to_a = [civs[j] for j in combo]
+					to_b = [c for j, c in enumerate(civs) if j not in combo]
+					total = sum(own(t, i, c) for i, c in zip(groups[a], to_a)) + sum(own(t, i, c) for i, c in zip(groups[b], to_b))
+					if best is None or total > best:
+						best, out = total, {**dict(zip(groups[a], to_a)), **dict(zip(groups[b], to_b))}
+		placements[key] = out
 		return out
 
-	splits = [[]]
-	for seat in seats:
-		k = len(slots_by_seat[0][seat])
-		splits = [prev + [(seat, set(combo))] for prev in splits for combo in combinations(range(len(civs_by_seat[seat])), k)]
+	every = [s.civ for t in teams for s in t]
 	options = []
-	for split in splits:
-		mine = [{seat: [civs_by_seat[seat][j] for j in sorted(js)] for seat, js in split},
-			{seat: [c for j, c in enumerate(civs_by_seat[seat]) if j not in js] for seat, js in split}]
+	for combo in combinations(range(len(every)), len(teams[0])):
+		mine = [[every[j] for j in combo], [c for j, c in enumerate(every) if j not in combo]]
 		placed = [place(0, mine[0]), place(1, mine[1])]
 		lineups = [[(civ, teams[t][i].seat) for i, civ in placed[t].items()] for t in (0, 1)]
 		values = [[own(t, i, civ) + MATCHUP_WEIGHT * vs(civ, teams[t][i].seat, lineups[1 - t])
@@ -1054,11 +1068,13 @@ def _top_quarter(key):
 GAMES_TO_TRUST = 3     # with fewer games of a civ, a reason says the pick is mostly the tech tree's guess
 
 
-def pick_reason(model: Model, res, team, slot):
+def pick_reason(model: Model, res, team, slot, seat_as=None):
 	""" One line on why a civ is in a civ_draft() result: what it is good at for the seat (on a closed map also its
 	siege, gunpowder, towers or power units), how it did here against Elo, and its best matchup against the other
 	team's civs. """
 	s = res['teams'][team][slot]
+	if seat_as:  # judge the civ in another seat (the one it suits better, for a team to choose from)
+		s = Slot(seat_as, s.elo, s.name, s.civ, s.user_id)
 	seat = s.seat.lower() if s.seat else None
 	strength, n_map, n_all = model.strength(s.civ, s.seat, res['map'], res.get('category'))
 	lines = main_lines(model, s.civ, s.seat)
@@ -1118,6 +1134,11 @@ def pick_reason(model: Model, res, team, slot):
 		parts.append(f"good against {best[1]} ({best[0]:.0%})")
 	return "; ".join(parts)
 
+
+
+def better_seat(model: Model, civ, map_name, category=None):
+	""" 'Flank' or 'Pocket': where the civ is stronger on this map. """
+	return max(('Flank', 'Pocket'), key=lambda seat: model.strength(civ, seat, map_name, category)[0])
 
 
 def main_lines(model: Model, civ, seat, top=2):

@@ -216,10 +216,13 @@ def _draft_embed(match, res, model, games, author):
 			if per_player:
 				lines.append((f"{s.seat} · " if s.seat else "") + f"**{s.name}** `〈{s.elo}〉` → **{s.civ}**")
 			else:
-				lines.append(f"**{s.civ}**" + (f" · {s.seat.lower()}" if s.seat else ""))
+				# The team decides who plays where: show the seat the civ suits better, not the slot it filled.
+				seat = draft.better_seat(model, s.civ, res['map'], res.get('category')) if s.seat else None
+				lines.append(f"**{s.civ}**" + (f" · {seat.lower()}" if seat else ""))
 		embed.add_field(name=f"{t.emoji} {t.name} `〈{elo}〉`", value="\n".join(lines)[:1024], inline=False)
 	for i, team in enumerate(res['teams']):
-		why = [f"**{s.civ}**: {draft.pick_reason(model, res, i, j)}" for j, s in enumerate(team)]
+		why = [f"**{s.civ}**: {draft.pick_reason(model, res, i, j, None if per_player or not s.seat else draft.better_seat(model, s.civ, res['map'], res.get('category')))}"
+			for j, s in enumerate(team)]
 		chunk, n = [], 0
 		for line in why:  # an embed field holds 1024 characters: carry on in another field rather than cut a line
 			if chunk and len("\n".join(chunk + [line])) > 1024:

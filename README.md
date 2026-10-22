@@ -300,8 +300,10 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
   (from `/aoe seats`, pulled towards 50% when they have few games) add up best; even splits are random. Picks then
   also count each player's own record with the civ.
 * A snake draft (coin flip for first pick) finds the strongest civs for the map and seats. They are then split
-  between the teams, the same number of flank and pocket civs each, trying every split, so that both sides' civs
-  are as even as possible (in player mode each civ goes to the player it suits best). Elo is not evened out with
+  between the teams, trying every split, so that both sides' civs are as even as possible; within a team every civ
+  goes to the seat (and in player mode the player) it suits best, so a civ drafted for a flank can end up a pocket.
+  In team mode each civ is shown with the seat it suits better on the map. On map types with their own seat rules
+  (open, semi closed, hybrid) those rules replace the tech tree's generic seat fit. Elo is not evened out with
   civs (the rating change already accounts for it), so a higher rated team never gets weaker civs; Elo only
   shapes which civs suit each player. The post shows each pick, why it is in the draft, which team's civs are
   ahead and the civs left out.
@@ -313,7 +315,8 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
 * **Semi closed maps**: pockets want a food bonus, a cavalry bonus or a strong late game (the closed-map score);
   flanks want an aggressive civ: a strong archer line, a strong unique unit, or men-at-arms and towers play.
   `semi()` scores each part from the tech tree plus known bonuses (`FOOD_BONUS`, `CAV_BONUS`, `FLANK_BONUS`); a
-  civ great at one part counts most. Archer lines missing Bracer, Thumb Ring or Arbalester are marked down
+  civ great at one part counts most; men-at-arms and towers counts 80%, as it works less often than a feudal
+  archer plan. Archer lines missing Bracer, Thumb Ring or Arbalester are marked down
   (`KEY_ARCHER`).
 * **Open maps**: flanks want top archer civs, pockets top cavalry civs, and both an eco bonus for a fast attack.
   `open_map()` scores archers (`archer_line` plus archer bonuses), melee cavalry (plus `CAV_BONUS`) and eco (early
