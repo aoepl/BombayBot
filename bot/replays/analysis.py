@@ -580,7 +580,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			stats[p]['base_lost_to'] = taker
 	# Age-up timings against the direct opponent: two players who delayed each other aren't both punished for late
 	# ages, and a late age that cost the opponent their base was the better plan.
-	opponent_timings(players, stats, exec_parts, {'Castle Age': castle_click, 'Imperial Age': imp_click}, press_matrix, vest)
+	opponent_timings(players, stats, exec_parts, {'Castle Age': castle_click, 'Imperial Age': imp_click}, press_matrix, vest, pos)
 	team_raw = [{p: trib_out[p] for p in pids}, {p: help_out[p] for p in pids}, {p: stats[p]['flares'] for p in pids}]
 	team_parts = [_minmax(raw) for raw in team_raw]  # parts nobody did (no tributes in the game) are left out
 	weights = {
@@ -1182,14 +1182,15 @@ def town_centers_destroyed(A, players, structs, pos, end):
 	return dict(out), {p: details[p] for p in players}
 
 
-OPPONENT_ORDERS = 20     # army orders into each other's base that make two players direct opponents ...
-OPPONENT_VILLAGERS = 2   # ... or villagers killed of each other
+OPPONENT_ORDERS = 20     # army orders into one's base (either way) that make two players direct opponents ...
+OPPONENT_VILLAGERS = 2   # ... or villagers killed (either way)
 
 
-def direct_opponents(players, press_matrix, vest):
+def direct_opponents(players, press_matrix, vest, pos=None):
 	"""
-	{player: their direct opponent}: the enemy they fought most head-on, when it went both ways (each sent
-	OPPONENT_ORDERS+ army orders into the other's base, or killed OPPONENT_VILLAGERS+ of the other's villagers).
+	{player: their direct opponent}: the enemy they fought most head-on in either direction, one side attacking and
+	the other defending counts (OPPONENT_ORDERS+ army orders into one's base, or OPPONENT_VILLAGERS+ villagers
+	killed, by either). With no such fight, the enemy whose start is nearest: the player directly opposite.
 	"""
 	out = {}
 	for p in players:
@@ -1197,20 +1198,22 @@ def direct_opponents(players, press_matrix, vest):
 		for e in players:
 			if players[e]['team_id'] == players[p]['team_id']:
 				continue
-			to_e, to_p = press_matrix[(p, e)], press_matrix[(e, p)]
-			kills_e = vest[e]['killers'].get(p, 0) if vest.get(e) else 0
-			kills_p = vest[p]['killers'].get(e, 0) if vest.get(p) else 0
-			mutual = (to_e >= OPPONENT_ORDERS and to_p >= OPPONENT_ORDERS) or \
-				(kills_e >= OPPONENT_VILLAGERS and kills_p >= OPPONENT_VILLAGERS)
-			n = to_e + to_p + 20 * (kills_e + kills_p)
-			if mutual and n > best_n:
-				best, best_n = e, n
+			orders = press_matrix[(p, e)] + press_matrix[(e, p)]
+			kills = (vest[e]['killers'].get(p, 0) if vest.get(e) else 0) + (vest[p]['killers'].get(e, 0) if vest.get(p) else 0)
+			if orders >= OPPONENT_ORDERS or kills >= OPPONENT_VILLAGERS:
+				n = orders + 20 * kills
+				if n > best_n:
+					best, best_n = e, n
+		if best is None and pos and p in pos:
+			enemies = [e for e in players if players[e]['team_id'] != players[p]['team_id'] and e in pos]
+			if enemies:
+				best = min(enemies, key=lambda e: math.dist(pos[p], pos[e]))
 		if best is not None:
 			out[p] = best
 	return out
 
 
-def opponent_timings(players, stats, exec_parts, clicks, press_matrix, vest):
+def opponent_timings(players, stats, exec_parts, clicks, press_matrix, vest, pos=None):
 	"""
 	Castle and Imperial Age timings judged against the direct opponent (only ever raising a score):
 	- both late (after the lobby's median click, or never): they were delaying each other, so the timing is scored
@@ -1220,7 +1223,7 @@ def opponent_timings(players, stats, exec_parts, clicks, press_matrix, vest):
 	Indices: exec_parts[0] Castle Age (may already hold Feudal uptime), exec_parts[1] Imperial Age. Notes go in
 	stats[p]['timing_notes'].
 	"""
-	opp = direct_opponents(players, press_matrix, vest)
+	opp = direct_opponents(players, press_matrix, vest, pos)
 	end = max((t for c in clicks.values() for t in c.values() if t), default=0) + 60000
 	for idx, (age, times) in enumerate(clicks.items()):
 		known = sorted(t for t in times.values() if t)
@@ -1234,7 +1237,7 @@ def opponent_timings(players, stats, exec_parts, clicks, press_matrix, vest):
 				pair = 5.5 + 4.5 * max(-1.0, min(1.0, (theirs - mine) / max(mine, theirs)))
 				if pair > exec_parts[idx][p]:
 					exec_parts[idx][p] = pair
-					notes.append(f"{age}: scored against direct opponent {players[e]['name']} (both late, delaying each other)")
+					notes.append(f"{age}: scored against direct opponent {players[e]['name']} (both late)")
 			elif mine > theirs and stats[e].get('base_lost') and not stats[p].get('base_lost'):
 				if exec_parts[idx][e] > exec_parts[idx][p]:
 					exec_parts[idx][p] = exec_parts[idx][e]

@@ -122,8 +122,9 @@ What the breakdown shows:
   8+ Feudal military units scores the better of their Castle Age click time and their Feudal production uptime
   (Town Centers and Docks kept busy, military buildings producing every minute), so a late Castle Age after a
   strong Feudal army is not penalised.
-  Age-up timings are also judged against the player's direct opponent: the enemy they fought head-on, both ways
-  (20+ army orders into each other's base, or 2+ of each other's villagers killed). When both were late (after the
+  Age-up timings are also judged against the player's direct opponent: the enemy they fought head-on, in either
+  direction (20+ army orders into one's base, or 2+ villagers killed, by either side: an attacker and the player
+  defending are direct opponents); with no such fight, the enemy whose base is nearest. When both were late (after the
   lobby's median click, or never), they were delaying each other, so Castle and Imperial Age timings are scored
   within the pair (5.5 when equal, higher for the faster) if that beats the lobby score. When the player aged up
   later than the opponent but the opponent lost their base and the player didn't, the late timing scores at least
