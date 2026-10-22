@@ -292,7 +292,7 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
 `Prior` later.
 
 `/aoe draft` runs a whole draft for a started match, on the match's map, from the games analysed in that channel:
-* First 20-35 random ranked civs are left out, so drafts differ from match to match.
+* First 25-35 random ranked civs are left out, so drafts differ from match to match.
 * **mode team**: each team gets 6 civs to choose its players' civs from (one per seat, flanks at the ends and
   pockets between for 3+ players, then extra flank and pocket choices), judged at the team's average Elo; the
   players decide who plays which civ and where.
@@ -305,11 +305,15 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
   civs (the rating change already accounts for it), so a higher rated team never gets weaker civs; Elo only
   shapes which civs suit each player. The post shows each pick, why it is in the draft, which team's civs are
   ahead and the civs left out.
-* **Closed maps** (fully on Closed, 60% on Semi Closed, 30% on Hybrid) favour civs that can field siege,
+* **Closed maps** (fully on Closed, 60% on Semi Closed) favour civs that can field siege,
   gunpowder, towers and expensive power units. `fortress()` scores that from the tech tree: siege lines with Siege
   Engineers and Chemistry, gunpowder lines (unique ones too), Bombard Tower and tower upgrades, and the best
   expensive land unit; `CLOSED_BONUS` adds known civ bonuses the data can't show (Spanish, Turks, Bohemians,
   Hindustanis and Portuguese gunpowder; Celts, Mongols, Ethiopians, Koreans and Slavs siege).
+* **Hybrid maps** favour a strong navy and fishing (navy lines, Gillnets, Careening, Dry Dock, Shipwright) and
+  wood (lumber upgrades), and a cavalry civ in the pocket that a fish boom pays for. `hybrid()` scores that per
+  seat; `HYBRID_BONUS` adds known water and wood bonuses (Japanese, Malay, Italians, Vikings, Dravidians,
+  Portuguese, Byzantines and Berbers water; Celts, Burmese, Huns and Mayans wood).
 * One draft per match: asking again shows the same draft, and moderators can redraw it (`redraw`).
 
 Civ tech trees and unit stats come from `bot/replays/techtree.json`, built from the

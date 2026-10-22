@@ -231,7 +231,8 @@ def _draft_embed(match, res, model, games, author):
 		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map and these seats were then split "
 		"between the teams, the same number of flank and pocket civs each, so both sides' civs are as even as possible. "
 		"A civ's value is how it does against Elo in this seat and on this kind of map (on closed maps also its siege, "
-		"gunpowder, towers and power units) and its matchups against the other team's civs.\n"
+		"gunpowder, towers and power units; on hybrid maps its navy, fishing and wood, and for pockets cavalry backed by "
+		"a fish boom) and its matchups against the other team's civs.\n"
 		f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it.")[:1024])
 	embed.set_footer(text=f"Drawn by {author}. From {games} analysed game{'s' if games != 1 else ''} in this channel"
 		" plus the tech trees; with few games picks lean on the tech trees.")
@@ -241,7 +242,7 @@ def _draft_embed(match, res, model, games, author):
 async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = False):
 	"""
 	Civ draft for your started match: civs for each team to share out (mode team), or a civ and position for every
-	player (mode player). 20-35 random civs are left out first. One draft per match; moderators can redraw.
+	player (mode player). 25-35 random civs are left out first. One draft per match; moderators can redraw.
 	"""
 	import random
 	from bot.replays import draft, insights, summaries

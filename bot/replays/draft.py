@@ -65,7 +65,7 @@ USUAL_SHARE = 0.6        # matchup: the usual armies against each other ...
 ANSWER_SHARE = 0.4       # ... and how well each side can switch to a counter
 # Closed maps: walls and space to build up let siege, gunpowder, towers and expensive power units come out, so
 # civs strong in those do better there. How much that counts per map type, and its weight next to Elo results.
-CLOSED_LEAN = {'Closed': 1.0, 'Semi Closed': 0.6, 'Hybrid': 0.3}
+CLOSED_LEAN = {'Closed': 1.0, 'Semi Closed': 0.6}
 CLOSED_WEIGHT = 0.3
 SIEGE_LINES = ('Bombard Cannons', 'Mangonels', 'Rams', 'Scorpions')
 TOWER_TECHS = ('Bombard Tower', 'Keep', 'Guard Tower', 'Masonry', 'Architecture', 'Heated Shot', 'Murder Holes', 'Arson',
@@ -80,6 +80,20 @@ CLOSED_BONUS = {
 	'Portuguese': 'gunpowder',
 }
 BONUS_SHARE = 0.25      # how much a bonus adds to that part (0..1)
+# Hybrid maps (land and water): a strong navy and fishing, and wood bonuses, count; a cavalry civ in the pocket
+# that can fish boom is very strong. How much that counts per map type, and its weight next to Elo results.
+HYBRID_LEAN = {'Hybrid': 1.0}
+HYBRID_WEIGHT = 0.3
+NAVY_LINES = ('Galleys', 'Fire ships', 'Demo ships', 'Cannon Galleons')
+DOCK_TECHS = ('Gillnets', 'Careening', 'Dry Dock', 'Shipwright')
+WOOD_TECHS = ('Double-Bit Axe', 'Bow Saw', 'Two-Man Saw')
+# Civ bonuses the data can't show: 'water' (cheaper or better fishing, docks or warships), 'wood' (faster or
+# cheaper wood, or saving it). Edit freely; like CLOSED_BONUS, a bonus makes up BONUS_SHARE of that part.
+HYBRID_BONUS = {
+	'Japanese': 'water', 'Malay': 'water', 'Italians': 'water', 'Vikings': 'water', 'Dravidians': 'water',
+	'Portuguese': 'water', 'Byzantines': 'water', 'Berbers': 'water',
+	'Celts': 'wood', 'Burmese': 'wood', 'Huns': 'wood', 'Mayans': 'wood',
+}
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
 CHRONICLES = {'Achaemenids', 'Athenians', 'Spartans'}  # not in ranked games
 
@@ -184,6 +198,47 @@ def fortress(civ):
 		score=0.35 * siege + 0.35 * gunpowder + 0.15 * towers + 0.15 * best_power)
 	_FORTRESS[civ] = out
 	return out
+
+
+_HYBRID = {}
+
+
+def hybrid(civ, seat=None):
+	"""
+	How well a civ can use a hybrid map, each part 0..1: water (navy lines and dock techs: Gillnets, Careening, Dry
+	Dock, Shipwright), wood (lumber upgrades) and, for pockets, cavalry (its best melee cavalry line) that the fish
+	boom pays for. Known civ bonuses from HYBRID_BONUS make up part of water or wood.
+	score: flanks 55 water / 45 wood; pockets 35 water / 20 wood / 45 cavalry x fishing.
+	"""
+	key = (civ, seat)
+	if key in _HYBRID:
+		return _HYBRID[key]
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	navy = sum(techtree.civ_line_quality(civ, ln) for ln in NAVY_LINES) / len(NAVY_LINES)
+	docks = sum(1 for t in DOCK_TECHS if t in techs) / len(DOCK_TECHS)
+	bonus = HYBRID_BONUS.get(civ)
+	water = (1 - BONUS_SHARE) * (0.6 * navy + 0.4 * docks) + (BONUS_SHARE if bonus == 'water' else 0.0)
+	wood = (1 - BONUS_SHARE) * (sum(1 for t in WOOD_TECHS if t in techs) / len(WOOD_TECHS)) + \
+		(BONUS_SHARE if bonus == 'wood' else 0.0)
+	cav = 0.0
+	for ln in techtree.civ_lines(civ):
+		u = techtree.unit(techtree._best_unit(civ, ln)) or {}
+		if u and techtree._cavalry(techtree._best_unit(civ, ln)) and not techtree._ranged(techtree._best_unit(civ, ln)) \
+				and ln != 'Scouts/Hussars' and sum((u.get('cost') or {}).values()) < techtree.HERO_COST:
+			cav = max(cav, techtree.civ_line_quality(civ, ln))
+	cavalry = cav * (0.5 + 0.5 * water)  # the fish boom is what pays for the cavalry
+	if seat == 'Pocket':
+		score = 0.35 * water + 0.2 * wood + 0.45 * cavalry
+	else:
+		score = 0.55 * water + 0.45 * wood
+	out = dict(water=water, wood=wood, cavalry=cavalry if seat == 'Pocket' else 0.0, score=score)
+	_HYBRID[key] = out
+	return out
+
+
+def _top_quarter_hybrid(key, seat):
+	vals = sorted((hybrid(c, seat)[key] for c in ranked_civs()), reverse=True)
+	return vals[len(vals) // 4]
 
 
 class Prior:
@@ -339,13 +394,24 @@ class Model:
 			self._cache['median_fortress'] = scores[len(scores) // 2]
 		return lean * CLOSED_WEIGHT * (fortress(civ)['score'] - self._cache['median_fortress'])
 
+	def hybrid_strength(self, civ, seat, category):
+		""" Head start on hybrid maps for navy and fishing, wood, and (pockets) cavalry with a fish boom. """
+		lean = HYBRID_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		key = ('median_hybrid', seat)
+		if key not in self._cache:
+			scores = sorted(hybrid(c, seat)['score'] for c in ranked_civs())
+			self._cache[key] = scores[len(scores) // 2]
+		return lean * HYBRID_WEIGHT * (hybrid(civ, seat)['score'] - self._cache[key])
+
 	def strength(self, civ, seat, map_name, category=None):
 		""" (rating 0..1, games on this map, games in all) for the civ in this seat on this map. """
 		key = ('strength', civ, seat, _norm(map_name), category)
 		if key in self._cache:
 			return self._cache[key]
 		mine = [r for r in self.rows if r['civ'] == civ and r.get('resid') is not None]
-		base = self.tech_strength(civ, seat) + self.closed_strength(civ, category)
+		base = self.tech_strength(civ, seat) + self.closed_strength(civ, category) + self.hybrid_strength(civ, seat, category)
 		prior = self.prior(civ, seat, category)
 		if prior is not None:
 			base = prior - 0.5
@@ -664,7 +730,7 @@ def ranked_civs():
 # ---------------------------------------------------------------- /aoe draft
 
 TEAM_CIVS, PLAYER_CIVS = 'team', 'player'  # civs per team (players sort them out) / a civ and seat for each player
-EXCLUDE_MIN, EXCLUDE_MAX = 20, 35  # civs left out at random before every draft, so drafts don't repeat
+EXCLUDE_MIN, EXCLUDE_MAX = 25, 35  # civs left out at random before every draft, so drafts don't repeat
 SEAT_PRIOR = 4  # a player's win rate in a seat starts as 4 games at 50%
 TEAM_CHOICES = 6  # civs each team gets to choose from in TEAM_CIVS mode (at least one per player)
 
@@ -863,6 +929,17 @@ def pick_reason(model: Model, res, team, slot):
 			('power units', 'power')) if f[key] >= max(CLOSED_STRONG, _top_quarter(key))]
 		if strong:
 			parts.append(f"strong {' and '.join(strong[:2])} for a {res['category'].lower()} map")
+	if HYBRID_LEAN.get(res.get('category')):
+		h = hybrid(s.civ, s.seat)
+		good = []
+		if h['water'] >= max(CLOSED_STRONG, _top_quarter_hybrid('water', s.seat)):
+			good.append("strong navy and fishing")
+		if HYBRID_BONUS.get(s.civ) == 'wood':
+			good.append("a wood bonus")
+		if h['cavalry'] >= max(CLOSED_STRONG, _top_quarter_hybrid('cavalry', s.seat)):
+			good.append("cavalry a fish boom can pay for")
+		if good:
+			parts.append("on a hybrid map: " + ", ".join(good))
 	best = None
 	for e in res['teams'][1 - team]:
 		m, _, _ = model.matchup(s.civ, s.seat, e.civ, e.seat, res['map'], res.get('category'))
