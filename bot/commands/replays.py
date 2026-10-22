@@ -220,7 +220,14 @@ def _draft_embed(match, res, model, games, author):
 		embed.add_field(name=f"{t.emoji} {t.name} `〈{elo}〉`", value="\n".join(lines)[:1024], inline=False)
 	for i, team in enumerate(res['teams']):
 		why = [f"**{s.civ}**: {draft.pick_reason(model, res, i, j)}" for j, s in enumerate(team)]
-		embed.add_field(name=f"Why these civs: {match.teams[i].name}", value="\n".join(why)[:1024], inline=False)
+		chunk, n = [], 0
+		for line in why:  # an embed field holds 1024 characters: carry on in another field rather than cut a line
+			if chunk and len("\n".join(chunk + [line])) > 1024:
+				embed.add_field(name=f"Why these civs: {match.teams[i].name}" if not n else "\u200b", value="\n".join(chunk), inline=False)
+				chunk, n = [], n + 1
+			chunk.append(line[:1024])
+		if chunk:
+			embed.add_field(name=f"Why these civs: {match.teams[i].name}" if not n else "\u200b", value="\n".join(chunk), inline=False)
 	edge = res['balance']['civ_edge']
 	ahead = match.teams[0 if edge >= 0 else 1].name
 	civ_line = "Civs: even." if abs(edge) < 0.005 else f"Civs: {ahead} ahead by {abs(edge):.1%}."

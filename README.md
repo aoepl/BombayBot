@@ -305,11 +305,16 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
   civs (the rating change already accounts for it), so a higher rated team never gets weaker civs; Elo only
   shapes which civs suit each player. The post shows each pick, why it is in the draft, which team's civs are
   ahead and the civs left out.
-* **Closed maps** (fully on Closed, 60% on Semi Closed) favour civs that can field siege,
+* **Closed maps** favour civs that can field siege,
   gunpowder, towers and expensive power units. `fortress()` scores that from the tech tree: siege lines with Siege
   Engineers and Chemistry, gunpowder lines (unique ones too), Bombard Tower and tower upgrades, and the best
   expensive land unit; `CLOSED_BONUS` adds known civ bonuses the data can't show (Spanish, Turks, Bohemians,
   Hindustanis and Portuguese gunpowder; Celts, Mongols, Ethiopians, Koreans and Slavs siege).
+* **Semi closed maps**: pockets want a food bonus, a cavalry bonus or a strong late game (the closed-map score);
+  flanks want an aggressive civ: a strong archer line, a strong unique unit, or men-at-arms and towers play.
+  `semi()` scores each part from the tech tree plus known bonuses (`FOOD_BONUS`, `CAV_BONUS`, `FLANK_BONUS`); a
+  civ great at one part counts most. Archer lines missing Bracer, Thumb Ring or Arbalester are marked down
+  (`KEY_ARCHER`).
 * **Hybrid maps** favour a strong navy and fishing (navy lines, Gillnets, Careening, Dry Dock, Shipwright) and
   wood (lumber upgrades), and a cavalry civ in the pocket that a fish boom pays for. `hybrid()` scores that per
   seat; `HYBRID_BONUS` adds known water and wood bonuses (Japanese, Malay, Italians, Vikings, Dravidians,

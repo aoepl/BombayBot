@@ -65,7 +65,7 @@ USUAL_SHARE = 0.6        # matchup: the usual armies against each other ...
 ANSWER_SHARE = 0.4       # ... and how well each side can switch to a counter
 # Closed maps: walls and space to build up let siege, gunpowder, towers and expensive power units come out, so
 # civs strong in those do better there. How much that counts per map type, and its weight next to Elo results.
-CLOSED_LEAN = {'Closed': 1.0, 'Semi Closed': 0.6}
+CLOSED_LEAN = {'Closed': 1.0}
 CLOSED_WEIGHT = 0.3
 SIEGE_LINES = ('Bombard Cannons', 'Mangonels', 'Rams', 'Scorpions')
 TOWER_TECHS = ('Bombard Tower', 'Keep', 'Guard Tower', 'Masonry', 'Architecture', 'Heated Shot', 'Murder Holes', 'Arson',
@@ -94,6 +94,26 @@ HYBRID_BONUS = {
 	'Portuguese': 'water', 'Byzantines': 'water', 'Berbers': 'water',
 	'Celts': 'wood', 'Burmese': 'wood', 'Huns': 'wood', 'Mayans': 'wood',
 }
+# Semi closed maps: pockets want a food bonus, a cavalry bonus or a strong late game (the closed-map score);
+# flanks want an aggressive civ: a strong archer line, a strong unique unit, or men-at-arms and towers play.
+# Being great at one of these counts most (score: half the best part, half their average).
+SEMI_LEAN = {'Semi Closed': 1.0}
+SEMI_WEIGHT = 0.3
+# Edit freely. Known food (eco) bonuses, cavalry bonuses, and flank aggression bonuses ('archers' or 'infantry')
+# that the data can't show; each makes up BONUS_SHARE of that part.
+FOOD_BONUS = {'Franks', 'Britons', 'Slavs', 'Khmer', 'Chinese', 'Sicilians', 'Poles', 'Burgundians', 'Teutons',
+	'Mayans', 'Hindustanis', 'Lithuanians', 'Gurjaras', 'Vikings'}
+CAV_BONUS = {'Franks', 'Magyars', 'Berbers', 'Huns', 'Lithuanians', 'Cumans', 'Poles', 'Burgundians', 'Bulgarians',
+	'Hindustanis', 'Persians'}
+FLANK_BONUS = {
+	'Britons': 'archers', 'Mayans': 'archers', 'Ethiopians': 'archers', 'Vietnamese': 'archers', 'Italians': 'archers',
+	'Chinese': 'archers', 'Koreans': 'archers',
+	'Aztecs': 'infantry', 'Japanese': 'infantry', 'Vikings': 'infantry', 'Malians': 'infantry', 'Goths': 'infantry',
+	'Romans': 'infantry',
+}
+# Archer upgrades that decide the archer war: a civ missing one fields clearly weaker archers.
+KEY_ARCHER = {'Bracer': 0.75, 'Thumb Ring': 0.9, 'Arbalester': 0.7}  # what the line is worth without it
+FEUDAL_TOWER_TECHS = ('Masonry', 'Guard Tower', 'Murder Holes', 'Heated Shot', 'Arson')
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
 CHRONICLES = {'Achaemenids', 'Athenians', 'Spartans'}  # not in ranked games
 
@@ -238,6 +258,77 @@ def hybrid(civ, seat=None):
 
 def _top_quarter_hybrid(key, seat):
 	vals = sorted((hybrid(c, seat)[key] for c in ranked_civs()), reverse=True)
+	return vals[len(vals) // 4]
+
+
+def archer_line(civ):
+	""" 0..1: the civ's archer line, where missing Bracer, Thumb Ring or Arbalester costs a lot (KEY_ARCHER). """
+	q = techtree.civ_line_quality(civ, 'Archers')
+	have = set(techtree.data()['civs'].get(civ, {}).get('techs', [])) | set(techtree.data()['civs'].get(civ, {}).get('units', []))
+	for what, keep in KEY_ARCHER.items():
+		if what not in have:
+			q *= keep
+	return q
+
+
+def _melee_cavalry(civ):
+	""" 0..1: the civ's best melee cavalry line (not scouts), heroes left out. """
+	best = 0.0
+	for ln in techtree.civ_lines(civ):
+		name = techtree._best_unit(civ, ln)
+		u = techtree.unit(name) or {}
+		if u and techtree._cavalry(name) and not techtree._ranged(name) and ln != 'Scouts/Hussars' \
+				and sum((u.get('cost') or {}).values()) < techtree.HERO_COST:
+			best = max(best, techtree.civ_line_quality(civ, ln))
+	return best
+
+
+_SEMI = {}
+
+
+def semi(civ, seat=None):
+	"""
+	How well a civ suits a seat on a semi closed map, each part 0..1.
+	Pockets: food (a known food bonus, else farming upgrades), cavalry (best melee cavalry line plus a known
+	cavalry bonus) and late game (the closed-map score). Flanks: archers (archer_line), unique unit (its best unique
+	land fighting line) and men-at-arms with towers (militia line and feudal tower upgrades), plus known
+	aggression bonuses. score: half the best part plus half their average.
+	"""
+	key = (civ, seat)
+	if key in _SEMI:
+		return _SEMI[key]
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	if seat == 'Pocket':
+		farming = sum(1 for t in ('Horse Collar', 'Heavy Plow', 'Crop Rotation') if t in techs) / 3
+		food = (1 - BONUS_SHARE) * farming + (BONUS_SHARE if civ in FOOD_BONUS else 0.0)
+		cav = (1 - BONUS_SHARE) * _melee_cavalry(civ) + (BONUS_SHARE if civ in CAV_BONUS else 0.0)
+		late = fortress(civ)['score']
+		parts = dict(food=food, cavalry=cav, late=late)
+	else:
+		bonus = FLANK_BONUS.get(civ)
+		archers = (1 - BONUS_SHARE) * archer_line(civ) + (BONUS_SHARE if bonus == 'archers' else 0.0)
+		unique = 0.0
+		for ln in techtree.civ_lines(civ):
+			if ln in techtree.LINES:
+				continue
+			name = techtree._best_unit(civ, ln)
+			u = techtree.unit(name) or {}
+			cost = sum((u.get('cost') or {}).values())
+			if u and u.get('speed', 0) > 0 and cost < techtree.HERO_COST and GUNPOWDER_CLASS not in (u.get('armours') or {}) \
+					and not (u.get('blast') and u.get('range', 0) >= 5):
+				unique = max(unique, techtree.civ_line_quality(civ, ln))
+		towers = sum(1 for t in FEUDAL_TOWER_TECHS if t in techs) / len(FEUDAL_TOWER_TECHS)
+		maa = (1 - BONUS_SHARE) * (0.6 * techtree.civ_line_quality(civ, 'Militia line') + 0.4 * towers) + \
+			(BONUS_SHARE if bonus == 'infantry' else 0.0)
+		parts = dict(archers=archers, unique=(1 - BONUS_SHARE) * unique, maa_towers=maa)
+	vals = list(parts.values())
+	out = dict(parts, score=0.5 * max(vals) + 0.5 * sum(vals) / len(vals))
+	_SEMI[key] = out
+	return out
+
+
+def _top_quarter_semi(key, seat):
+	vals = sorted((semi(c, seat)[key] for c in ranked_civs()), reverse=True)
 	return vals[len(vals) // 4]
 
 
@@ -405,13 +496,25 @@ class Model:
 			self._cache[key] = scores[len(scores) // 2]
 		return lean * HYBRID_WEIGHT * (hybrid(civ, seat)['score'] - self._cache[key])
 
+	def semi_strength(self, civ, seat, category):
+		""" Head start on semi closed maps: food, cavalry or late game for pockets, aggression for flanks. """
+		lean = SEMI_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		key = ('median_semi', seat)
+		if key not in self._cache:
+			scores = sorted(semi(c, seat)['score'] for c in ranked_civs())
+			self._cache[key] = scores[len(scores) // 2]
+		return lean * SEMI_WEIGHT * (semi(civ, seat)['score'] - self._cache[key])
+
 	def strength(self, civ, seat, map_name, category=None):
 		""" (rating 0..1, games on this map, games in all) for the civ in this seat on this map. """
 		key = ('strength', civ, seat, _norm(map_name), category)
 		if key in self._cache:
 			return self._cache[key]
 		mine = [r for r in self.rows if r['civ'] == civ and r.get('resid') is not None]
-		base = self.tech_strength(civ, seat) + self.closed_strength(civ, category) + self.hybrid_strength(civ, seat, category)
+		base = self.tech_strength(civ, seat) + self.closed_strength(civ, category) + self.hybrid_strength(civ, seat, category) + \
+			self.semi_strength(civ, seat, category)
 		prior = self.prior(civ, seat, category)
 		if prior is not None:
 			base = prior - 0.5
@@ -929,6 +1032,16 @@ def pick_reason(model: Model, res, team, slot):
 			('power units', 'power')) if f[key] >= max(CLOSED_STRONG, _top_quarter(key))]
 		if strong:
 			parts.append(f"strong {' and '.join(strong[:2])} for a {res['category'].lower()} map")
+	if SEMI_LEAN.get(res.get('category')):
+		sm = semi(s.civ, s.seat)
+		names = (('food', 'a food bonus' if s.civ in FOOD_BONUS else None),
+			('cavalry', 'strong cavalry'), ('late', 'a strong late game'),
+			('archers', 'a strong archer line'), ('unique', 'a strong unique unit'),
+			('maa_towers', 'men-at-arms and towers aggression'))
+		good = [label for key, label in names
+			if label and key in sm and sm[key] >= max(CLOSED_STRONG, _top_quarter_semi(key, s.seat))]
+		if good:
+			parts.append(f"semi closed {seat or 'seat'}: " + ", ".join(good[:2]))
 	if HYBRID_LEAN.get(res.get('category')):
 		h = hybrid(s.civ, s.seat)
 		good = []
