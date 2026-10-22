@@ -2411,6 +2411,32 @@ def fight_vs_elo(players, fights):
 	return {p: (round(v[0] / v[1], 3), round(v[1])) for p, v in acc.items() if v[1]}
 
 
+FIELDED_LOOKBACK = 5 * 60000  # units trained this long before a fight count as what a side brought to it
+
+
+def _fielded(A, p, t0, t1):
+	""" ' (Crossbows, Mangonels)': the unit lines a player trained for a fight (from 5 minutes before it to its end),
+	named by the upgrades researched by then; '' when nothing stands out. """
+	if not A:
+		return ''
+	lines = _army_lines(_army_between(A, p, max(0, t0 - FIELDED_LOOKBACK), t1), minimum=2, researched=_researched(A, p, t1))
+	return f" ({', '.join(lines[:3])})" if lines else ''
+
+
+def _units_lost(army, p, t0, t1):
+	""" '12 units': army units of a player that stopped being commanded while they were fighting, in [t0, t1]
+	(the same rule as the army value lost in the scores). """
+	fight_orders = army.get(p, {}).get('_fight_orders', {})
+	n = 0
+	for t_last, _ in army.get(p, {}).get('_gone', []):
+		if not (t0 <= t_last <= t1):
+			continue
+		m = int(t_last // 60000)
+		if max(fight_orders.get(k, 0) for k in (m - 1, m, m + 1, m + 2)) >= FIGHT_MIN_ORDERS:
+			n += 1
+	return f"{n} unit{'s' if n != 1 else ''}"
+
+
 def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0):
 	"""
 	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
@@ -2425,11 +2451,14 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 	if army:
 		for f in fight_episodes(players, army):
 			a, b, ka, kb, first, last_m = f['a'], f['b'], f['a_killed'], f['b_killed'], f['start_m'], f['end_m']
-			win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
-			when = f" ({mmss(first * 60000)}–{mmss((last_m + 3) * 60000)})" if f['windows'] > 1 else ""
+			win, lose = (a, b) if ka >= kb else (b, a)
+			t0, t1 = first * 60000, (last_m + 3) * 60000
+			when = f" ({mmss(t0)}–{mmss(t1)})" if f['windows'] > 1 else ""
 			late = first * 60000 >= end - LATE_WINDOW if end else False
+			# Ranked by army value killed; told in units: what each side fielded and how many units each lost.
 			ev.append(((ka + kb) * (0.5 if late else 1), first * 60000,
-				f"{name(win)} fought {name(lose)}: {round(kw):,} vs {round(kl):,} army value killed{when}"))
+				f"{name(win)}{_fielded(A, win, t0, t1)} fought {name(lose)}{_fielded(A, lose, t0, t1)}{when}: "
+				f"{name(win)} lost {_units_lost(army, win, t0, t1)}, {name(lose)} lost {_units_lost(army, lose, t0, t1)}"))
 
 	# Raids: one player killing many of another player's villagers or fishing ships in one burst (kills under a
 	# minute apart); bursts on the same player less than 5 minutes apart are one moment.
