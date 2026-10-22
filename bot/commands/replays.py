@@ -206,10 +206,11 @@ def _draft_embed(match, res, model, games, author):
 	where = f"{res['map']} ({res['category']})" if res.get('category') and res['category'] != 'Other' else res['map']
 	embed = Embed(title=f"Civ draft: {where}", colour=0x9a5b13)
 	embed.description = ("A civ and position for each player." if per_player else
-		"Civs for each team: decide among yourselves who plays which civ and position.")
+		f"{draft.TEAM_CHOICES} civs for each team: choose your players' civs from them and decide who plays where.")
 	for i, team in enumerate(res['teams']):
 		t = match.teams[i]
-		elo = round(sum(s.elo or 0 for s in team) / len(team)) if team else 0
+		players = match.teams[i]
+		elo = round(sum(match.ratings.get(p.id) or 0 for p in players) / len(players)) if players else 0
 		lines = []
 		for s in team:
 			units = ", ".join(draft.main_lines(model, s.civ, s.seat))

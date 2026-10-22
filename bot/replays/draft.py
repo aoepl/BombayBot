@@ -599,11 +599,17 @@ def ranked_civs():
 TEAM_CIVS, PLAYER_CIVS = 'team', 'player'  # civs per team (players sort them out) / a civ and seat for each player
 EXCLUDE_MIN, EXCLUDE_MAX = 15, 25  # civs left out at random before every draft, so drafts don't repeat
 SEAT_PRIOR = 4  # a player's win rate in a seat starts as 4 games at 50%
+TEAM_CHOICES = 6  # civs each team gets to choose from in TEAM_CIVS mode (at least one per player)
 
 
-def seat_layout(size):
-	""" Seats of a team from one end to the other: flanks at the ends, pockets between (none below 3 players). """
-	return ['Flank'] + ['Pocket'] * (size - 2) + ['Flank'] if size >= 3 else [None] * size
+def seat_layout(size, choices=None):
+	"""
+	Seats of a team from one end to the other: flanks at the ends, pockets between (none below 3 players).
+	With choices (more civs than players), the extra civs are for flank, pocket, flank... in turn.
+	"""
+	seats = ['Flank'] + ['Pocket'] * (size - 2) + ['Flank'] if size >= 3 else [None] * size
+	extra = max(0, (choices or size) - size)
+	return seats + ([('Flank', 'Pocket')[i % 2] for i in range(extra)] if size >= 3 else [None] * extra)
 
 
 def civ_pool(rng, civs=None, low=EXCLUDE_MIN, high=EXCLUDE_MAX, keep=0):
@@ -659,13 +665,14 @@ def pick_order(sizes, first):
 def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=None, records=None, civs=None):
 	"""
 	A whole draft for a started match. teams: two lists of dicts(name, elo, user_id). In TEAM_CIVS mode each team
-	gets civs for its seats (team average Elo, no player), to share out as they like; in PLAYER_CIVS mode every
+	gets TEAM_CHOICES civs (team average Elo, no player) to choose its players' civs from; in PLAYER_CIVS mode every
 	player gets a seat (assign_seats, from their flank/pocket records) and a civ. Both teams take the best civ
 	left in turn (snake order, the lower total Elo first) from the civs not left out at random.
 	-> dict(mode, map, category, teams (Slots with civs), picks, excluded, first, balance)
 	"""
 	rng = rng or random.Random()
-	pool, excluded = civ_pool(rng, civs, keep=sum(len(t) for t in teams) + 2 * FIELD_SIZE)
+	picks = sum(len(t) if mode == PLAYER_CIVS else max(len(t), TEAM_CHOICES) for t in teams)
+	pool, excluded = civ_pool(rng, civs, keep=picks + 2 * FIELD_SIZE)
 	if mode == PLAYER_CIVS:
 		slots = [assign_seats(t, records or {}, rng) for t in teams]
 	else:
@@ -673,7 +680,7 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 		for t in teams:
 			elos = [p['elo'] for p in t if p.get('elo') is not None]
 			avg = round(sum(elos) / len(elos)) if elos else None
-			slots.append([Slot(seat, avg) for seat in seat_layout(len(t))])
+			slots.append([Slot(seat, avg) for seat in seat_layout(len(t), max(len(t), TEAM_CHOICES))])
 	first = fair_first_pick(slots)
 	d = Draft(map_name, category, pool, slots, pick_order([len(t) for t in slots], first))
 	made, d = simulate(model, d)
