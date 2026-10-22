@@ -709,7 +709,8 @@ def pick_reason(model: Model, res, team, slot):
 	units = " and ".join(lines[:2])
 	parts = []
 	if n_all >= GAMES_TO_TRUST:
-		parts.append(f"{units}; {strength - 0.5:+.0%} against Elo in {n_all} games here" +
+		diff = round(100 * (strength - 0.5))
+		parts.append(f"{units}; {'even' if diff == 0 else f'{diff:+d}%'} against Elo in {n_all} games here" +
 			(f" ({n_map} on this map)" if n_map else ""))
 	else:
 		parts.append(f"{units} {'suit a ' + seat if seat else 'are strong'} by its tech tree"
