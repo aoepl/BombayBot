@@ -313,26 +313,18 @@ async def starting_map(rec, result=None):
 		return None
 
 
-def _map_file(embed, png):
+def _map_file(png):
 	"""
-	Show the map picture inside the embed (its image, attachment://minimap.png): -> the File to send with it, or
-	None. Discord shows the file once, as the embed's image, as long as the embed points at it in the same message;
-	every send and edit keeps it so (_keep_map).
+	The map picture as a plain attachment (or None). It is not used as the embed's image: Discord then shows the
+	file a second time unless every send and edit keeps pointing the embed at it, which forum posts and edits
+	don't reliably do. A plain attachment shows once, above the breakdown.
 	"""
-	if not png:
-		return None
-	embed.set_image(url=f'attachment://{MINIMAP}')
-	return File(BytesIO(png), filename=MINIMAP)
+	return File(BytesIO(png), filename=MINIMAP) if png else None
 
 
-def _keep_map(embed, msg):
-	"""
-	Point the embed's image at the map picture already attached to msg. An embed fetched back from Discord has the
-	image's CDN address instead (and posts made while the picture was a plain attachment have none); sent like
-	that, Discord shows the attachment on its own above the embed.
-	"""
-	if any(a.filename == MINIMAP for a in msg.attachments):
-		embed.set_image(url=f'attachment://{MINIMAP}')
+def _no_map_image(embed):
+	""" Posts made before this showed the picture as the embed's image too: drop it when editing them. """
+	embed.set_image(url=None)
 	return embed
 
 
@@ -349,8 +341,7 @@ async def publish(qc, result, map_name=None, lobby=None, title=None, footer=None
 	if mention_ids:
 		content += " " + " ".join(f"<@{u}>" for u in mention_ids)
 	extra = {}
-	plain = embed.copy()  # without the picture, for the forum post's first step
-	if map_file := _map_file(embed, map_png):
+	if map_file := _map_file(map_png):
 		extra['file'] = map_file
 
 	forum = getattr(qc.cfg, 'replay_forum', None)
@@ -359,18 +350,9 @@ async def publish(qc, result, map_name=None, lobby=None, title=None, footer=None
 		msg = await channel.send(embed=embed, **extra)
 		posted = dict(channel_id=channel.id, message_id=msg.id, url=msg.jump_url)
 	elif isinstance(forum, ForumChannel):
-		# A forum post sent with a file doesn't keep the embed pointing at it (the library puts the attachment
-		# outside the post's message), so the file showed twice. Post first, then add the picture by editing the
-		# first message, which links the embed's image to the file like any message.
-		created = await forum.create_thread(name=title[:100], content=content, embed=plain if map_file else embed)
+		created = await forum.create_thread(name=title[:100], content=content, embed=embed, **extra)
 		thread = getattr(created, 'thread', created)
 		posted = dict(channel_id=forum.id, thread_id=thread.id, url=getattr(thread, 'jump_url', None))
-		if map_file:
-			try:
-				first = getattr(created, 'message', None) or await thread.fetch_message(thread.id)
-				await first.edit(embed=embed, file=map_file)
-			except Exception as e:  # noqa: BLE001 - the post stands without the picture
-				log.error(f"Could not add the map picture to the post: {e}")
 	else:
 		msg = await forum.send(content=content, embed=embed, **extra)
 		thread = await msg.create_thread(name=title[:100])
@@ -408,12 +390,12 @@ async def update_post(qc, row, result, title, map_name=None, footer=None, links=
 		else:
 			thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
 			msg = await thread.fetch_message(row['thread_id'])
-		map_file = _map_file(embed, map_png)
+		map_file = _map_file(map_png)
 		if map_file:  # replace the old picture (if any), keep any other attachment
 			keep = [a for a in msg.attachments if a.filename != MINIMAP]
 			await msg.edit(embed=embed, file=map_file, attachments=keep)
 		else:
-			await msg.edit(embed=_keep_map(embed, msg))
+			await msg.edit(embed=embed)
 		if row.get('thread_id'):
 			thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
 			if getattr(thread, 'name', title[:100]) != title[:100]:
@@ -604,7 +586,7 @@ async def _add_links(row, links):
 		thread = dc.get_channel(row['thread_id']) or await dc.fetch_channel(row['thread_id'])
 		msg = await thread.fetch_message(row['thread_id'])
 	if msg.embeds:
-		await msg.edit(embed=_keep_map(post.with_links(msg.embeds[0], links), msg))
+		await msg.edit(embed=_no_map_image(post.with_links(msg.embeds[0], links)))
 
 
 # ---------- automatic fetch after a pickup match is reported
