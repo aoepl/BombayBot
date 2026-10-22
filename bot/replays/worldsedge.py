@@ -117,11 +117,23 @@ def replay_urls(match):
 	return {u['profile_id']: u['url'] for u in match.get('matchurls', []) if u.get('url')}
 
 
+def download_links(match, profile_id):
+	"""
+	Where to get a player's recording: the official aoe.ms link first (the one the game's stats pages share; it
+	redirects to a fresh download), then the match's own storage link, which can answer HTTP 409.
+	"""
+	links = [replay_link(match['id'], profile_id)]
+	if url := replay_urls(match).get(profile_id):
+		links.append(url)
+	return links
+
+
 async def download(url):
 	async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-		async with session.get(url) as r:
+		async with session.get(url, allow_redirects=True) as r:
 			if r.status != 200:
-				raise WorldsEdgeError(f"Recorded game download failed with HTTP {r.status}.")
+				body = (await r.text(errors='replace'))[:200].replace('\n', ' ')
+				raise WorldsEdgeError(f"Recorded game download failed with HTTP {r.status} ({body.strip() or 'no details'}).")
 			data = bytearray()
 			async for chunk in r.content.iter_chunked(1 << 16):
 				data += chunk

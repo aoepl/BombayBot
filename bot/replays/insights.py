@@ -12,13 +12,14 @@ Re-analysing the same game replaces its rows, so uploading a recorded game twice
 double counts. Bump ANALYSIS_VERSION when scoring changes, so old rows can be told apart.
 """
 import hashlib
+import json
 import re
 import time
 
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 41
+ANALYSIS_VERSION = 54
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -49,6 +50,65 @@ db.ensure_table(dict(
 		dict(cname="at", ctype=db.types.int)
 	],
 	primary_keys=["game_key"]
+))
+
+# One row per base lost in a game: which civ in which position took which civ in which position, on which map.
+db.ensure_table(dict(
+	tname="aoe_matchups",
+	columns=[
+		dict(cname="game_key", ctype=db.types.str),
+		dict(cname="map_name", ctype=db.types.str),
+		dict(cname="map_category", ctype=db.types.str),
+		dict(cname="team_size", ctype=db.types.int),
+		dict(cname="winner_civ", ctype=db.types.str),
+		dict(cname="winner_seat", ctype=db.types.str),
+		dict(cname="winner_name", ctype=db.types.str),
+		dict(cname="winner_user_id", ctype=db.types.int),
+		dict(cname="winner_elo", ctype=db.types.int),
+		dict(cname="loser_civ", ctype=db.types.str),
+		dict(cname="loser_seat", ctype=db.types.str),
+		dict(cname="loser_name", ctype=db.types.str),
+		dict(cname="loser_user_id", ctype=db.types.int),
+		dict(cname="loser_elo", ctype=db.types.int),
+		dict(cname="share", ctype=db.types.float),
+		dict(cname="winner_team_won", ctype=db.types.bool),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["game_key", "loser_name"]
+))
+
+# One row per major fight between two players: what each side fielded (units queued in the 5 minutes before and
+# during it), the army value each killed, and the share the sides' Elos predicted (allies in the fight included).
+db.ensure_table(dict(
+	tname="aoe_fights",
+	columns=[
+		dict(cname="game_key", ctype=db.types.str),
+		dict(cname="idx", ctype=db.types.int),
+		dict(cname="map_name", ctype=db.types.str),
+		dict(cname="map_category", ctype=db.types.str),
+		dict(cname="team_size", ctype=db.types.int),
+		dict(cname="start_s", ctype=db.types.int),
+		dict(cname="a_name", ctype=db.types.str),
+		dict(cname="a_user_id", ctype=db.types.int),
+		dict(cname="a_civ", ctype=db.types.str),
+		dict(cname="a_seat", ctype=db.types.str),
+		dict(cname="a_elo", ctype=db.types.int),
+		dict(cname="a_side", ctype=db.types.str),
+		dict(cname="a_lines", ctype=db.types.str),
+		dict(cname="a_killed", ctype=db.types.int),
+		dict(cname="b_name", ctype=db.types.str),
+		dict(cname="b_user_id", ctype=db.types.int),
+		dict(cname="b_civ", ctype=db.types.str),
+		dict(cname="b_seat", ctype=db.types.str),
+		dict(cname="b_elo", ctype=db.types.int),
+		dict(cname="b_side", ctype=db.types.str),
+		dict(cname="b_lines", ctype=db.types.str),
+		dict(cname="b_killed", ctype=db.types.int),
+		dict(cname="a_share", ctype=db.types.float),
+		dict(cname="expected", ctype=db.types.float),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["game_key", "idx"]
 ))
 
 db.ensure_table(dict(
@@ -112,6 +172,21 @@ db.ensure_table(dict(
 		dict(cname="score_rank", ctype=db.types.int),
 		dict(cname="elo_delta", ctype=db.types.float),
 		dict(cname="elo_verdict", ctype=db.types.str),
+		dict(cname="fight_vs_elo", ctype=db.types.float),
+		dict(cname="fight_value", ctype=db.types.int),
+		dict(cname="multi_enemy_minutes", ctype=db.types.int),
+		dict(cname="focused_minutes", ctype=db.types.int),
+		dict(cname="outnumbered_trade", ctype=db.types.float),
+		dict(cname="several_bonus", ctype=db.types.float),
+		dict(cname="forward_value", ctype=db.types.float),
+		dict(cname="forward_effect", ctype=db.types.float),
+		dict(cname="forward_bonus", ctype=db.types.float),
+		dict(cname="macro_disrupted", ctype=db.types.int),
+		dict(cname="buildings_destroyed", ctype=db.types.int),
+		dict(cname="age_delay_bonus", ctype=db.types.float),
+		# JSON: why the player got each score (Explain analysis). MEDIUMTEXT: "text" is only VARCHAR(2000) on MySQL,
+		# too short for it (the earlier "explain" column of that type is no longer used).
+		dict(cname="explain_json", ctype=db.types.dict),
 		dict(cname="pressure_dealt", ctype=db.types.int),
 		dict(cname="playstyle", ctype=db.types.str),
 		dict(cname="macro_score", ctype=db.types.float),
@@ -140,9 +215,10 @@ db.ensure_table(dict(
 
 
 def map_category(map_name):
-	name = (map_name or '').lower()
+	""" Map type from the name; spaces, underscores and symbols ignored ("nCZ_PalisadeArena_1.0" is Semi Closed). """
+	name = re.sub(r'[^0-9a-z]', '', (map_name or '').lower())
 	for category, keys in MAP_CATEGORIES:
-		if any(k in name for k in keys):
+		if any(re.sub(r'[^0-9a-z]', '', k) in name for k in keys):
 			return category
 	return 'Other'
 
@@ -183,6 +259,8 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 			if other and other['game_key'] != key:
 				if key.startswith('we:') and not other['game_key'].startswith('we:'):
 					await db.delete('aoe_game_players', where=dict(game_key=other['game_key']))
+					await db.delete('aoe_matchups', where=dict(game_key=other['game_key']))
+					await db.delete('aoe_fights', where=dict(game_key=other['game_key']))
 					await db.delete('aoe_games', where=dict(game_key=other['game_key']))
 				else:
 					key = other['game_key']
@@ -217,7 +295,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				user_id=p.get('user_id'), name=p['name'], map_name=map_name, map_category=category,
 				team_size=team_size, civ=p['civ'], civ_id=p['civ_id'], team=p['team_id'], seat=p['seat'],
 				won=p['won'], elo=p.get('elo'), tg_rating=p.get('rating'),
-				strategy=s['strategy'], opening=parts.get('opening'), boom=parts.get('boom'), fish_boom=parts.get('fish_boom'), feudal_boom=parts.get('feudal_boom'),
+				strategy=(s['strategy'] or '')[:191], opening=parts.get('opening'), boom=parts.get('boom'), fish_boom=parts.get('fish_boom'), feudal_boom=parts.get('feudal_boom'),
 				main_units=", ".join(parts.get('main_units', [])), fast_imp=parts.get('fast_imp'),
 				feudal_units=", ".join(parts.get('feudal_units', [])), feudal_attack=parts.get('feudal_attack'),
 				forward_towers=parts.get('forward_towers'), castle_units=", ".join(parts.get('castle_units', [])),
@@ -230,7 +308,13 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				late_gold_share=s.get('late_gold_share'),
 				score_exec=sc['exec'], score_pressure=sc['press'], score_survival=sc['surv'], score_team=sc['team'],
 				score_overall=sc['overall'], score_rank=s.get('score_rank'), elo_delta=s.get('elo_delta'),
-				elo_verdict=s.get('elo_verdict'), pressure_dealt=s.get('press_out'),
+				elo_verdict=s.get('elo_verdict'), fight_vs_elo=s.get('fight_vs_elo'), fight_value=s.get('fight_value'),
+				multi_enemy_minutes=s.get('multi_enemy_minutes'), focused_minutes=s.get('focused_minutes'),
+				outnumbered_trade=s.get('outnumbered_trade'), several_bonus=s.get('several_bonus'),
+				forward_value=s.get('forward_value'), forward_effect=s.get('forward_effect'), forward_bonus=s.get('forward_bonus'),
+				macro_disrupted=s.get('macro_disrupted'), buildings_destroyed=s.get('buildings_destroyed'), age_delay_bonus=s.get('age_delay_bonus'),
+				explain_json=json.dumps(s['explain']) if s.get('explain') else None,
+				pressure_dealt=s.get('press_out'),
 				playstyle=s.get('playstyle'), macro_score=s.get('macro'), micro_score=s.get('micro'),
 				army_apm=s['army'].get('army_apm'), targeted_share=s['army'].get('targeted_share'),
 				avg_group_size=s['army'].get('avg_group'), units_kept=s['army'].get('units_kept'),
@@ -242,8 +326,43 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				base_note=(s.get('survival_note') or '')[:2000], tributes_sent=s.get('trib_out'),
 				tributes_received=s.get('trib_in'), analysis_version=ANALYSIS_VERSION, at=now
 			))
-		await db.delete('aoe_game_players', where=dict(game_key=key))
-		await db.insert_many('aoe_game_players', rows)
+		# Replace in place (key: game and player) rather than delete first, so a failed write keeps the old stats.
+		await db.insert_many('aoe_game_players', rows, on_dublicate="replace")
+		kept = {r['profile_id'] for r in rows}
+		for old in await db.select(('game_key', 'profile_id'), 'aoe_game_players', where=dict(game_key=key)):
+			if old['profile_id'] not in kept:
+				await db.delete('aoe_game_players', where=dict(game_key=key, profile_id=old['profile_id']))
+		# Lost bases: which civ and position took which, on this map.
+		matchups = []
+		for k in result.get('base_kills', []):
+			w, l = players[k['winner']], players[k['loser']]
+			matchups.append(dict(
+				game_key=key, map_name=map_name, map_category=category, team_size=team_size,
+				winner_civ=w['civ'], winner_seat=w.get('seat'), winner_name=w['name'], winner_user_id=w.get('user_id'),
+				winner_elo=w.get('elo'), loser_civ=l['civ'], loser_seat=l.get('seat'), loser_name=l['name'],
+				loser_user_id=l.get('user_id'), loser_elo=l.get('elo'), share=k['share'],
+				winner_team_won=w.get('won'), at=now
+			))
+		await db.delete('aoe_matchups', where=dict(game_key=key))
+		if matchups:
+			await db.insert_many('aoe_matchups', matchups)
+		# Fights: which units each side fielded and how it went against Elo.
+		fights = []
+		for i, f in enumerate(result.get('fights', [])):
+			a, b = players[f['a']], players[f['b']]
+			fights.append(dict(
+				game_key=key, idx=i, map_name=map_name, map_category=category, team_size=team_size,
+				start_s=f['start_m'] * 60, a_name=a['name'], a_user_id=a.get('user_id'), a_civ=a['civ'],
+				a_seat=a.get('seat'), a_elo=a.get('elo'), a_side=", ".join(players[q]['name'] for q in f['a_side']),
+				a_lines=json.dumps(f['a_lines']), a_killed=round(f['a_killed']),
+				b_name=b['name'], b_user_id=b.get('user_id'), b_civ=b['civ'], b_seat=b.get('seat'), b_elo=b.get('elo'),
+				b_side=", ".join(players[q]['name'] for q in f['b_side']), b_lines=json.dumps(f['b_lines']),
+				b_killed=round(f['b_killed']), a_share=round(f['a_share'], 3),
+				expected=round(f['expected'], 3) if f['expected'] is not None else None, at=now
+			))
+		await db.delete('aoe_fights', where=dict(game_key=key))
+		if fights:
+			await db.insert_many('aoe_fights', fights)
 		log.info(f"Saved replay insights for {key}: {len(rows)} players on {map_name} ({category}).")
 		return key
 	except Exception as e:

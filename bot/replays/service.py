@@ -15,6 +15,7 @@ download and the match pages instead. Profile ids are learned from uploaded reco
 lists each player's profile id, saved against the member their name matched.
 """
 import asyncio
+import json
 import re
 import time
 
@@ -83,27 +84,45 @@ class ReplayError(Exception):
 # ---------- AoE2 profile ids
 
 async def learn_profiles(rec, found):
-	""" Save the profile id of every player whose name matched a member. """
+	"""
+	Save the profile id and in-game name of every player in an uploaded recording, so later reported matches can
+	be found on World's Edge. A player matched to a member is saved against them; an unmatched player is saved by
+	name only (a profile already linked to a member keeps that link) and is picked up when the name is linked with
+	/aoe link later.
+	"""
 	now = int(time.time())
 	for p in rec['players']:
-		info = found.get(p['name'])
-		if info and info.get('user_id') and p.get('profile_id'):
-			try:
-				await db.insert('aoe_profiles', dict(
-					profile_id=p['profile_id'], user_id=info['user_id'], name=p['name'], at=now
-				), on_dublicate="replace")
-			except Exception as e:
-				log.error(f"Could not save AoE2 profile {p['profile_id']}: {e}")
+		if not p.get('profile_id') or p['profile_id'] <= 0:
+			continue  # AI players have no profile
+		info = found.get(p['name']) or {}
+		user_id = info.get('user_id')
+		try:
+			if not user_id:
+				old = await db.select_one(('user_id',), 'aoe_profiles', where=dict(profile_id=p['profile_id']))
+				user_id = old.get('user_id') if old else None
+			await db.insert('aoe_profiles', dict(
+				profile_id=p['profile_id'], user_id=user_id, name=p['name'], at=now
+			), on_dublicate="replace")
+		except Exception as e:
+			log.error(f"Could not save AoE2 profile {p['profile_id']}: {e}")
 
 
 async def profiles_of(user_ids):
-	""" {user_id: [profile ids, most recently seen first]} """
+	"""
+	{user_id: [profile ids, most recently seen first]}: profiles saved against the member, and profiles saved
+	under one of the in-game names they linked with /aoe link.
+	"""
 	wanted = set(user_ids)
-	out = {}
-	rows = await db.select(('profile_id', 'user_id', 'at'), 'aoe_profiles')
-	for r in sorted(rows, key=lambda r: -(r.get('at') or 0)):
+	by_name = {}
+	for r in await db.select(('name_key', 'user_id'), 'aoe_name_links'):
 		if r['user_id'] in wanted:
-			out.setdefault(r['user_id'], []).append(r['profile_id'])
+			by_name[r['name_key']] = r['user_id']
+	out = {}
+	rows = await db.select(('profile_id', 'user_id', 'name', 'at'), 'aoe_profiles')
+	for r in sorted(rows, key=lambda r: -(r.get('at') or 0)):
+		uid = r['user_id'] if r.get('user_id') in wanted else by_name.get(_norm(r.get('name')))
+		if uid and r['profile_id'] not in out.get(uid, []):
+			out.setdefault(uid, []).append(r['profile_id'])
 	return out
 
 
@@ -388,8 +407,21 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 		for p in rec['players']:
 			if p['name'] == name:
 				meta[p['profile_id']] = dict(elo=info['elo'], user_id=info['user_id'])
-	result = await asyncio.to_thread(analysis.analyze, rec, meta)
 	key = insights.game_key(filename=filename, rec=rec)
+	footer = f"Uploaded by {get_nick(ctx.author)}"
+	# Analysed already by this version of the bot: nothing to redo.
+	stale, old_version, saved_key = await _needs_analysis(key, fp)
+	existing = await _live_post(key=saved_key, fingerprint=fp) if summary else None
+	if summary and not existing:
+		stale = True  # the post was deleted (or never made): analyse and post it again
+	if not stale:
+		url = existing.get('post_url') if existing else None
+		where = f": {url}" if url else "."
+		what = f"already posted{where}" if existing else "already analysed."
+		await ctx.success(f"This game was {what} It was analysed with the current version of the bot "
+			f"(v{insights.ANALYSIS_VERSION}), so nothing changed.\n{report}")
+		return
+	result = await asyncio.to_thread(analysis.analyze, rec, meta)
 	saved = await insights.save(
 		result, key, map_name=rec.get('map_name'), channel_id=qc.id, source='upload',
 		uploaded_by=ctx.author.id, fingerprint=fp
@@ -406,13 +438,14 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 			_spawn(_links_later(qc, None, **later))  # still find the World's Edge id, so the game is known by it
 		return
 
-	footer = f"Uploaded by {get_nick(ctx.author)}"
 	existing = await _live_post(key=key, fingerprint=fp)
 	if existing or key in _posting or fp in _posting:
 		url = existing.get('post_url') if existing else None
 		where = f": {url}" if url else "."
+		why = (f"re-analysed with the newer bot version (v{old_version} → v{insights.ANALYSIS_VERSION})"
+			if old_version is not None and old_version < insights.ANALYSIS_VERSION else "updated with the latest Elo and stats")
 		if existing and await update_post(qc, existing, result, title, rec.get('map_name'), footer=footer, links=links):
-			await ctx.success(f"This game was already posted, so the post was updated with the latest Elo and stats{where}\n{report}")
+			await ctx.success(f"This game was already posted, so the post was {why}{where}\n{report}")
 			if lookup and not links:
 				_spawn(_links_later(qc, existing, **later))
 		else:
@@ -431,6 +464,49 @@ async def analyze_upload(qc, ctx, data: bytes, filename: str, summary: bool = Tr
 		row = dict(channel_id=posted['channel_id'], thread_id=posted.get('thread_id'), message_id=posted.get('message_id'),
 			post_url=posted.get('url'))
 		_spawn(_links_later(qc, row, **later))
+
+
+async def _needs_analysis(key, fp):
+	"""
+	(analyse again?, version it was analysed with, key it is saved under). A game needs analysing only when it
+	was never saved or was saved by an older version of the bot (scoring rules changed). Player or Elo changes
+	since don't count.
+	"""
+	row = None
+	for col, value in (('game_key', key), ('fingerprint', fp)):
+		if value and not row:
+			row = await db.select_one(('game_key', 'analysis_version'), 'aoe_games', where={col: value})
+	if not row:
+		return True, None, key
+	version = row.get('analysis_version')
+	return version is None or version < insights.ANALYSIS_VERSION, version, row['game_key']
+
+
+async def explain_post(channel_id, message_id):
+	"""
+	Why each player got their scores, for an analysis post. Works on the post itself (its message, or a forum
+	post's starter message) or any message in its thread. Returns (title, [messages of embeds]).
+	"""
+	rows = []
+	for where in (dict(message_id=message_id), dict(thread_id=message_id), dict(thread_id=channel_id), dict(message_id=channel_id)):
+		if not rows and all(where.values()):
+			rows = await db.select(('game_key', 'post_url'), 'aoe_game_posts', where=where)
+	if not rows:
+		raise ReplayError("That isn't a game analysis post. Use this on a post made by /replay upload (or on a message in its thread).")
+	players, key = [], None
+	for key in {r['game_key'] for r in rows}:
+		players = await db.select(('name', 'civ', 'seat', 'score_overall', 'explain_json'), 'aoe_game_players', where=dict(game_key=key))
+		if players:
+			break
+	if not players:
+		raise ReplayError("The stats for this game are no longer saved. Upload the recorded game again to analyse it.")
+	if not all(p.get('explain_json') for p in players):
+		raise ReplayError("This game was analysed before explanations were saved. Upload the recorded game again: "
+			f"it is analysed with the current version (v{insights.ANALYSIS_VERSION}) and then can be explained.")
+	players.sort(key=lambda p: -(p.get('score_overall') or 0))
+	game = await db.select_one(('map_name',), 'aoe_games', where=dict(game_key=key)) or {}
+	title = f"Why each player got their scores{' on ' + game['map_name'] if game.get('map_name') else ''}"
+	return title, post.explain_embeds([(p['name'], p['civ'], p.get('seat'), json.loads(p['explain_json'])) for p in players])
 
 
 def _spawn(coro):
@@ -482,9 +558,29 @@ def _auto_enabled(qc):
 
 
 def schedule(match):
-	""" Called after /report loss or draw (never abort). Runs in the background so reporting is never slowed down. """
-	if not _auto_enabled(match.qc) or match.id in _pending:
+	"""
+	Called after a match result is reported (loss, agreed draw, or a moderator's report; never abort). Runs in the
+	background so reporting is never slowed down.
+	"""
+	if match.id in _pending:
 		return
+	forum = getattr(match.qc.cfg, 'replay_forum', None)
+	if not bool(getattr(match.qc.cfg, 'replay_auto', 1)):
+		log.info(f"Replay for match {match.id}: automatic breakdowns are off in this channel (replay_auto).")
+		return
+	if not isinstance(forum, ForumChannel):
+		# Only a forum channel turns this on. Say so when a replay channel is set, since then it looks like it should work.
+		log.info(f"Replay for match {match.id}: no automatic breakdown, replay_forum is "
+			f"{'not set' if forum is None else 'not a forum channel'}.")
+		if forum is not None:
+			try:
+				asyncio.get_running_loop().create_task(_notify(match.qc, f"No automatic game breakdown for match ({match.id}): "
+					"the replay channel is not a forum channel. Set a forum channel as replay_forum, or upload the game "
+					"with `/replay upload`."))
+			except RuntimeError:  # not called from the bot's event loop: the log line above is enough
+				pass
+		return
+	log.info(f"Replay for match {match.id}: looking for the recorded game on World's Edge.")
 	info = dict(
 		match_id=match.id,
 		qc_id=match.qc.id,
@@ -523,12 +619,20 @@ async def _run(qc, info):
 			try:
 				if await _process(qc, info):
 					return
+				log.info(f"Replay for match {info['match_id']}: not on World's Edge yet (players {sorted(info['profile_ids'])}); "
+					"will retry.")
 			except ReplayError as e:
 				log.info(f"Replay for match {info['match_id']}: {e}")
 				if e.args and e.args[0].startswith("No known"):
+					await _notify(qc, f"Couldn't look up the recorded game for match ({info['match_id']}): none of its "
+						"players has a known AoE2 profile yet. Profiles come from recorded games uploaded with `/replay "
+						"upload`, so upload this game to get its breakdown; after that, these players' games are found "
+						"automatically.")
 					return
+			except worldsedge.WorldsEdgeError as e:
+				log.info(f"Replay for match {info['match_id']}: {e}; will retry.")
 			except Exception as e:
-				log.info(f"Replay for match {info['match_id']}: World's Edge not reachable ({e}); will retry.")
+				log.info(f"Replay for match {info['match_id']}: World's Edge not reachable ({type(e).__name__}: {e}); will retry.")
 		if not info['cancelled']:
 			await _notify(qc, f"Couldn't find the recorded game for match ({info['match_id']}) on World's Edge. "
 				f"Upload it with `/replay upload` to get the game breakdown.")
@@ -562,9 +666,23 @@ async def _process(qc, info):
 		return False  # the game is there but no recording was uploaded yet
 
 	profile_user = {pid: uid for uid, pids in links.items() for pid in pids}
-	source = max(urls, key=lambda pid: rating.get(profile_user.get(pid), 0))  # highest-rated player's recording
-	raw = await worldsedge.download(urls[source])
-	rec = await asyncio.to_thread(rec_parser.parse, raw)
+	# Highest-rated known player's recording first, then everyone else's; each from the match's link, then aoe.ms.
+	sources = sorted(urls, key=lambda pid: (pid not in profile_user, -rating.get(profile_user.get(pid), 0)))
+	rec, source, errors = None, None, []
+	for pid in sources:
+		for url in worldsedge.download_links(game, pid):
+			try:
+				raw = await worldsedge.download(url)
+				rec = await asyncio.to_thread(rec_parser.parse, raw)
+				source = pid
+				break
+			except Exception as e:
+				errors.append(f"{pid}: {type(e).__name__}: {e}")
+		if rec:
+			break
+	if not rec:
+		raise worldsedge.WorldsEdgeError(f"game {game['id']} found, but no recording could be downloaded: " + "; ".join(errors[:4]))
+	log.info(f"Replay for match {info['match_id']}: downloaded the recording of profile {source} for game {game['id']}.")
 	fp = insights.fingerprint(rec)
 	if info['cancelled'] or fp in _posting or await _live_post(key=key, fingerprint=fp):
 		return True

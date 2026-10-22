@@ -186,7 +186,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		for a in mine:
 			if a['a'] == 'RESEARCH':
 				n = _name('technologies', a['technology_id'])
-				if n in AGES and n not in ages:
+				if n in AGES:  # clicked again (Town Center destroyed or research cancelled): the last click counted
 					ages[n] = a['t']
 		units = Counter()
 		first_military = None
@@ -241,6 +241,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	press_out, press_in, help_out = Counter(), Counter(), Counter()
 	press_matrix = Counter()
 	timeline_in = defaultdict(Counter)  # defender -> minute -> orders
+	into_by = defaultdict(Counter)  # (attacker, defender) -> minute -> army orders into the defender's base
 	team_into = defaultdict(Counter)  # (attacking team, defender) -> minute -> orders
 	attack_times = defaultdict(list)  # attacker -> times of army orders into enemy bases
 	for a in A:
@@ -261,6 +262,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			press_in[b] += 1
 			press_matrix[(pid, b)] += 1
 			timeline_in[b][int(a['t'] // 60000)] += 1
+			into_by[(pid, b)][int(a['t'] // 60000)] += 1
 			team_into[(players[pid]['team_id'], b)][int(a['t'] // 60000)] += 1
 		elif b != pid:
 			help_out[pid] += 1
@@ -280,7 +282,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if a['a'] == 'ORDER' and a['t'] >= b['t'] and a.get('target_id', 0) > 0 and a.get('x') is not None \
 					and math.dist((a['x'], a['y']), (x, y)) < 2.6:
 				cand[a['target_id']] += 1
-		status, oid = 'unclear', None
+		status, oid, lost_at = 'unclear', None, None
 		produced = []
 		for o, _ in cand.most_common(2):
 			r = refs.get(o, [])
@@ -300,11 +302,13 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 				and players[a['player_id']]['team_id'] != players[pid]['team_id']]
 			if enemy_hits and last == max(a['t'] for a in enemy_hits) and end - last > 90000:
 				status = 'lost'
+				lost_at = last
 		trained = Counter(_name('objects', a['unit_id']) for a in produced if a['a'] == 'DE_QUEUE')
 		castles.append(dict(
 			t=b['t'], player=pid, kind=_name('objects', b['building_id']), base=where,
 			forward=where != pid and players[where]['team_id'] != players[pid]['team_id'],
-			status=status, deleted_at=deleted.get(oid), trained=trained.most_common(2), oid=oid
+			status=status, deleted_at=deleted.get(oid), trained=trained.most_common(2), oid=oid,
+			lost_at=lost_at, x=x, y=y, building_id=b['building_id'], act=id(b)
 		))
 
 	# Objects that queue castle units (Trebuchets, Petards, or the unique units a known castle trained) are castles.
@@ -371,16 +375,16 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	# the army value sent into enemy bases, and forward castles and towers.
 	imp_at = {p: stats[p]['ages'].get('Imperial Age') for p in pids}
 	water = water_weight(rec.get('map_name'))
-	army = army_presence(A, players, base_of, villagers, end, offensive, imp_at, water)
-	fwd_up = Counter(c['player'] for c in castles if c['forward'] and c['status'] in ('up', 'lost', 'deleted'))
-	fwd_towers = Counter()
-	for a in A:
-		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) in TOWERS:
-			if players[base_of(a['x'], a['y'])]['team_id'] != players[a['player_id']]['team_id']:
-				fwd_towers[a['player_id']] += 1
-	sent = _minmax({p: army[p]['value_sent'] for p in pids})
-	forward_raw = {p: fwd_up[p] + 0.25 * fwd_towers[p] for p in pids}
-	forward = _minmax(forward_raw)
+	structs = structure_list(A, players, castles, base_of, end)
+	army = army_presence(A, players, base_of, villagers, end, offensive, imp_at, water, structs)
+	# Forward castles, Donjons and towers count by cost and by what they did: stood, held the area, gained ground.
+	forward_raw = forward_value(A, players, structs, villagers, end)
+	for p in pids:
+		mine = [x for x in structs if x['player'] == p and x['forward']]
+		stats[p]['forward_value'] = round(forward_raw[p], 2)
+		stats[p]['forward_effect'] = round(sum(x['effect'] * x['weight'] for x in mine) / sum(x['weight'] for x in mine), 2) if mine else None
+		stats[p]['forward_structures'] = [dict(kind=x['kind'], t=x['t0'], base=x['base'], built=x['known'], effect=x['effect'],
+			held=x['hold'], presence=x['presence'], gain=x['gain'], push=x['push'], pushes=x['pushes'], trade=x['trade']) for x in mine]
 	for p in pids:
 		stats[p]['army'] = army[p]
 	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end)
@@ -430,22 +434,61 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['float_minutes'] = floating[p]
 	exec_parts[2] = _minmax({p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids})
 	exec_parts.append(_minmax(floating, invert=True))
+	# Fighting several enemies at once (execution), and being focused by several (execution by how well the
+	# player traded then, and a harder survival test).
+	multi_raw, focus_raw, focused = several_enemies(A, players, army, villagers, end)
+	# As a share of the game from 8:00, so long games don't hand everyone the full bonus.
+	fight_minutes = max(1.0, end / 60000 - ARMY_FROM)
+	for p in pids:
+		stats[p]['several_bonus'] = round(MULTI_BONUS_MAX * min(1.0, multi_raw[p] / fight_minutes / MULTI_FULL)
+			+ FOCUS_BONUS_MAX * min(1.0, focus_raw[p] / fight_minutes / FOCUS_FULL), 2)
+		stats[p]['multi_enemy_minutes'] = len(focused[p]['multi'])
+		stats[p]['focused_minutes'] = len(focused[p]['focused'])
+		stats[p]['outnumbered_trade'] = focused[p]['trade']
 	playstyle(A, players, stats, army, floating, end, trib_out)
 	# Pressure: army on the map 35%, army value sent at the enemy 40%, damage done (enemy army value killed in
-	# fights plus enemy villagers killed) 15%, forward castles and towers 10%.
-	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] for p in pids}
+	# fights plus enemy villagers killed) 15% (shares of 90%), plus a bonus for forward castles, Donjons and towers.
+	# Damage also counts the enemy macro an attack disrupted: production that stalled while the army was in their base.
+	disrupted, disruptions = macro_disruption(A, players, vest, timeline_in, into_by, end)
+	for p in pids:
+		stats[p]['macro_disrupted'] = round(disrupted[p])
+		stats[p]['macro_disruptions'] = disruptions[p]
+	# ... and enemy Town Centers destroyed, with any research and units in progress in them.
+	razed, razings = town_centers_destroyed(A, players, structs, pos, end)
+	for p in pids:
+		stats[p]['buildings_destroyed'] = round(razed[p])
+		stats[p]['buildings_destroyed_list'] = razings[p]
+	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] + disrupted[p] + razed[p] for p in pids}
 	damage = _minmax(dealt)
 	# Army on the map only matters if it does damage: scale it by damage done per army value, with full
 	# credit at the lobby median or better and nothing for an army that never hurt anyone.
-	per_army = {p: dealt[p] / army[p]['avg_value_on_map'] for p in pids if army[p]['avg_value_on_map']}
+	# Castles and towers are left out of this: their arrows can't be seen as kills, and forward ones are judged
+	# by what they did (forward part).
+	per_army = {p: dealt[p] / army[p]['avg_units_value_on_map'] for p in pids if army[p]['avg_units_value_on_map']}
 	median = sorted(per_army.values())[len(per_army) // 2] if per_army else 0
+	# ... or by how much damage it did in total compared with the lobby's most: a big army that did a lot of damage is
+	# not cut for being big. The better of the two counts.
+	top_dealt = max(dealt.values()) if dealt else 0
 	for p in pids:
-		eff = min(1.0, per_army.get(p, 0) / median) if median else 1.0
-		army[p]['damage_efficiency'] = round(eff, 2)
-	on_map = _minmax({p: army[p]['avg_value_on_map'] * army[p]['damage_efficiency'] for p in pids})
+		for_size = min(1.0, per_army.get(p, 0) / median) if median else 1.0
+		in_total = dealt[p] / top_dealt if top_dealt else 1.0
+		army[p]['damage_for_size'], army[p]['damage_in_total'] = round(for_size, 2), round(in_total, 2)
+		army[p]['damage_efficiency'] = round(max(for_size, in_total), 2)
+	# Army sent at the enemy is judged the same way: sending a lot that achieves little is not pressure.
+	sent_raw = {p: army[p]['value_sent'] * army[p]['damage_efficiency'] for p in pids}
+	sent = _vs_best(sent_raw)  # against the game's best, not stretched between the top and the bottom
+	on_map = _minmax({p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
+		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids})
 	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
-	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage), (0.10, forward_raw, forward)], p)
-		for p in pids}
+	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage)], p) for p in pids}
+	# Forward castles, Donjons and towers only add: up to +1.5, by their cost and effect (see forward_value).
+	for p in pids:
+		bonus = round(FORWARD_BONUS_MAX * min(1.0, forward_raw[p] / FORWARD_BONUS_FULL), 2)
+		stats[p]['forward_bonus'] = bonus
+		# Destroying a Town Center with an age-up in progress delays the enemy's age: up to +1 per age delayed.
+		age_bonus = round(sum(d['bonus'] for x in stats[p]['buildings_destroyed_list'] for d in x['delays']), 2)
+		stats[p]['age_delay_bonus'] = age_bonus
+		press[p] = min(10.0, press[p] + bonus + age_bonus)
 	# Pressure on each base = enemy army orders aimed into it, plus enemy castles and towers built in it.
 	# A castle is only a big threat when an army comes with it: its weight grows with the enemy army
 	# orders into that base from 3 minutes before it was placed to 5 minutes after.
@@ -469,18 +512,20 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 				siege_times[b].append(a['t'])
 	pressure = {p: press_in[p] + siege_in[p] for p in pids}
 
-	# Survival only counts for players whose base was really attacked: did they keep their
-	# economy at home afterwards, or did they have to rebuild somewhere else?
+	# Holding position (survival): for players whose base was really attacked, did they keep their economy at home
+	# afterwards, or did they have to rebuild somewhere else? A base the enemy never got into scores HOLD_UNTESTED.
 	max_in = max(pressure.values()) if pressure else 0
-	survival, survival_note = {}, {}
+	survival, survival_note, surv_detail = {}, {}, {}
 	for p in pids:
 		enemy_castles = sum(1 for c in castles if c['forward'] and c['base'] == p and c['status'] != 'unclear')
 		stats[p]['enemy_castles_in_base'] = enemy_castles
 		stats[p]['enemy_castles_cleared'] = sum(1 for c in castles if c['forward'] and c['base'] == p
 			and c['status'] in ('lost', 'deleted'))
 		if not max_in or (pressure[p] < max(50, 0.25 * max_in) and enemy_castles == 0):
-			survival[p] = None
-			survival_note[p] = "base not seriously attacked"
+			# The enemy never got into this base: the position was held (the fighting stayed elsewhere).
+			survival[p] = HOLD_UNTESTED
+			survival_note[p] = "base not seriously attacked: the enemy was kept out"
+			surv_detail[p] = dict(untested=True)
 			continue
 		tl = timeline_in[p]
 		total, cum, pressure_start = sum(tl.values()), 0, None
@@ -498,11 +543,17 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		# A Town Center next to an ally is an expansion, not a lost base, while the economy stays at home.
 		held = max(0.0, min(1.0, home - (0.1 * moved_tcs if home < 0.85 else 0)))
 		# Holding a light attack is worth less than holding a heavy one.
-		difficulty = min(1.0, pressure[p] / (0.6 * max_in))
+		# Being attacked by two or more enemies at once makes holding harder.
+		difficulty = min(1.0, pressure[p] / (0.6 * max_in) + min(FOCUS_DIFFICULTY_MAX, FOCUS_DIFFICULTY * len(focused[p]['focused'])))
 		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0)
 		survival[p] = max(1.0, min(10.0, value))
+		surv_detail[p] = dict(home=round(home, 2), held=round(held, 2), moved_tcs=moved_tcs, difficulty=round(difficulty, 2),
+			cleared=round(min(cleared[p], 1.0), 2), focused=len(focused[p]['focused']), pressure=pressure[p], max_pressure=max_in)
 		n_cleared = stats[p]['enemy_castles_cleared']
 		cleared_txt = f", cleared {n_cleared} enemy castle{'s' if n_cleared != 1 else ''}" if n_cleared else ""
+		n_focus = len(focused[p]['focused'])
+		if n_focus:
+			cleared_txt += f", attacked by 2+ enemies at once in {n_focus} minute{'s' if n_focus != 1 else ''}"
 		level = 'heavy' if difficulty >= 0.66 else 'moderate' if difficulty >= 0.33 else 'light'
 		stats[p]['pressure_level'] = level
 		survival_note[p] = (
@@ -511,6 +562,25 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if held >= 0.4 else
 			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
+		stats[p]['base_lost'] = held < 0.4
+	# Who took each lost base: the enemy with the most army orders into it, a castle they built there counting
+	# for BASE_CASTLE_ORDERS orders. Saved as a matchup: winner civ and position beat loser civ and position.
+	base_kills = []
+	for p in pids:
+		if not stats[p].get('base_lost'):
+			continue
+		weight = Counter()
+		for e in pids:
+			if players[e]['team_id'] != players[p]['team_id']:
+				weight[e] = press_matrix[(e, p)] + BASE_CASTLE_ORDERS * sum(
+					1 for c in castles if c['player'] == e and c['base'] == p and c['status'] != 'deleted')
+		if weight and max(weight.values()) > 0:
+			taker = max(weight, key=weight.get)
+			base_kills.append(dict(winner=taker, loser=p, share=round(weight[taker] / sum(weight.values()), 2)))
+			stats[p]['base_lost_to'] = taker
+	# Age-up timings against the direct opponent: two players who delayed each other aren't both punished for late
+	# ages, and a late age that cost the opponent their base was the better plan.
+	opponent_timings(players, stats, exec_parts, {'Castle Age': castle_click, 'Imperial Age': imp_click}, press_matrix, vest, pos)
 	team_raw = [{p: trib_out[p] for p in pids}, {p: help_out[p] for p in pids}, {p: stats[p]['flares'] for p in pids}]
 	team_parts = [_minmax(raw) for raw in team_raw]  # parts nobody did (no tributes in the game) are left out
 	weights = {
@@ -519,7 +589,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		None: dict(exec=.32, press=.32, surv=.26, team=.10),
 	}
 	for p in pids:
-		e = _combine(list(zip(EXEC_WEIGHTS, exec_raw, exec_parts)), p)
+		e = min(10.0, _combine(list(zip(EXEC_WEIGHTS, exec_raw, exec_parts)), p) + stats[p]['several_bonus'])
 		t = _combine([(.5, team_raw[0], team_parts[0]), (.35, team_raw[1], team_parts[1]), (.15, team_raw[2], team_parts[2])], p)
 		surv = round(survival[p], 1) if survival[p] is not None else None
 		sc = dict(exec=round(e, 1), press=round(press[p], 1), surv=surv, team=round(t, 1))
@@ -531,22 +601,122 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['scores'] = sc
 		stats[p]['survival_note'] = survival_note[p]
 
+	# ---- why each score is what it is. The recording is not kept, so this is saved with the game for /explain.
+	vill_raw = {p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids}
+	on_map_raw = {p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
+		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids}
+	exec_info = [
+		("Castle Age click", castle_click, mmss, True, False),
+		("Imperial Age click", imp_click, mmss, True, False),
+		("Villager value", vill_raw, lambda v: f"{v:g}", False, True),
+		("First military unit", first_mil, mmss, True, False),
+		("Unplanned floating", floating, lambda v: f"{v:g} min", True, True),
+	]
+	press_info = [
+		("Army on the map", on_map_raw, lambda v: f"{v:,.0f} value", 0.35, on_map),
+		("Army sent at the enemy", sent_raw, lambda v: f"{v:,.0f} value", 0.40, sent),
+		("Damage done", dealt, lambda v: f"{v:,.0f} value", 0.15, damage),
+	]
+	team_info = [
+		("Tributes sent", team_raw[0], lambda v: f"{v:,.0f} resources", 0.5, team_parts[0]),
+		("Army orders helping allies", team_raw[1], lambda v: f"{v:,.0f} orders", 0.35, team_parts[1]),
+		("Flares", team_raw[2], lambda v: f"{v:,.0f}", 0.15, team_parts[2]),
+	]
+
+	def lobby_range(raw, fmt, lower_better):
+		known = [v for v in raw.values() if v is not None]
+		if not known:
+			return None
+		best, worst = (min(known), max(known)) if lower_better else (max(known), min(known))
+		return f"best {fmt(best)}, worst {fmt(worst)}"
+
+	for p in pids:
+		st = stats[p]
+		ex_parts = []
+		for i, (name, raw, fmt, lower_better, always) in enumerate(exec_info):
+			done = always or _did(raw)
+			v = raw.get(p)
+			part = dict(name=name, value=fmt(v) if v is not None else "never", score=round(exec_parts[i][p], 1) if done else None,
+				weight=EXEC_WEIGHTS[i], range=lobby_range(raw, fmt, lower_better))
+			if not done:
+				part['note'] = "nobody did this, so it is left out"
+			if i == 0 and st.get('feudal_units', 0) >= FEUDAL_ARMY_MIN and st.get('feudal_uptime') is not None \
+					and exec_parts[0][p] > _minmax(castle_click, invert=True)[p]:
+				part['note'] = f"scored by Feudal production uptime ({round(st['feudal_uptime'] * 100)}%) instead, after a {st['feudal_units']}-unit Feudal army"
+			if i in (0, 1):
+				age_notes = [n.split(': ', 1)[1] for n in st.get('timing_notes', []) if n.startswith(('Castle Age', 'Imperial Age')[i])]
+				if age_notes:
+					part['note'] = (part.get('note') + '; ' if part.get('note') else '') + age_notes[0]
+			if i == 3:
+				part['note'] = "counts a quarter as much as the others"
+			ex_parts.append(part)
+		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w, range=lobby_range(raw, f, False))
+			for n, raw, f, w, sc_ in press_info]
+		notes = []
+		for x in st.get('buildings_destroyed_list', []):
+			notes.append(f"{x['value']:,} for {players[x['victim']]['name']}'s Town Center destroyed at {mmss(x['t'])}")
+		if notes:
+			pr_parts[2]['note'] = "includes " + "; ".join(notes)
+		if st.get('macro_disrupted'):
+			raided = sorted({players[x['victim']]['name'] for x in st['macro_disruptions']})
+			text = (f"{st['macro_disrupted']:,} of enemy macro disrupted (production that stalled while their army was in "
+				f"{', '.join(raided)}'s base)")
+			pr_parts[2]['note'] = (pr_parts[2]['note'] + "; " + text) if notes else "includes " + text
+		why = (f"its damage was {round(army[p]['damage_for_size'] * 100)}% of the lobby median for its size and "
+			f"{round(army[p]['damage_in_total'] * 100)}% of the lobby's most in total; the better counts")
+		if army[p]['damage_efficiency'] < 1:
+			pr_parts[1]['note'] = f"{army[p]['value_sent']:,} sent, counted at {round(army[p]['damage_efficiency'] * 100)}%: {why}"
+		pr_parts[0]['note'] = (f"units counted at {round(army[p]['damage_efficiency'] * 100)}%: {why}" if army[p]['damage_efficiency'] < 1
+			else "full credit: " + ("the most damage in the lobby" if army[p]['damage_in_total'] >= 1 else
+				"at least the lobby's median damage for its size"))
+		tm_parts = []
+		for n, raw, f, w, sc_ in team_info:
+			done = _did(raw)
+			part = dict(name=n, value=f(raw[p]), score=round(sc_[p], 1) if done else None, weight=w, range=lobby_range(raw, f, False))
+			if not done:
+				part['note'] = "nobody did this, so it is left out"
+			tm_parts.append(part)
+		fwd = [x for x in structs if x['player'] == p and x['forward']]
+		bonuses = dict(
+			several=dict(value=st['several_bonus'], multi=st['multi_enemy_minutes'], focused=st['focused_minutes'],
+				trade=st['outnumbered_trade']),
+			age_delay=dict(value=st.get('age_delay_bonus', 0), delays=[dict(victim=players[x['victim']]['name'], age=d['age'],
+				clicked=mmss(d['clicked']), destroyed=mmss(x['t']), again=mmss(d['again']), minutes=d['minutes'], bonus=d['bonus'])
+				for x in st.get('buildings_destroyed_list', []) for d in x['delays']]),
+			forward=dict(value=st['forward_bonus'], worth=st.get('forward_value'), effect=st.get('forward_effect'), count=len(fwd),
+				built=sum(1 for x in fwd if x['known'])),
+		)
+		w = dict(weights[players[p]['seat']])
+		if st['scores']['surv'] is None:
+			w.pop('surv')
+		total_w = sum(w.values())
+		st['explain'] = dict(
+			seat=players[p]['seat'], scores=st['scores'], overall_weights={k: round(v / total_w, 3) for k, v in w.items()},
+			exec=ex_parts, press=pr_parts, team=tm_parts, bonuses=bonuses,
+			surv=dict(note=survival_note[p], **surv_detail.get(p, {})),
+		)
+
 	# ---- performance against BombayBot Elo
-	elo_scaled = _minmax({p: players[p]['elo'] for p in pids if players[p]['elo'] is not None})
-	by_elo = sorted((p for p in pids if players[p]['elo'] is not None), key=lambda p: -players[p]['elo'])
+	# Expected score from Elo: how far the player's Elo is above or below the lobby (in standard deviations), and
+	# where they rank in their own team, with Elos within ELO_SAME_TIER of each other treated as the same level.
+	elos = {p: players[p]['elo'] for p in pids if players[p]['elo'] is not None}
+	expected = expected_scores(elos, {p: players[p]['team_id'] for p in pids},
+		{p: stats[p]['scores']['overall'] for p in pids})
+	by_elo = sorted(elos, key=lambda p: -elos[p])
 	by_score = sorted(pids, key=lambda p: -stats[p]['scores']['overall'])
 	for p in pids:
 		st = stats[p]
 		st['score_rank'] = by_score.index(p) + 1
-		if p not in elo_scaled:
-			st['elo_rank'], st['elo_delta'], st['elo_verdict'] = None, None, None
+		if p not in expected:
+			st['elo_rank'], st['elo_delta'], st['elo_verdict'], st['elo_expected'] = None, None, None, None
 			continue
 		st['elo_rank'] = by_elo.index(p) + 1
-		delta = round(st['scores']['overall'] - elo_scaled[p], 1)
+		st['elo_expected'] = round(expected[p], 1)
+		delta = round(st['scores']['overall'] - expected[p], 1)
 		st['elo_delta'] = delta
 		st['elo_verdict'] = (
-			'well above their Elo' if delta >= 3 else 'above their Elo' if delta >= 1.5 else
-			'well below their Elo' if delta <= -3 else 'below their Elo' if delta <= -1.5 else 'around their Elo'
+			'well above their Elo' if delta >= ELO_WELL else 'above their Elo' if delta >= ELO_ABOVE else
+			'well below their Elo' if delta <= -ELO_WELL else 'below their Elo' if delta <= -ELO_ABOVE else 'around their Elo'
 		)
 
 	# ---- strategy names
@@ -560,8 +730,14 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			top_target=max(((players[d]['civ'], n) for (a, d), n in press_matrix.items() if a == p), key=lambda x: x[1], default=None),
 		)
 
+	# ---- fights: what each side fielded, and how they went against Elo
+	fights = fight_records(players, army, A, end)
+	for p, (diff, size) in fight_vs_elo(players, fights).items():
+		stats[p]['fight_vs_elo'], stats[p]['fight_value'] = diff, size
+
 	return dict(
-		duration=end, players=players, stats=stats, castles=castles, water_weight=water,
+		duration=end, players=players, stats=stats, castles=castles, water_weight=water, base_kills=base_kills,
+		fights=fights,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
 		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end},
 			army, vest, A, end),
@@ -599,6 +775,69 @@ def saving_minutes(A, pid, ages):
 	out = set()
 	for t in clicks:
 		out.update(range(int((t - SAVE_WINDOW) // 60000), int(t // 60000) + 1))
+	return out
+
+
+def _vs_best(values):
+	"""
+	Scale a {pid: value} dict to 1..10 against the game's best: the best gets 10 and the rest their share of it
+	(half the best ≈ 5.5), so how far apart players are matters, not only where they sit between top and bottom.
+	None counts as worst.
+	"""
+	known = [v for v in values.values() if v is not None]
+	best = max(known) if known else 0
+	if best <= 0:
+		return {k: 5.0 for k in values}
+	return {k: 1.0 if v is None else 1 + 9 * max(0.0, v) / best for k, v in values.items()}
+
+
+ELO_SAME_TIER = 100   # Elos this close count as the same level
+ELO_MIN_SD = 100      # spread used is at least this, so a very even lobby doesn't turn small gaps into big ones
+ELO_MIN_SCORE_SD = 0.5  # spread of overall scores used is at least this (a lobby where everyone scored the same)
+ELO_ABOVE, ELO_WELL = 1.5, 3.0  # verdict thresholds: actual minus expected score
+
+
+def elo_tiers(elos):
+	"""
+	{pid: tier Elo}: players sorted by Elo, each joining the current tier when within ELO_SAME_TIER of its average;
+	everyone in a tier gets the tier's average, so a 100-point gap doesn't separate players.
+	"""
+	tiers, cur = [], []
+	for p in sorted(elos, key=lambda p: elos[p]):
+		if cur and elos[p] - sum(elos[q] for q in cur) / len(cur) > ELO_SAME_TIER:
+			tiers.append(cur)
+			cur = []
+		cur.append(p)
+	if cur:
+		tiers.append(cur)
+	return {p: sum(elos[q] for q in t) / len(t) for t in tiers for p in t}
+
+
+def _z(value, values):
+	mean = sum(values) / len(values)
+	sd = math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+	return (value - mean) / max(ELO_MIN_SD, sd)
+
+
+def expected_scores(elos, teams, overall):
+	"""
+	{pid: expected overall score from Elo}: the lobby's average score + the player's Elo standing x the spread of
+	the lobby's actual scores, so being one standard deviation above in Elo expects one standard deviation above
+	in score. The standing is the average of two, in standard deviations of (tiered) Elo: against the whole lobby,
+	and against the player's own team (their rank in it). Players without an Elo are left out.
+	"""
+	if len(elos) < 2:
+		return {}
+	tier = elo_tiers(elos)
+	scores = [overall[p] for p in elos]
+	mean_score = sum(scores) / len(scores)
+	score_sd = max(ELO_MIN_SCORE_SD, math.sqrt(sum((v - mean_score) ** 2 for v in scores) / len(scores)))
+	out = {}
+	for p in elos:
+		lobby = _z(tier[p], list(tier.values()))
+		mates = [tier[q] for q in elos if teams.get(q) == teams.get(p)]
+		team = _z(tier[p], mates) if len(mates) > 1 else lobby
+		out[p] = max(1.0, min(10.0, mean_score + score_sd * (lobby + team) / 2))
 	return out
 
 
@@ -821,6 +1060,312 @@ def villager_value(times, attacked_minutes=(), alive=None):
 FLOAT_FROM = 10 * 60000
 # Execution parts: Castle Age timing, Imperial Age click, villager value, first military unit (quarter weight), floating
 EXEC_WEIGHTS = (1.0, 1.0, 1.0, 0.25, 1.0)
+# Execution bonus on top: fighting several enemies at once, and holding when focused by several.
+# Full bonus at a quarter of the minutes from 8:00 spent clicking 2+ enemies' units (early minutes count more) ...
+MULTI_FULL, MULTI_BONUS_MAX = 0.25, 0.75
+# ... and at a fifth of them attacked by 2+ enemies with even trades (each minute counts by how the player traded).
+FOCUS_FULL, FOCUS_BONUS_MAX = 0.2, 0.75
+MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that count as fighting them
+HOLD_UNTESTED = 7.0       # holding position for a base never seriously attacked: the enemy was kept out
+FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
+FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
+
+
+DISRUPT_BEFORE = 5 * 60000   # production in the 5 minutes before an attack is the defender's normal
+DISRUPT_AFTER = 2 * 60000    # ... compared with during the attack and the 2 minutes after
+DISRUPT_GAP = 1              # attacked minutes this far apart are one attack
+DISRUPT_MAX = 10 * 60000     # an attack counts its first 10 minutes at most
+
+
+def _mil_times(A, pid):
+	return [a['t'] for a in A if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid
+		and _name('objects', a['unit_id']) not in NOT_ARMY and _name('objects', a['unit_id']) not in WORKER_TRAIN]
+
+
+def macro_disruption(A, players, vest, timeline_in, into_by, end):
+	"""
+	Enemy macro an attack disrupted. For every attack on a base (minutes with ATTACK_MINUTE_ORDERS+ enemy army
+	orders into it, gaps of a minute or less joined, first 10 minutes): the defender's production uptime (Town
+	Centers and Docks busy, military queued every minute; military only once they have 120+ villagers) during it and
+	the 2 minutes after, against the 5 minutes before. The drop
+	times the attack's length times what the defender was spending a minute before it is the resources they did
+	not turn into units, research and buildings. It is credited to the attackers by their share of army orders
+	into the base during the attack. Returns ({attacker: value}, {attacker: [dict(victim, start, minutes, slip,
+	value)]}).
+	"""
+	out = Counter({p: 0.0 for p in players})
+	details = defaultdict(list)
+	for d in players:
+		minutes = sorted(m for m, n in timeline_in[d].items() if n >= ATTACK_MINUTE_ORDERS)
+		episodes, cur = [], []
+		for m in minutes:
+			if cur and m - cur[-1] > DISRUPT_GAP + 1:
+				episodes.append(cur)
+				cur = []
+			cur.append(m)
+		if cur:
+			episodes.append(cur)
+		if not episodes:
+			continue
+		mil = _mil_times(A, d)
+		for ep in episodes:
+			t0, t1 = ep[0] * 60000, min(end, (ep[-1] + 1) * 60000)
+			if t0 - DISRUPT_BEFORE < 0:
+				continue
+			t1 = min(t1, t0 + DISRUPT_MAX)  # a long siege shows in survival and lost bases, not here
+			alive = vest[d].get('alive') or []
+			full = alive and alive[min(len(alive) - 1, ep[0])] >= VILLAGER_FULL
+			if full:  # Town Centers going idle at a full villager count is normal: judge military production only
+				before = _steady([t for t in mil if t0 - DISRUPT_BEFORE <= t < t0], t0 - DISRUPT_BEFORE, t0)
+				during = _steady([t for t in mil if t0 <= t < t1 + DISRUPT_AFTER], t0, min(end, t1 + DISRUPT_AFTER))
+			else:
+				before = production_uptime(vest[d]['busy'], vest[d]['first_use'], mil, t0 - DISRUPT_BEFORE, t0)
+				during = production_uptime(vest[d]['busy'], vest[d]['first_use'], mil, t0, min(end, t1 + DISRUPT_AFTER))
+			if before is None or during is None or before <= during:
+				continue
+			slip = before - during
+			rate = spending_rate(A, d, t0 - DISRUPT_BEFORE, t0)
+			length = (t1 - t0) / 60000
+			value = slip * length * rate
+			orders = {a: sum(into_by[(a, d)].get(m, 0) for m in ep) for a in players
+				if players[a]['team_id'] != players[d]['team_id']}
+			total = sum(orders.values())
+			if not total or value <= 0:
+				continue
+			for a, n in orders.items():
+				if n:
+					share = value * n / total
+					out[a] += share
+					details[a].append(dict(victim=d, start=t0, minutes=round(length), slip=round(slip, 2), value=round(share)))
+	return dict(out), {p: details[p] for p in players}
+
+
+TC_ID = 109
+RAZE_HIT_WINDOW = 3 * 60000  # enemy attack clicks on a Town Center up to 3 minutes before its last use ...
+RAZE_GONE = 5 * 60000        # ... and never used again for 5+ minutes (or the game ends): it was destroyed
+AGE_DELAY_BONUS = 1.0        # pressure bonus for destroying a Town Center with an age-up in progress ...
+AGE_DELAY_FULL = 4 * 60000   # ... in full when the age is delayed 4+ minutes (first click to the click again)
+RAZE_NEAR = 12               # tiles: enemy castles, Donjons and towers this close can have destroyed it
+RAZE_STRUCT_CLICKS = 5       # a nearby enemy castle counts like 5 attack clicks when sharing credit
+
+
+def town_centers_destroyed(A, players, structs, pos, end):
+	"""
+	Enemy Town Centers destroyed, valued at the Town Center's cost (research and queued units in it are refunded).
+	An age-up in progress when it fell (the owner clicked the same age again later) is recorded as a delay: first
+	click to the click again, for the age delay pressure bonus. A Town Center (anything that queued villagers or an age) counts as destroyed when its owner never used
+	it again (5+ minutes before the end) and either research was lost in it, enemies attack-clicked it 2+ times, or
+	an enemy attack-clicked it with an enemy castle, Donjon or tower within 12 tiles. Credit is shared by attack
+	clicks, a nearby castle or tower counting as 5. Returns ({attacker: value}, {attacker: [details]}).
+	"""
+	owner, first, last, is_tc = {}, {}, {}, set()
+	research = defaultdict(list)   # building -> [(t, tech id)]
+	queued = defaultdict(list)     # building -> [(t, unit id, amount)]
+	for a in A:
+		pid = a.get('player_id')
+		if pid not in players or a['a'] not in ('DE_QUEUE', 'RESEARCH'):
+			continue
+		for o in a.get('object_ids') or []:
+			owner.setdefault(o, pid)
+			first.setdefault(o, a['t'])
+			if a['a'] == 'DE_QUEUE':
+				queued[o].append((a['t'], a['unit_id'], a.get('amount', 1) or 1))
+				if _name('objects', a['unit_id']) == 'Villager':
+					is_tc.add(o)
+			else:
+				research[o].append((a['t'], a.get('technology_id')))
+				if _name('technologies', a.get('technology_id')) in AGES:
+					is_tc.add(o)
+	for a in A:  # the owner's last use of each building (queues, research, gather points, ungarrison...)
+		for o in a.get('object_ids') or []:
+			if o in owner and a.get('player_id') == owner[o]:
+				last[o] = max(last.get(o, 0), a['t'])
+	clicks = defaultdict(Counter)  # building -> attacker -> attack clicks
+	for a in A:
+		t, att = a.get('target_id') or 0, a.get('player_id')
+		if t in is_tc and att in players and players[att]['team_id'] != players[owner[t]]['team_id']:
+			if last[t] - RAZE_HIT_WINDOW <= a['t'] <= last[t] + RAZE_HIT_WINDOW:
+				clicks[t][att] += 1
+	# Where each Town Center stood: the owner's Town Center placement just before it was first used, or their start.
+	placed = defaultdict(list)
+	for a in A:
+		if a['a'] == 'BUILD' and a.get('player_id') in players and _name('objects', a['building_id']) == 'Town Center':
+			placed[a['player_id']].append((a['t'], (a['x'], a['y'])))
+	out, details = Counter({p: 0.0 for p in players}), defaultdict(list)
+	for o in is_tc:
+		pid, t_last = owner[o], last[o]
+		if end - t_last < RAZE_GONE:
+			continue  # still in use near the end
+		before = [xy for t, xy in placed[pid] if t <= first[o]]
+		where = before[-1] if before and first[o] > 60000 else pos.get(pid)
+		credit = Counter(clicks[o])
+		n_clicks = sum(clicks[o].values())
+		near = False
+		if where:
+			for x in structs:
+				if players[x['player']]['team_id'] != players[pid]['team_id'] and x['t0'] <= t_last <= x['t1'] \
+						and math.dist((x['x'], x['y']), where) <= RAZE_NEAR:
+					credit[x['player']] += RAZE_STRUCT_CLICKS * x['certainty']
+					near = True
+		if not credit:
+			continue
+		# Research in progress when it fell, shown by the owner researching the same thing again later. The game
+		# refunds it, so it is not damage; an age-up lost this way is a delay (see the age delay bonus).
+		lost_research = []
+		for t, tech in research[o]:
+			if t > t_last:
+				continue
+			again = min((a['t'] for a in A if a['a'] == 'RESEARCH' and a.get('player_id') == pid
+				and a.get('technology_id') == tech and a['t'] > t_last), default=None)
+			if again is not None:
+				lost_research.append((t, tech, again))
+		# A Town Center that just stopped being used (villagers full) is not destroyed: it needs research lost in it,
+		# 2+ enemy attack clicks, or an attack click with an enemy castle or tower next to it.
+		if not (lost_research or n_clicks >= 2 or (n_clicks and near)):
+			continue
+		value = unit_value(TC_ID)  # research and queued units are refunded when a building falls
+		total = sum(credit.values())
+		ages_lost = [(_name('technologies', tech), click, again) for click, tech, again in lost_research
+			if _name('technologies', tech) in AGES]
+		for att, n in credit.items():
+			share = n / total
+			delays = [dict(age=age, clicked=click, again=again, minutes=round((again - click) / 60000, 1),
+				bonus=round(share * AGE_DELAY_BONUS * min(1.0, (again - click) / AGE_DELAY_FULL), 2)) for age, click, again in ages_lost]
+			details[att].append(dict(victim=pid, t=t_last, value=round(value * share), research=[d['age'] for d in delays],
+				delays=delays))
+			out[att] += value * share
+	return dict(out), {p: details[p] for p in players}
+
+
+OPPONENT_ORDERS = 20     # army orders into one's base (either way) that make two players direct opponents ...
+OPPONENT_VILLAGERS = 2   # ... or villagers killed (either way)
+
+
+def direct_opponents(players, press_matrix, vest, pos=None):
+	"""
+	{player: their direct opponent}.
+	4v4: by position, each flank against the enemy flank on its side, each pocket against the enemy pocket on its
+	side (the nearest enemy in the same seat).
+	Other sizes: the enemy they fought most head-on in either direction, one side attacking and the other defending
+	counts (OPPONENT_ORDERS+ army orders into one's base, or OPPONENT_VILLAGERS+ villagers killed, by either); with
+	no such fight, the enemy whose start is nearest.
+	"""
+	sizes = Counter(players[p]['team_id'] for p in players)
+	if pos and len(sizes) == 2 and all(n == 4 for n in sizes.values()) and all(players[p].get('seat') for p in players):
+		# Each seat has two players per team: pair them across the two possible ways, keeping the one with the
+		# shorter total distance (the flanks, and the pockets, on the same side of the map).
+		out = {}
+		team_a, team_b = list(sizes)
+		for seat in ('Flank', 'Pocket'):
+			mine = [p for p in players if players[p]['team_id'] == team_a and players[p]['seat'] == seat and p in pos]
+			theirs = [p for p in players if players[p]['team_id'] == team_b and players[p]['seat'] == seat and p in pos]
+			if len(mine) != 2 or len(theirs) != 2:
+				continue
+			pairings = [((mine[0], theirs[0]), (mine[1], theirs[1])), ((mine[0], theirs[1]), (mine[1], theirs[0]))]
+			best = min(pairings, key=lambda pr: sum(math.dist(pos[a], pos[b]) for a, b in pr))
+			for a, b in best:
+				out[a], out[b] = b, a
+		return out
+	out = {}
+	for p in players:
+		best, best_n = None, 0
+		for e in players:
+			if players[e]['team_id'] == players[p]['team_id']:
+				continue
+			orders = press_matrix[(p, e)] + press_matrix[(e, p)]
+			kills = (vest[e]['killers'].get(p, 0) if vest.get(e) else 0) + (vest[p]['killers'].get(e, 0) if vest.get(p) else 0)
+			if orders >= OPPONENT_ORDERS or kills >= OPPONENT_VILLAGERS:
+				n = orders + 20 * kills
+				if n > best_n:
+					best, best_n = e, n
+		if best is None and pos and p in pos:
+			enemies = [e for e in players if players[e]['team_id'] != players[p]['team_id'] and e in pos]
+			if enemies:
+				best = min(enemies, key=lambda e: math.dist(pos[p], pos[e]))
+		if best is not None:
+			out[p] = best
+	return out
+
+
+def opponent_timings(players, stats, exec_parts, clicks, press_matrix, vest, pos=None):
+	"""
+	Castle and Imperial Age timings judged against the direct opponent (only ever raising a score):
+	- both late (after the lobby's median click, or never): they were delaying each other, so the timing is scored
+	  within the pair, 5.5 when equal and higher for the faster, if that beats the lobby score;
+	- the player was later than the opponent, but the opponent lost their base and the player didn't: the late
+	  timing paid off, so it scores at least the opponent's.
+	Indices: exec_parts[0] Castle Age (may already hold Feudal uptime), exec_parts[1] Imperial Age. Notes go in
+	stats[p]['timing_notes'].
+	"""
+	opp = direct_opponents(players, press_matrix, vest, pos)
+	end = max((t for c in clicks.values() for t in c.values() if t), default=0) + 60000
+	for idx, (age, times) in enumerate(clicks.items()):
+		known = sorted(t for t in times.values() if t)
+		if not known:
+			continue  # nobody clicked it: the part is left out anyway
+		median = known[len(known) // 2]
+		for p, e in opp.items():
+			mine, theirs = times.get(p) or end, times.get(e) or end
+			notes = stats[p].setdefault('timing_notes', [])
+			if mine > median and theirs > median:
+				pair = 5.5 + 4.5 * max(-1.0, min(1.0, (theirs - mine) / max(mine, theirs)))
+				if pair > exec_parts[idx][p]:
+					exec_parts[idx][p] = pair
+					notes.append(f"{age}: scored against direct opponent {players[e]['name']} (both late)")
+			elif mine > theirs and stats[e].get('base_lost') and not stats[p].get('base_lost'):
+				if exec_parts[idx][e] > exec_parts[idx][p]:
+					exec_parts[idx][p] = exec_parts[idx][e]
+					notes.append(f"{age}: scored like direct opponent {players[e]['name']}, who aged up sooner but lost their base")
+
+
+def several_enemies(A, players, army, villagers, end):
+	"""
+	From attack clicks on units (an attack order whose target is a unit an enemy commands):
+	Units (villagers included) belong to whoever first gave them a move, attack or army command.
+	- multi: minutes a player clicked units of 2+ different enemies (MULTI_CLICKS+ each), early minutes
+	  weighted like army (x2 before 15:00, x1.5 before 20:00);
+	- focused: minutes 2+ different enemies clicked the player's units; each counts by how the player traded
+	  in it (army value killed / killed + lost, x2: an even trade against two players is worth full credit,
+	  0.5 when no fight losses were seen).
+	Returns (multi raw, focus raw, {player: dict(multi=set of minutes, focused=set of minutes, trade=...)}).
+	"""
+	owner = {}
+	for a in A:
+		if a.get('player_id') in players and (a['a'] in ARMY_ORDERS or a['a'] in ARMY_COMMANDS):
+			for o in a.get('object_ids') or []:
+				owner.setdefault(o, a['player_id'])
+	clicks = defaultdict(Counter)  # (attacker, victim) -> minute -> clicks
+	for a in A:
+		att = a.get('player_id')
+		t = a.get('target_id') or 0
+		if a['a'] != 'ORDER' or att not in players or t <= 0 or a['t'] > end:
+			continue
+		vic = owner.get(t)
+		if vic in players and players[vic]['team_id'] != players[att]['team_id']:
+			clicks[(att, vic)][int(a['t'] // 60000)] += 1
+	pair = pair_kills(players, army)
+	out, multi_raw, focus_raw = {}, {}, {}
+	for p in players:
+		targets, attackers = defaultdict(set), defaultdict(set)
+		for (att, vic), mins in clicks.items():
+			for m, n in mins.items():
+				if n < MULTI_CLICKS:
+					continue
+				if att == p:
+					targets[m].add(vic)
+				if vic == p:
+					attackers[m].add(att)
+		multi = {m for m, vs in targets.items() if len(vs) >= 2}
+		focused = {m for m, xs in attackers.items() if len(xs) >= 2}
+		trade = 0.0
+		for m in focused:
+			killed = sum(pair[(p, e)].get(m, 0) for e in players if (p, e) in pair)
+			lost = sum(pair[(e, p)].get(m, 0) for e in players if (e, p) in pair)
+			trade += min(2.0, 2 * killed / (killed + lost)) if killed + lost else 0.5
+		multi_raw[p] = round(sum(early_weight(m) for m in multi), 1)
+		focus_raw[p] = round(trade, 1)
+		out[p] = dict(multi=multi, focused=focused, trade=round(trade / len(focused), 2) if focused else None)
+	return multi_raw, focus_raw, out
 
 
 def spending_rate(A, pid, start, end):
@@ -1139,7 +1684,168 @@ def early_weight(minute, imp_at=None):
 	return 1.0
 
 
-def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, water=1.0):
+STRUCT_SAME_TILES = 3        # placements this close ...
+STRUCT_SAME_MS = 60000       # ... and this soon after another by the same player are the same building
+UNSEEN_CERTAINTY = 0.5       # a castle placement never seen built (no units, research or hits) counts half
+FORWARD_RADIUS = 15          # tiles around a forward building whose activity shows who holds the area
+FORWARD_BEFORE = 5 * 60000   # compared with the 5 minutes before it was placed
+FORWARD_AFTER = 15 * 60000   # over up to 15 minutes after (while it stands)
+FORWARD_MIN_ACTIVITY = 5     # less activity than this nearby says nothing about control
+FORWARD_FLOOR = 0.25         # a forward building that did nothing still counts this much of its cost
+CASTLE_ID = 82
+FORWARD_BONUS_MAX = 1.5    # pressure bonus for forward buildings ...
+FORWARD_BONUS_FULL = 3.0   # ... in full at 3 Castles' worth (cost x effect, see forward_value)
+FORWARD_PARTS = dict(held=0.25, area=0.20, ground=0.15, push=0.20, trade=0.20)
+FORWARD_PUSH_RADIUS = 20     # tiles: siege pushing in under the building's cover
+FORWARD_PUSH_FULL = 15       # building attacks / attack-ground orders in its first 15 minutes for full push credit
+FORWARD_TRADE_RADIUS = 10    # tiles from the enemy trade route
+FORWARD_TRADE_FULL = 30      # enemy trade carts made while it stood for full trade credit
+TRADE_ROUTE_MIN = 40         # tiles between two Markets for a trade route
+
+
+def structure_list(A, players, castles, base_of, end):
+	"""
+	Castles (Donjons, Kreposts...) and towers as buildings, not placements: repeated placements by the same
+	player at the same spot within a minute, and castle placements matched to an object already counted, are
+	dropped. Each: player, kind, building_id, x, y, t0 (placed), t1 (lost / deleted / end), known (seen built:
+	units, research or enemy hits), certainty (1, or 0.5 when never seen built), forward and base.
+	Towers are not tracked one by one (they produce nothing), so they stand until the end and count as known.
+	"""
+	out, seen_oids = [], set()
+
+	def repeat(pid, x, y, t):
+		return any(o['player'] == pid and abs(o['t0'] - t) <= STRUCT_SAME_MS and math.dist((o['x'], o['y']), (x, y)) <= STRUCT_SAME_TILES
+			for o in out)
+
+	for c in sorted(castles, key=lambda c: c['t']):
+		if c.get('oid') and c['oid'] in seen_oids:
+			continue
+		if repeat(c['player'], c['x'], c['y'], c['t']):
+			continue
+		if c.get('oid'):
+			seen_oids.add(c['oid'])
+		known = c['status'] in ('up', 'lost', 'deleted')
+		t1 = c.get('lost_at') if c['status'] == 'lost' else c.get('deleted_at') if c['status'] == 'deleted' else end
+		out.append(dict(player=c['player'], kind=c['kind'], building_id=c['building_id'], x=c['x'], y=c['y'], t0=c['t'],
+			t1=t1 or end, known=known, certainty=1.0 if known else UNSEEN_CERTAINTY, forward=c['forward'], base=c['base']))
+	for a in A:
+		if a['a'] != 'BUILD' or a.get('player_id') not in players or _name('objects', a['building_id']) not in TOWERS:
+			continue
+		pid = a['player_id']
+		if repeat(pid, a['x'], a['y'], a['t']):
+			continue
+		where = base_of(a['x'], a['y'])
+		out.append(dict(player=pid, kind=_name('objects', a['building_id']), building_id=a['building_id'], x=a['x'], y=a['y'],
+			t0=a['t'], t1=end, known=True, certainty=1.0, tower=True, base=where,
+			forward=where != pid and players[where]['team_id'] != players[pid]['team_id']))
+	return out
+
+
+def _dist_to_segment(p, a, b):
+	ax, ay = a
+	bx, by = b
+	dx, dy = bx - ax, by - ay
+	if dx == dy == 0:
+		return math.dist(p, a)
+	t = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / (dx * dx + dy * dy)))
+	return math.dist(p, (ax + t * dx, ay + t * dy))
+
+
+def forward_value(A, players, structs, villagers, end):
+	"""
+	{player: forward building value} in Castles' worth: each forward building counts its cost (a Castle = 1,
+	a Donjon about 0.33, a tower about 0.24) times FORWARD_FLOOR + the rest by its effect (0..1):
+	- held (0.25): how long it stood, as a share of the rest of the game (castles; towers are not tracked);
+	- area (0.20): after it went up, the owner's team's share of the activity within 15 tiles (buildings placed
+	  count 3, army orders 1): did they hold the position;
+	- ground (0.15): how much that share rose compared with the 5 minutes before (doubled, up to 1);
+	- push (0.20): the owner's team attacking enemy buildings or using attack-ground (rams, trebuchets, bombards,
+	  mangonels) within 20 tiles in its first 15 minutes standing: it covered siege pushing in (full at 15);
+	- trade (0.20): it stood within 10 tiles of the enemy team's trade route (the line between their Markets 40+
+	  tiles apart) while they made trade carts (full at 30 carts): it denied trade or made it costly. Left out
+	  (weight spread over the rest) when that team made no trade carts while it stood.
+	Never-seen-built placements count half. Writes effect and its parts into each building.
+	"""
+	castle_value = unit_value(CASTLE_ID) or 780
+	events = []  # (t, x, y, player, weight)
+	for a in A:
+		pid = a.get('player_id')
+		if pid not in players or a.get('x') is None or a['x'] <= 0:
+			continue
+		if a['a'] == 'BUILD':
+			events.append((a['t'], a['x'], a['y'], pid, 3))
+		elif a['a'] in ARMY_ORDERS:
+			ids = a.get('object_ids') or []
+			if ids and not all(i in villagers for i in ids):
+				events.append((a['t'], a['x'], a['y'], pid, 1))
+	# Enemy buildings: anything that queued units or research belongs to that player.
+	building_owner = {}
+	for a in A:
+		if a['a'] in ('DE_QUEUE', 'RESEARCH') and a.get('player_id') in players:
+			for o in a.get('object_ids') or []:
+				building_owner.setdefault(o, a['player_id'])
+	siege_orders = []  # (t, x, y, player): attacks on buildings and attack-ground
+	for a in A:
+		pid = a.get('player_id')
+		if pid not in players or a.get('x') is None or a['x'] <= 0:
+			continue
+		target = a.get('target_id') or 0
+		if a['a'] == 'ATTACK_GROUND' or (a['a'] == 'ORDER' and target in building_owner
+				and players[building_owner[target]]['team_id'] != players[pid]['team_id']):
+			siege_orders.append((a['t'], a['x'], a['y'], pid))
+	markets = [(a['t'], a['x'], a['y'], a['player_id']) for a in A if a['a'] == 'BUILD' and a.get('player_id') in players
+		and _name('objects', a['building_id']) == 'Market']
+	carts = [(a['t'], a['player_id'], a.get('amount', 1) or 1) for a in A if a['a'] == 'DE_QUEUE'
+		and a.get('player_id') in players and _name('objects', a['unit_id']) in ('Trade Cart', 'Trade Cog')]
+
+	out = Counter({p: 0.0 for p in players})
+	for x in structs:
+		if not x['forward']:
+			continue
+		team = players[x['player']]['team_id']
+		t0, t1 = x['t0'], x['t1']
+		here = (x['x'], x['y'])
+		stand_end = max(t0 + 60000, t1)
+
+		def control(lo, hi):
+			own = other = 0
+			for t, ex, ey, pid, w in events:
+				if lo <= t < hi and math.dist((ex, ey), here) <= FORWARD_RADIUS:
+					if players[pid]['team_id'] == team:
+						own += w
+					else:
+						other += w
+			return own / (own + other) if own + other >= FORWARD_MIN_ACTIVITY else None
+
+		before = control(t0 - FORWARD_BEFORE, t0)
+		after = control(t0, max(t0 + 60000, min(t1, t0 + FORWARD_AFTER)))
+		presence = after if after is not None else 0.5
+		gain = max(0.0, presence - (before if before is not None else 0.5))
+		parts = {'area': presence, 'ground': min(1.0, 2 * gain)}
+		if x['known'] and not x.get('tower'):
+			parts['held'] = max(0.0, min(1.0, (t1 - t0) / max(60000, end - t0)))
+		push_end = min(stand_end, t0 + FORWARD_AFTER)
+		pushes = sum(1 for t, ex, ey, pid in siege_orders if t0 <= t < push_end and players[pid]['team_id'] == team
+			and math.dist((ex, ey), here) <= FORWARD_PUSH_RADIUS)
+		x['pushes'] = pushes
+		parts['push'] = min(1.0, pushes / FORWARD_PUSH_FULL)
+		enemy_carts = sum(n for t, pid, n in carts if t0 <= t < stand_end and players[pid]['team_id'] != team)
+		if enemy_carts:
+			theirs = [(mx, my) for t, mx, my, pid in markets if t < stand_end and players[pid]['team_id'] != team]
+			near = any(_dist_to_segment(here, m1, m2) <= FORWARD_TRADE_RADIUS
+				for i, m1 in enumerate(theirs) for m2 in theirs[i + 1:] if math.dist(m1, m2) >= TRADE_ROUTE_MIN)
+			parts['trade'] = min(1.0, enemy_carts / FORWARD_TRADE_FULL) if near else 0.0
+		weights = {k: FORWARD_PARTS[k] for k in parts}
+		effect = sum(weights[k] * parts[k] for k in parts) / sum(weights.values())
+		weight = unit_value(x['building_id']) / castle_value * x['certainty']
+		x.update(effect=round(effect, 2), weight=weight, hold=round(parts['held'], 2) if 'held' in parts else None,
+			presence=round(presence, 2), gain=round(gain, 2), push=round(parts['push'], 2),
+			trade=round(parts['trade'], 2) if 'trade' in parts else None)
+		out[x['player']] += weight * (FORWARD_FLOOR + (1 - FORWARD_FLOOR) * effect)
+	return dict(out)
+
+
+def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, water=1.0, structs=None):
 	"""
 	Estimate each player's army on the map over time from the unit ids in their commands.
 	A unit is military if it ever gets an army-only command (formation, stance, patrol, attack-move...)
@@ -1191,10 +1897,16 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 			value_per_unit[m] = total / count if count else 0.0
 			press_value[m] = value_per_unit[m] * (1 - (ships / total if total else 0) * (1 - water))
 		structures = [0.0] * minutes
-		for a in A:
-			if a['a'] == 'BUILD' and a.get('player_id') == pid and _name('objects', a['building_id']) in CASTLES | TOWERS:
-				for m in range(int(a['t'] // 60000) + 1, minutes):
-					structures[m] += unit_value(a['building_id'])
+		if structs is not None:  # castles count while they stand; placements never seen built count half
+			for x in structs:
+				if x['player'] == pid:
+					for m in range(int(x['t0'] // 60000) + 1, min(minutes, int(x['t1'] // 60000) + 1)):
+						structures[m] += unit_value(x['building_id']) * x['certainty']
+		else:
+			for a in A:
+				if a['a'] == 'BUILD' and a.get('player_id') == pid and _name('objects', a['building_id']) in CASTLES | TOWERS:
+					for m in range(int(a['t'] // 60000) + 1, minutes):
+						structures[m] += unit_value(a['building_id'])
 		sent = set()
 		for a in A:
 			if a.get('player_id') == pid and id(a) in offensive:
@@ -1205,6 +1917,7 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 		# A small army early is worth a lot: x2 before 15:00, x1.5 before 20:00 (same as army sent)
 		my_imp = imp_at.get(pid) if isinstance(imp_at, dict) else imp_at
 		on_map = [(alive[m] * press_value[m] + structures[m]) * early_weight(m, my_imp) for m in window]
+		units_on_map = [alive[m] * press_value[m] * early_weight(m, my_imp) for m in window]
 		# Micro inputs: how much the player controls the army, picks targets, splits groups and keeps units alive.
 		army_cmds = [a for a in A if a.get('player_id') == pid and any(i in military[pid] for i in (a.get('object_ids') or []))]
 		army_minutes = max(1.0, (end - min((seen[(pid, i)][0] for i in military[pid]), default=end)) / 60000)
@@ -1245,6 +1958,7 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 			avg_units=round(sum(alive[m] for m in window) / len(window)),
 			peak_units=max(alive) if alive else 0,
 			avg_value_on_map=round(sum(on_map) / len(on_map)),
+			avg_units_value_on_map=round(sum(units_on_map) / len(units_on_map)),
 			unit_value=round(value_per_unit[-1]),
 			value_sent=round(sum(press_value[m] * early_weight(m, (imp_at or {}).get(pid)) for _, m in sent)),
 			units_by_5min=[alive[m] for m in range(0, minutes, 5)],
@@ -1383,7 +2097,8 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	imperial_units = _army_lines(_army_between(A, pid, imp, end)) if imp else []
 	main_units = castle_units or imperial_units
 	fast_imp = bool(imp and imp < 25 * 60000)
-	forward_castles = sum(1 for c in my_castles if c['forward'])
+	# Castles seen built (units, research or enemy hits), each object once: not every placement.
+	forward_castles = len({c.get('oid') for c in my_castles if c['forward'] and c['status'] != 'unclear' and c.get('oid')})
 	tower_creep = st['towers'] >= 8
 
 	parts = []
@@ -1414,6 +2129,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	)
 
 
+BASE_CASTLE_ORDERS = 50  # a castle in a base counts like this many army orders into it when crediting a lost base
 MOMENTS_MAX = 6  # the 5 biggest events plus the resignation that ends the analysis
 BATTLE_MIN = 500      # army value killed (both players) in 3 minutes that makes a fight worth listing
 RAID_MIN = 3          # villagers of one player killed by one raider in one burst that make a raid worth listing
@@ -1421,6 +2137,7 @@ RAID_VILLAGER_WEIGHT = 300  # a villager killed counts like this much army value
 RAID_GAP = 60000      # kills more than a minute apart are separate raids
 LATE_WINDOW = 3 * 60000  # events this close to the end of the analysis count half when picking moments
 ELIMINATED_GAP = 3 * 60000  # stopped giving orders this long before the end without resigning
+DENIED_AGE_SIZE = 10 ** 5   # a denied age-up always makes the key moments (below eliminations)
 
 
 EPISODE_GAP = 5 * 60000  # fights or raids between the same two players less than 5 minutes apart are one moment
@@ -1439,6 +2156,135 @@ def _episodes(items, time_of):
 	return out
 
 
+def pair_kills(players, army):
+	"""
+	(killer, victim) -> minute -> army value killed. A unit lost while its owner was clearly fighting is credited
+	to the enemies fighting that player then, by their share of orders.
+	"""
+	team_of = {p: players[p]['team_id'] for p in players}
+	pair = defaultdict(Counter)
+	for p in players:
+		for t_last, value in army[p]['_gone']:
+			m = int(t_last // 60000)
+			ks = (m - 1, m, m + 1, m + 2)
+			if max(army[p]['_fight_orders'].get(k, 0) for k in ks) < FIGHT_MIN_ORDERS:
+				continue
+			credit = Counter()
+			for e in players:
+				if team_of[e] != team_of[p]:
+					for k in ks:
+						credit[e] += army[e]['_fights'].get(k, {}).get(p, 0)
+			total = sum(credit.values())
+			for e, n in credit.items():
+				if n:
+					pair[(e, p)][m] += value * n / total
+	return pair
+
+
+def fight_episodes(players, army):
+	"""
+	Major fights per pair of players: 3-minute windows with at least BATTLE_MIN army value killed, windows of a
+	pair less than 5 minutes apart merged into one fight. Each: a, b, a_killed (value a killed of b), b_killed,
+	start_m, end_m (minutes) and windows.
+	"""
+	pair = pair_kills(players, army)
+	fights = []
+	for a, b in {tuple(sorted(k)) for k in pair}:
+		for m in sorted(set(pair[(a, b)]) | set(pair[(b, a)])):
+			ka = sum(pair[(a, b)].get(k, 0) for k in (m, m + 1, m + 2))
+			kb = sum(pair[(b, a)].get(k, 0) for k in (m, m + 1, m + 2))
+			fights.append((ka + kb, m, a, b, ka, kb))
+	used, per_pair = defaultdict(set), defaultdict(list)
+	for size, m, a, b, ka, kb in sorted(fights, key=lambda f: -f[0]):
+		if size < BATTLE_MIN or used[(a, b)] & {m, m + 1, m + 2}:
+			continue
+		used[(a, b)].update(range(m - 2, m + 3))
+		per_pair[(a, b)].append((m, ka, kb))
+	out = []
+	for (a, b), windows in per_pair.items():
+		for episode in _episodes(sorted(windows), lambda w: w[0] * 60000):
+			out.append(dict(a=a, b=b, a_killed=sum(w[1] for w in episode), b_killed=sum(w[2] for w in episode),
+				start_m=episode[0][0], end_m=episode[-1][0], windows=len(episode)))
+	return sorted(out, key=lambda f: f['start_m'])
+
+
+FIGHT_ARMY_BEFORE = 5  # minutes: the units a player queued this long before a fight (and during it) fought in it
+
+
+def _side(players, army, p, enemy, start_m, end_m):
+	"""
+	p and the teammates who clearly fought the same enemy during the fight (FIGHT_MIN_ORDERS orders at them in
+	some minute of it), so one player holding off two armies is seen as 1 against 2.
+	"""
+	side = [p]
+	for q in players:
+		if q != p and players[q]['team_id'] == players[p]['team_id']:
+			if max((army[q]['_fights'].get(m, {}).get(enemy, 0) for m in range(start_m, end_m + 3)), default=0) >= FIGHT_MIN_ORDERS:
+				side.append(q)
+	return side
+
+
+def elo_scale(elos):
+	"""
+	Elo points that make a side 10x as strong, from how spread out this lobby's Elos are: in a lobby where Elos
+	are close, a small gap means more. A gap of one standard deviation (at least 100) is a 62% favourite.
+	"""
+	elos = [e for e in elos if e is not None]
+	if len(elos) < 2:
+		return 400.0
+	mean = sum(elos) / len(elos)
+	sd = max(100.0, math.sqrt(sum((e - mean) ** 2 for e in elos) / len(elos)))
+	return sd / -math.log10(1 / 0.62 - 1)
+
+
+def side_expectation(elos_a, elos_b, scale):
+	""" Expected share of the fight for side a: strength is the sum of 10^(elo/scale) of the players in it. """
+	sa = sum(10 ** (e / scale) for e in elos_a)
+	sb = sum(10 ** (e / scale) for e in elos_b)
+	return sa / (sa + sb) if sa + sb else 0.5
+
+
+def fight_records(players, army, A, end):
+	"""
+	Every major fight with what each side fielded and how it went against Elo: a, b (the pair), a_side / b_side
+	(players on each side, allies included), a_lines / b_lines ({unit: count} queued in the 5 minutes before
+	and during it), a_killed / b_killed, a_share (a's share of the value killed) and expected (a's expected share
+	from Elo, None when an Elo is missing).
+	"""
+	scale = elo_scale([players[p].get('elo') for p in players])
+	out = []
+	for f in fight_episodes(players, army):
+		a, b = f['a'], f['b']
+		t0 = max(0, (f['start_m'] - FIGHT_ARMY_BEFORE) * 60000)
+		t1 = min(end, (f['end_m'] + 3) * 60000)
+		sa, sb = _side(players, army, a, b, f['start_m'], f['end_m']), _side(players, army, b, a, f['start_m'], f['end_m'])
+		elos_a, elos_b = [players[p].get('elo') for p in sa], [players[p].get('elo') for p in sb]
+		expected = side_expectation(elos_a, elos_b, scale) if None not in elos_a + elos_b else None
+		total = f['a_killed'] + f['b_killed']
+		out.append(dict(f, a_side=sa, b_side=sb, a_lines=dict(_army_between(A, a, t0, t1)),
+			b_lines=dict(_army_between(A, b, t0, t1)), a_share=f['a_killed'] / total if total else 0.5, expected=expected,
+			elo_scale=round(scale)))
+	return out
+
+
+def fight_vs_elo(players, fights):
+	"""
+	{player: (average of share of value killed minus the share their side's Elo predicts, army value fought)}:
+	+0.10 means the player's fights went 10 points of share better than Elo expected. Bigger fights count more.
+	"""
+	acc = defaultdict(lambda: [0.0, 0.0])
+	for f in fights:
+		if f['expected'] is None:
+			continue
+		size = f['a_killed'] + f['b_killed']
+		diff = f['a_share'] - f['expected']
+		acc[f['a']][0] += size * diff
+		acc[f['a']][1] += size
+		acc[f['b']][0] -= size * diff
+		acc[f['b']][1] += size
+	return {p: (round(v[0] / v[1], 3), round(v[1])) for p, v in acc.items() if v[1]}
+
+
 def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0):
 	"""
 	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
@@ -1447,52 +2293,17 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 	All estimated from orders: the replay has no kill data.
 	"""
 	name = lambda p: players[p]['name']  # noqa: E731
-	team_of = {p: players[p]['team_id'] for p in players}
 	ev = []  # (size, time, text)
 
-	# Major fights, per pair of players (so a sea fight and a land fight at the same time stay apart): army
-	# value each one killed of the other over 3 minutes. A unit lost while its owner was clearly fighting is
-	# credited to the enemies fighting that player then, by their share of orders.
+	# Major fights, per pair of players (so a sea fight and a land fight at the same time stay apart).
 	if army:
-		pair = defaultdict(Counter)  # (killer, victim) -> minute -> value
-		for p in players:
-			for t_last, value in army[p]['_gone']:
-				m = int(t_last // 60000)
-				ks = (m - 1, m, m + 1, m + 2)
-				if max(army[p]['_fight_orders'].get(k, 0) for k in ks) < FIGHT_MIN_ORDERS:
-					continue
-				credit = Counter()
-				for e in players:
-					if team_of[e] != team_of[p]:
-						for k in ks:
-							credit[e] += army[e]['_fights'].get(k, {}).get(p, 0)
-				total = sum(credit.values())
-				for e, n in credit.items():
-					if n:
-						pair[(e, p)][m] += value * n / total
-		fights = []
-		for a, b in {tuple(sorted(k)) for k in pair}:
-			minutes = sorted(set(pair[(a, b)]) | set(pair[(b, a)]))
-			for m in minutes:
-				ka = sum(pair[(a, b)].get(k, 0) for k in (m, m + 1, m + 2))  # a killed of b
-				kb = sum(pair[(b, a)].get(k, 0) for k in (m, m + 1, m + 2))
-				fights.append((ka + kb, m, a, b, ka, kb))
-		# Every fight window of a pair, then one line per pair covering all its fights.
-		used, per_pair = defaultdict(set), defaultdict(list)
-		for size, m, a, b, ka, kb in sorted(fights, key=lambda f: -f[0]):
-			if size < BATTLE_MIN or used[(a, b)] & {m, m + 1, m + 2}:
-				continue
-			used[(a, b)].update(range(m - 2, m + 3))
-			per_pair[(a, b)].append((m, ka, kb))
-		for (a, b), windows in per_pair.items():
-			for episode in _episodes(sorted(windows), lambda w: w[0] * 60000):
-				ka, kb = sum(w[1] for w in episode), sum(w[2] for w in episode)
-				first, last_m = episode[0][0], episode[-1][0]
-				win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
-				when = f" ({mmss(first * 60000)}–{mmss((last_m + 3) * 60000)})" if len(episode) > 1 else ""
-				late = all(m * 60000 >= end - LATE_WINDOW for m, _, _ in episode) if end else False
-				ev.append(((ka + kb) * (0.5 if late else 1), first * 60000,
-					f"{name(win)} fought {name(lose)}: {round(kw):,} vs {round(kl):,} army value killed{when}"))
+		for f in fight_episodes(players, army):
+			a, b, ka, kb, first, last_m = f['a'], f['b'], f['a_killed'], f['b_killed'], f['start_m'], f['end_m']
+			win, lose, kw, kl = (a, b, ka, kb) if ka >= kb else (b, a, kb, ka)
+			when = f" ({mmss(first * 60000)}–{mmss((last_m + 3) * 60000)})" if f['windows'] > 1 else ""
+			late = first * 60000 >= end - LATE_WINDOW if end else False
+			ev.append(((ka + kb) * (0.5 if late else 1), first * 60000,
+				f"{name(win)} fought {name(lose)}: {round(kw):,} vs {round(kl):,} army value killed{when}"))
 
 	# Raids: one player killing many of another player's villagers or fishing ships in one burst (kills under a
 	# minute apart); bursts on the same player less than 5 minutes apart are one moment.
@@ -1520,6 +2331,18 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 					start, stop = episode[0][0][0], episode[-1][-1][0]
 					when = f" ({mmss(start)}–{mmss(stop)})" if len(episode) > 1 else ""
 					ev.append((weight, start, f"{name(raider)} raided {name(p)}: {what} killed{when}"))
+
+	# Denied age-ups: an enemy Town Center destroyed while it was researching an age (clicked again later). Always a
+	# major moment, so it ranks just below eliminations.
+	denied = defaultdict(list)  # (victim, age, clicked) -> [(attacker, share of credit)]
+	for p in players:
+		for x in stats[p].get('buildings_destroyed_list', []):
+			for d in x.get('delays', []):
+				denied[(x['victim'], d['age'], d['clicked'], d['again'], x['t'])].append(p)
+	for (victim, age, clicked, again, t), who in denied.items():
+		names = " and ".join(name(p) for p in who)
+		ev.append((DENIED_AGE_SIZE, t, f"{names} denied {name(victim)}'s {age}: Town Center destroyed mid-research "
+			f"(clicked at {mmss(clicked)}, clicked again at {mmss(again)}, {mmss(again - clicked)} lost)"))
 
 	for c in castles:
 		if c['status'] == 'lost':

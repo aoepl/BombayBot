@@ -1,4 +1,4 @@
-__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs']
+__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain']
 
 from nextcord import Attachment, Member, Embed, ForumChannel
 
@@ -124,3 +124,32 @@ async def aoe_civs(ctx, map: str = None):
 	embed.set_footer(text=f"{c['games']} analysed games in this channel. Best lists need {summaries.MIN_CIV_GAMES}+ games "
 		"with a civ; win rate (games).")
 	await ctx.reply(embed=embed)
+
+
+async def explain_analysis(interaction, message):
+	"""
+	"Explain analysis" (right-click or long-press an analysis post → Apps): why each player got their scores.
+	Works on the post or on any message in its thread. Answers everyone in the thread.
+	"""
+	try:
+		title, messages = await bot.replays.explain_post(interaction.channel_id, message.id)
+	except bot.replays.ReplayError as e:
+		await interaction.response.send_message(str(e), ephemeral=True)
+		return
+	await interaction.response.send_message(content=f"**{title}**", embeds=messages[0])
+	for embeds in messages[1:]:
+		await interaction.followup.send(embeds=embeds)
+
+
+async def aoe_explain(ctx, *args):
+	""" !explain as a reply to an analysis post in a queue channel: why each player got their scores. """
+	ref = getattr(ctx.message, 'reference', None)
+	if not ref or not ref.message_id:
+		raise bot.Exc.SyntaxError("Reply to a game analysis post with this command, or use Apps → Explain analysis on the post.")
+	try:
+		title, messages = await bot.replays.explain_post(ctx.message.channel.id, ref.message_id)
+	except bot.replays.ReplayError as e:
+		raise bot.Exc.NotFoundError(str(e))
+	for i, embeds in enumerate(messages):
+		await ctx.message.channel.send(content=f"**{title}**" if i == 0 else None, embeds=embeds,
+			reference=ctx.message if i == 0 else None)

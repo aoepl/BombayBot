@@ -47,6 +47,19 @@ Reports over the games analysed in the queue channel (uploads and automatic brea
 * `/aoe civs [map]`: win rate of every civ, overall or on one map (name or type, e.g. `Arena`, `Golden Lakes`,
   `Closed`), and the best civs (2+ games) by BombayBot Elo range (under 1400, 1400–1599, 1600–1799, 1800+), by
   position (flank, pocket) and by map.
+* **Explain analysis**: right-click (or long-press) a game analysis post → Apps → Explain analysis. It works on
+  the post or on any message in its thread, including in the replay forum. The bot replies with why each player
+  got each score:
+  * first, how the scores are calculated: what each of execution, pressure, survival and team play measures and
+    from which parts, how parts become 1–10 scores, the bonuses and the overall weights;
+  * then for each player, the calculation: every part of execution, pressure, survival and team play, with the player's value, its 1–10 score, the
+    lobby's best and worst, and its share of the score;
+  * the bonuses (fighting several enemies, forward buildings) and any parts left out because nobody did them;
+  * the arithmetic, for example "(8.3×1 + 10×1 + 1.8×1 + 5.7×0.25 + 10×1) ÷ 4.25 = 7.4, + 0.91 bonus → 8.3", and how
+    the overall score weighs the four for the player's position.
+
+  In a queue channel, replying `!explain` to the post does the same. Games analysed before this was added need
+  uploading again (they are re-analysed with the newer version).
 
 ### Game breakdowns from recorded games
 Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).
@@ -54,11 +67,17 @@ BombayBot analyses it, saves every player's performance (see Player insights) an
 
 Automatic breakdowns: when a queue channel's `replay_forum` is a **forum channel**, every match reported with `/report` is looked
 up on World's Edge (the game's own match history, also used by AoE2 Insights and AoE2 Companion) about 90 seconds
-after `/report loss` (or `/report draw` once both captains agree; never after `/report abort`), retrying for about 20 minutes. The bot searches the history of the highest-rated players whose
+after `/report loss` (or `/report draw` once both captains agree, or a moderator's `report_admin` result; never after
+an abort), retrying for about 20 minutes. The bot searches the history of the highest-rated players whose
 AoE2 profile it knows, downloads the highest-rated player's recording and posts the breakdown in the forum,
 mentioning the players. It stops looking as soon as a member uploads that game with `/replay upload`. Profile ids
-are learned from uploaded recordings (each recording lists every player's profile id, saved against the member
-their name matched), so a player needs to appear in one uploaded game first.
+are learned from uploaded recordings: each recording lists every player's profile id, and all of them are saved with
+the player's in-game name, against the member the name matched when there is one. A player whose name matched no
+member is picked up as soon as the name is linked with `/aoe link`, so earlier uploads count. A reported match is
+found once any one of its players has appeared in an uploaded game. When the search can't start, the queue
+channel is told why: the replay channel isn't a forum channel, or none of the players has a known AoE2 profile yet
+(then upload the game). When it gives up after 20 minutes, it asks for an upload. The log has a `Replay for match
+<id>:` line for every step.
 
 Posts never attach the recording, to save the server's Discord storage. They link to the official download
 (`aoe.ms/replay`) and the match pages on AoE2 Insights and AoE2 Companion. The match id comes from the file name
@@ -80,7 +99,7 @@ What the breakdown shows:
   minutes apart are merged into one line with the time span: fights between two players (500+
   army value killed in 3 minutes, so a sea fight and a land fight at the same time stay apart), raids (3+
   villagers of one player killed by one raider in one burst, kills under a minute apart; events in the last 3
-  minutes before the game is decided count half when picking), castles destroyed, players eliminated (orders
+  minutes before the game is decided count half when picking), denied age-ups (an enemy Town Center destroyed while researching an age, clicked again later; always listed), castles destroyed, players eliminated (orders
   stop well before the end with no resignation, e.g. a regicide king killed) and the resignation that ends the analysis.
 * Each player gets a strategy name: opening → Castle Age army → Imperial Age army → extras, for example
   "Fast Castle → Monks + Temple Guard → Imp: Monks + Spearmen/Halbs → 3 forward castles".
@@ -97,12 +116,29 @@ What the breakdown shows:
   A part nobody in the lobby did (no forward castles or towers, no tributes, nobody in Imperial Age) is left
   out and its weight spread over the other parts. Saving for an age-up or an expensive technology (550+
   resources; the 2 minutes before the click) is not a gap in military production. Execution weighs the first military unit at a quarter of the others.
-  Overall weights: flanks execution 27%, pressure 36%, survival 27%, team 10%; pockets 40/25/25/10; others
-  32/32/26/10. When survival is not scored its weight is spread over the rest.
+  Overall weights: flanks execution 27%, pressure 36%, holding position 27%, team 10%; pockets 40/25/25/10;
+  others 32/32/26/10.
   Execution: Castle and Imperial Age timing, villager value, first military unit and floating. A player who made
   8+ Feudal military units scores the better of their Castle Age click time and their Feudal production uptime
   (Town Centers and Docks kept busy, military buildings producing every minute), so a late Castle Age after a
   strong Feudal army is not penalised.
+  Age-up timings are also judged against the player's direct opponent. In 4v4 that is by position: each flank
+  against the enemy flank on its side, each pocket against the enemy pocket on its side. In other sizes it is the
+  enemy they fought head-on, in either direction (20+ army orders into one's base, or 2+ villagers killed, by
+  either side: an attacker and the player defending are direct opponents); with no such fight, the enemy whose
+  base is nearest. When both were late (after the
+  lobby's median click, or never), they were delaying each other, so Castle and Imperial Age timings are scored
+  within the pair (5.5 when equal, higher for the faster) if that beats the lobby score. When the player aged up
+  later than the opponent but the opponent lost their base and the player didn't, the late timing scores at least
+  the opponent's.
+  Execution also gets a bonus of up to +1.5 for fighting several enemies at once, from attack clicks on enemy
+  units (villagers included):
+  * up to +0.75 for minutes spent attacking units of 2 or more enemies (2+ clicks on each in that minute;
+    early minutes count more);
+  * up to +0.75 for minutes in which 2 or more enemies attacked the player's units, each minute counting by how
+    the player traded in it. An even trade against two players earns full credit.
+
+  Both are measured as a share of the game from 8:00, so long games don't hand everyone the full bonus.
 * Villagers killed are estimated: a villager counted as killed is credited to the enemies whose army orders were
   near it, by share of those orders. They count towards micro (value killed) and pressure (damage done).
 * Each player gets a playstyle: Macro, Micro, Macro + Micro, or "Neither stood out" (6.0 or more out of 10 earns
@@ -143,12 +179,45 @@ What the breakdown shows:
   look the same as kills and count in full. Micro weighs value traded (60%), how much fighting the player did (25%)
   and target picking (15%). The Micro label also needs more value killed than lost (1.1 times or better).
 * Pressure measures the army a player keeps on the map and how much of it they send at the enemy:
-  35% average army value on the map from 8:00 on, scaled by how much damage that army did for its size (full
-  credit at the lobby median or better, none for an army that never did damage) (units plus castles, Kreposts, Donjons and towers), 40% army
-  value sent at the enemy, 15% damage done (enemy army value killed in fights plus enemy villagers killed, 100
-  each), and 10% forward castles and towers. An order counts as sent at the enemy
+  35% average army value on the map from 8:00 on, units scaled by how much damage they did, the better of two measures: for their size
+  (full credit at the lobby median or better) and in total (against the lobby's most damage) (units plus castles, Kreposts, Donjons and towers), 40% army
+  value sent at the enemy (scaled the same way, and scored against the game's best: the best gets 10 and
+  the rest their share of it, so half the best is about 5.5) and 15% damage done (enemy army value killed in fights, enemy villagers killed at 100
+  each, enemy Town Centers destroyed and enemy macro disrupted; see below), as shares of 90%, plus a bonus of up to +1.5 for forward castles, Donjons and towers (see below). The
+  bonus only adds: players with no forward buildings, or ones that achieved little, lose nothing for it. An order counts as sent at the enemy
   when it targets an enemy unit or building, goes into an enemy base, or goes within 12 tiles of where an enemy
   army was ordered within a minute (fights in the open count too).
+  Enemy Town Centers destroyed count their cost (research and queued units in them are refunded by the game). A
+  Town Center destroyed with an age-up in progress (verified by the owner clicking the same age again later) also
+  gives a pressure bonus of up to +1 per age delayed, in full when the age was delayed 4+ minutes from the first
+  click to the click again, shared like the Town Center. A Town Center counts as destroyed when its owner never
+  used it again and research was lost in it, enemies
+  attack-clicked it 2+ times, or an enemy attack-clicked it with an enemy castle, Donjon or tower within 12 tiles
+  (castle arrows can't be seen). Credit is shared by attack clicks, a nearby castle or tower counting as 5.
+  Age-up times use the last click of each age, so an age lost with its Town Center counts from when it was clicked
+  again.
+  Enemy macro disrupted: for every attack on a base (minutes with 10+ enemy army orders into it, first 10 minutes),
+  the defender's production uptime during it and the 2 minutes after is compared with the 5 minutes before (Town
+  Centers and Docks busy and military queued every minute; military only once they have 120+ villagers). The drop
+  × the attack's length × what the defender was spending a minute before is the production it cost them, credited
+  to the attackers by their share of army orders into that base.
+  Forward castles, Kreposts, Donjons and towers (built in an enemy base) count by cost and by what they did,
+  and the bonus is full at 3 Castles' worth. A Castle is worth 1, a Donjon about 0.33 and a tower about 0.24. A building that achieved nothing still
+  counts a quarter of its cost; the rest comes from its effect (0 to 1):
+  * held, 25%: how long it stood, as a share of the rest of the game;
+  * held position, 20%: after it went up, the owner's team's share of the activity within 15 tiles (buildings
+    placed count 3, army orders 1);
+  * gained ground, 15%: how much that share rose compared with the 5 minutes before;
+  * covered a push, 20%: the owner's team attacking enemy buildings or using attack-ground (rams, trebuchets,
+    bombards, mangonels) within 20 tiles in its first 15 minutes (full credit at 15 such orders);
+  * denied trade, 20%: it stood within 10 tiles of the enemy team's trade route (the line between their
+    Markets 40+ tiles apart) while they made trade carts (full credit at 30 carts). Left out when that team
+    made no trade carts.
+
+  Towers aren't tracked one by one, so they skip the held part. Castles are counted as buildings, not
+  placements: repeated placements at the same spot within a minute count once, and placements never seen
+  built (no units, research or enemy hits) count half. In army on the map a castle counts only while it
+  stands, and the damage discount applies to units only (castle and tower arrows can't be seen as kills).
   Warships count for less in pressure where water does not decide the land fight: 0.4 of their value on lake
   maps (4 Lakes, Golden Lakes, Kawasan), 0.7 on coastal maps (Baltic, Mediterranean, Continental...), in full
   on island maps, 0.6 elsewhere. Micro still counts water fights at full value.
@@ -158,13 +227,19 @@ What the breakdown shows:
   a cheap one. Units are tracked by their ids in the player's commands (the replay has no kill data), and count
   as on the map until 90 seconds after their owner last commanded them.
   The overall score weighs them by seat (flank or pocket).
-* Survival is only scored for players whose base was seriously attacked: it rewards keeping the economy at
+* Holding position (survival) is scored for every base. A base the enemy never seriously attacked scores 7 (the
+  enemy was kept out). For a base that was seriously attacked: it rewards keeping the economy at
   home under pressure and marks players whose main base was destroyed. Holding a heavy attack scores higher
   than holding a light one. Enemy castles and towers built in a base count as pressure, weighted by how much
-  enemy army came with them, and clearing them earns a little extra. Players who were never attacked get
-  "—" and their overall score uses the other three.
+  enemy army came with them, and clearing them earns a little extra.  Being attacked by 2 or more enemies at once makes the test
+  harder: each such minute adds to the attack's difficulty, up to 0.3.
 * Every score is compared with the player's BombayBot Elo, so the post and the recap show who played above
-  or below their Elo. Players are matched to BombayBot members by name. Names linked with `/aoe link` come
+  or below their Elo. The expected score is the lobby's average overall score plus the player's Elo standing times the
+  spread (standard deviation) of the lobby's actual scores: one standard deviation above in Elo expects one
+  standard deviation above in score. The standing is the average of two, in standard deviations of Elo: against
+  the whole lobby and against their own team (their rank in it). Elos within 100 of each other count as the same level (players
+  are grouped into tiers that share an average Elo), and the spread used is at least 100. The verdict is actual
+  minus expected: +1.5 above their Elo, +3 well above, −1.5 below, −3 well below, otherwise around their Elo. Players are matched to BombayBot members by name. Names linked with `/aoe link` come
   first (a member can link several in-game names; moderators can link names for others). Otherwise the
   in-game name is compared with the member's BombayBot nick and Discord names, ignoring case, spaces,
   symbols and rating tags. Unmatched players show no Elo.
@@ -172,16 +247,57 @@ What the breakdown shows:
   highest BombayBot Elo on each team and the winning team comes first.
 * The breakdown covers the game up to the first resignation; the result still counts every resignation.
 * With `summary:False`, `/replay upload` only saves the player stats and posts nothing.
-* Each game is posted once. Uploading it again (even a different player's recording or a renamed file) links
-  the existing post and refreshes the saved stats. If the post was deleted, uploading the game again creates a new post.
+* Each game is posted once. Uploading it again (even a different player's recording or a renamed file) analyses it
+  again only when the bot's analysis has changed since (a newer version); the existing post and saved stats are
+  then updated, and the reply says which version it was analysed with before. Player or Elo changes (for example a
+  name linked with `/aoe link` afterwards) don't trigger a new analysis. Otherwise the reply links the post and nothing changes. If the post was
+  deleted, uploading the game again analyses it again and creates a new post.
 
 The analysis reads player commands, not kills or damage, so treat scores as a guide.
+
+### Draft logic (not in Discord yet)
+`bot/replays/draft.py` recommends civ picks and bans for a map, and plays out or rates a whole draft. Everything is
+measured against Elo, so a civ is not rated well just because good players picked it:
+* a game result is compared with the win chance the teams' Elos gave. The spread of Elos in that lobby sets how
+  much a gap means: one standard deviation (at least 100) is a 62% favourite;
+* a fight is compared with the share of army value killed that the Elos of the players in it predicted. Allies who
+  joined the fight count, so one player holding two armies is judged 1 against 2.
+
+Each option is rated 0–1 (0.5 = average) from:
+* **Strength** of the civ in that seat, against Elo. Games on this map count fully, the same map type 0.5, the
+  same seat elsewhere 0.2 and the other seat 0.1. Every estimate starts from 6 games of the tech tree's guess:
+  how well the civ's best unit lines suit the seat (archers and infantry on the flank, cavalry in the pocket).
+* **Army**: the unit lines the civ fields in that seat, taken from saved fights. The tech tree's best lines for
+  the seat fill in until there are enough fights. Siege and monks count half.
+* **Matchups** against the enemy civs: 60% their usual armies against each other, 40% how well each civ can
+  switch to a counter for the other's army. Unit line matchups start from unit stats with each civ's own
+  Blacksmith and armour upgrades (attack and bonus damage against armour classes, hit points, range, speed,
+  splash, cost) and are corrected by real fights between those lines. Real fights between the two civs and lost
+  bases correct them further; a base taken by a civ whose team still lost counts 1.5x. Same-seat enemies count
+  fully, the other seat half. An enemy slot not picked yet counts as its 6 likeliest picks, at half weight.
+* **Elo range fit** (how the civ does there compared with all its games), and **player fit** (how the player does
+  with this civ compared with their other games).
+
+The pick is the option with the best value plus half of what it denies the enemy. That is the enemy's best slot
+value with the civ minus without it. `ban()` suggests bans (what the enemy would value most). `balance()` rates a
+finished draft: the Elo win chance, the civ edge and both combined. `fair_first_pick()` gives first pick to the
+team with the lower total Elo. Any format works: bans, pick order (A-B-A-B and A-B-B-A helpers), seats and
+players with Elo. Chronicles civs are left out. Community votes (the civ voting sheet) can be added through
+`Prior` later.
+
+Civ tech trees and unit stats come from `bot/replays/techtree.json`, built from the
+[aoe2techtree](https://github.com/SiegeEngineers/aoe2techtree) data. `bot/replays/techtree.py` holds the unit lines,
+line quality per civ (units and upgrades the civ has) and the stat-based counter estimate. Civ bonuses that are not
+in the data, such as Franks cavalry hit points, only show through results.
 
 ### Player insights (saved for later)
 Every recorded game uploaded with `/replay upload` is saved for
 future features such as suggesting civs and seats for a map. Nothing reads it yet; it builds up as games are played.
 
 * `aoe_games`: one row per game (map, map category, team size, length, who uploaded it).
+* `aoe_fights`: one row per major fight between two players: both civs and seats, the players on each side
+  (allies who joined), the units each side queued in the 5 minutes before and during it, army value each killed,
+  and the share their Elos predicted.
 * `aoe_game_players`: one row per player per game: AoE2 profile and the Discord member matched by name, map and map category
   (Open, Semi Closed, Closed, Hybrid, Nomad or Other), civ, seat (flank or pocket), win or loss, BombayBot Elo,
   strategy (opening, Feudal units and whether they attacked, forward towers, boom, Castle Age and Imperial Age
@@ -208,3 +324,7 @@ This program is free software: you can redistribute it and/or modify it under th
 This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 See 'GNU GPLv3.txt' for GNU General Public License.
+
+* Lost bases are saved as matchups (table `aoe_matchups`): when a player's main base falls, the enemy with the
+  most army orders into it (a castle built there counts as 50) is credited, as "winner civ + position took
+  loser civ + position" on that map, with both players' member and Elo.
