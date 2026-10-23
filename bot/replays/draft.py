@@ -892,7 +892,7 @@ def ranked_civs():
 
 TEAM_CIVS, PLAYER_CIVS = 'team', 'player'  # civs per team (players sort them out) / a civ and seat for each player
 PICK_SPREAD = 0.02  # each pick is a random one of the civs within 2% of the best, for variety
-EXCLUDE_MIN, EXCLUDE_MAX = 35, 35  # civs left out at random before every draft, so drafts don't repeat
+EXCLUDE_MIN, EXCLUDE_MAX = 35, 40  # civs left out at random before every draft, so drafts don't repeat
 SEAT_PRIOR = 4  # a player's win rate in a seat starts as 4 games at 50%
 TEAM_CHOICES = 6  # civs each team gets to choose from in TEAM_CIVS mode (at least one per player)
 
@@ -968,7 +968,7 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 	"""
 	rng = rng or random.Random()
 	picks = sum(len(t) if mode == PLAYER_CIVS else max(len(t), TEAM_CHOICES) for t in teams)
-	pool, excluded = civ_pool(rng, civs, keep=picks + FIELD_SIZE)
+	pool, excluded = civ_pool(rng, civs, keep=picks + 2)  # a couple spare, so the last picks still have a choice
 	if mode == PLAYER_CIVS:
 		slots = [assign_seats(t, records or {}, rng) for t in teams]
 	else:
