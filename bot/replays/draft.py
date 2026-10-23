@@ -817,7 +817,8 @@ def recommend(model: Model, draft: Draft, team: int = None, top: int = 5):
 def simulate(model: Model, draft: Draft, rng=None, spread=0.0):
 	"""
 	Play the rest of the draft with each team taking the top recommendation. With rng and spread, a team takes a
-	random one of the civs within `spread` of the best instead, so the same strong civs don't come up every time.
+	random one of the civs within `spread` of the best for the same seat instead, so the same strong civs don't
+	come up every time.
 	Returns the picks made.
 	"""
 	d = Draft(draft.map_name, draft.map_category, list(draft.available), draft.teams, list(draft.order), list(draft.picks),
@@ -829,8 +830,9 @@ def simulate(model: Model, draft: Draft, rng=None, spread=0.0):
 		if not options:
 			break
 		pick = options[0]
-		if rng and spread:
-			pick = rng.choice([o for o in options if o['score'] >= options[0]['score'] - spread])
+		if rng and spread:  # only civs for the same seat as the best pick, so a pocket slot never gets an archer civ
+			pick = rng.choice([o for o in options if o['score'] >= options[0]['score'] - spread
+				and o['seat'] == options[0]['seat']])
 		d.picks.append((team, pick['slot'], pick['civ']))
 		made.append(dict(team=team, **pick))
 	return made, d
