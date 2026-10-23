@@ -2,7 +2,7 @@
 """
 Draft logic: which civ to pick next for a map, from the games the bot has analysed and the civs' tech trees.
 
-Nothing here is wired to Discord yet. With few games saved most ratings stay close to "average" on purpose:
+/aoe draft (civ_draft) uses it once a match has started. With few games saved most ratings stay close to "average" on purpose:
 every estimate is pulled towards a broader one by how few games back it up. Community votes (the civ voting
 sheet) can be plugged in later through `Prior`.
 
@@ -31,7 +31,10 @@ available; balance() says how even the finished draft is. Any format works: bans
 """
 import json
 import math
+import random
+import re
 from collections import defaultdict
+from itertools import combinations, permutations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
@@ -60,6 +63,64 @@ OPEN_SLOT_FACE = 0.5     # ... at half the weight of a civ already picked
 DENIAL_WEIGHT = 0.5      # how much taking a civ away from the enemy is worth next to its value for us
 USUAL_SHARE = 0.6        # matchup: the usual armies against each other ...
 ANSWER_SHARE = 0.4       # ... and how well each side can switch to a counter
+# Closed maps: walls and space to build up let siege, gunpowder, towers and expensive power units come out, so
+# civs strong in those do better there. How much that counts per map type, and its weight next to Elo results.
+CLOSED_LEAN = {'Closed': 1.0}
+CLOSED_WEIGHT = 0.3
+SIEGE_LINES = ('Bombard Cannons', 'Mangonels', 'Rams', 'Scorpions')
+TOWER_TECHS = ('Bombard Tower', 'Keep', 'Guard Tower', 'Masonry', 'Architecture', 'Heated Shot', 'Murder Holes', 'Arson',
+	'Hoardings', 'Treadmill Crane')
+GUNPOWDER_CLASS = '23'  # armour class of gunpowder units in the game data
+POWER_COST = 150        # a land unit costing this much or more (elephants, war wagons ...) is a power unit
+# Civ bonuses the tech tree data can't show, that make their siege or gunpowder better than the units alone say.
+# Edit freely; a bonus makes up BONUS_SHARE of that part of the closed-map score, units and upgrades the rest.
+CLOSED_BONUS = {
+	'Celts': 'siege', 'Mongols': 'siege', 'Ethiopians': 'siege', 'Koreans': 'siege', 'Slavs': 'siege',
+	'Spanish': 'gunpowder', 'Turks': 'gunpowder', 'Bohemians': 'gunpowder', 'Hindustanis': 'gunpowder',
+	'Portuguese': 'gunpowder',
+}
+BONUS_SHARE = 0.25      # how much a bonus adds to that part (0..1)
+# Hybrid maps (land and water): a strong navy and fishing, and wood bonuses, count; a cavalry civ in the pocket
+# that can fish boom is very strong. How much that counts per map type, and its weight next to Elo results.
+HYBRID_LEAN = {'Hybrid': 1.0}
+HYBRID_WEIGHT = 0.3
+NAVY_LINES = ('Galleys', 'Fire ships', 'Demo ships', 'Cannon Galleons')
+DOCK_TECHS = ('Gillnets', 'Careening', 'Dry Dock', 'Shipwright')
+WOOD_TECHS = ('Double-Bit Axe', 'Bow Saw', 'Two-Man Saw')
+# Civ bonuses the data can't show: 'water' (cheaper or better fishing, docks or warships), 'wood' (faster or
+# cheaper wood, or saving it). Edit freely; like CLOSED_BONUS, a bonus makes up BONUS_SHARE of that part.
+HYBRID_BONUS = {
+	'Japanese': 'water', 'Malay': 'water', 'Italians': 'water', 'Vikings': 'water', 'Dravidians': 'water',
+	'Portuguese': 'water', 'Byzantines': 'water', 'Berbers': 'water',
+	'Celts': 'wood', 'Burmese': 'wood', 'Huns': 'wood', 'Mayans': 'wood',
+}
+# Semi closed maps: pockets want a food bonus, a cavalry bonus or a strong late game (the closed-map score);
+# flanks want an aggressive civ: a strong archer line, a strong unique unit, or men-at-arms and towers play.
+# Being great at one of these counts most (score: half the best part, half their average).
+SEMI_LEAN = {'Semi Closed': 1.0}
+SEMI_WEIGHT = 0.3
+# Edit freely. Known food (eco) bonuses, cavalry bonuses, and flank aggression bonuses ('archers' or 'infantry')
+# that the data can't show; each makes up BONUS_SHARE of that part.
+FOOD_BONUS = {'Franks', 'Britons', 'Slavs', 'Khmer', 'Chinese', 'Sicilians', 'Poles', 'Burgundians', 'Teutons',
+	'Mayans', 'Hindustanis', 'Lithuanians', 'Gurjaras', 'Vikings'}
+CAV_BONUS = {'Franks', 'Magyars', 'Berbers', 'Huns', 'Lithuanians', 'Cumans', 'Poles', 'Burgundians', 'Bulgarians',
+	'Hindustanis', 'Persians', 'Malians'}
+FLANK_BONUS = {
+	'Britons': 'archers', 'Mayans': 'archers', 'Ethiopians': 'archers', 'Vietnamese': 'archers', 'Italians': 'archers',
+	'Chinese': 'archers', 'Koreans': 'archers',
+	'Aztecs': 'infantry', 'Japanese': 'infantry', 'Vikings': 'infantry', 'Malians': 'infantry', 'Goths': 'infantry',
+	'Romans': 'infantry',
+}
+# Archer upgrades that decide the archer war: a civ missing one fields clearly weaker archers.
+KEY_ARCHER = {'Bracer': 0.75, 'Thumb Ring': 0.9, 'Arbalester': 0.7}  # what the line is worth without it
+FEUDAL_TOWER_TECHS = ('Masonry', 'Guard Tower', 'Murder Holes', 'Heated Shot', 'Arson')
+MAA_TOWERS_SHARE = 0.8  # men-at-arms and towers works, but less often than a feudal archer plan
+# Open maps: an eco bonus for a fast attack, top archer civs on the flanks and top cavalry civs in the pockets.
+# score: flanks 65 archers / 35 eco; pockets 65 cavalry / 35 eco.
+OPEN_LEAN = {'Open': 1.0}
+OPEN_WEIGHT = 0.3
+# Edit freely: known eco bonuses that speed up an early attack (food bonuses count too).
+ECO_BONUS = FOOD_BONUS | {'Huns', 'Mongols', 'Aztecs', 'Persians', 'Celts', 'Japanese', 'Malians', 'Ethiopians'}
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
 CHRONICLES = {'Achaemenids', 'Athenians', 'Spartans'}  # not in ranked games
 
@@ -125,6 +186,185 @@ def _lines(text):
 def _shares(values):
 	total = sum(values.values())
 	return {k: v / total for k, v in values.items()} if total else {}
+
+
+_FORTRESS = {}
+
+
+def fortress(civ):
+	"""
+	How well a civ can use a closed map, from its tech tree, each 0..1: siege (Bombard Cannons, Onagers, Rams,
+	Scorpions with Siege Engineers and Chemistry), gunpowder (its gunpowder lines, unique ones too: two good lines
+	count as full), towers (Bombard Tower, Keep and tower upgrades) and power (its best expensive land unit line).
+	score weighs them 35 / 35 / 15 / 15. Civ bonuses missing from the data come from CLOSED_BONUS.
+	"""
+	if civ in _FORTRESS:
+		return _FORTRESS[civ]
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	lines = techtree.civ_lines(civ)
+	siege = sum(techtree.civ_line_quality(civ, ln) for ln in SIEGE_LINES) / len(SIEGE_LINES)
+	gun, power = [], []
+	for ln in lines:
+		u = techtree.unit(techtree._best_unit(civ, ln)) or {}
+		if GUNPOWDER_CLASS in (u.get('armours') or {}) and ln not in ('Cannon Galleons',) and u.get('speed', 0) > 0:
+			gun.append(techtree.civ_line_quality(civ, ln))
+		cost = sum((u.get('cost') or {}).values())
+		if GUNPOWDER_CLASS in (u.get('armours') or {}):
+			continue  # counted as gunpowder already
+		if POWER_COST <= cost < techtree.HERO_COST and ln not in SIEGE_LINES and u.get('speed', 0) > 0 \
+				and not ln.endswith(('ships', 'Galleons', 'Galleys', 'Hulks')) and techtree.line_of(ln) not in SUPPORT_LINES:
+			power.append(techtree.civ_line_quality(civ, ln))
+	gunpowder = min(1.0, sum(sorted(gun, reverse=True)[:2]) / 2) if gun else 0.0
+	# Units and upgrades make up most of siege and gunpowder; a known civ bonus makes up the rest.
+	bonus = CLOSED_BONUS.get(civ)
+	siege = (1 - BONUS_SHARE) * siege + (BONUS_SHARE if bonus == 'siege' else 0.0)
+	gunpowder = (1 - BONUS_SHARE) * gunpowder + (BONUS_SHARE if bonus == 'gunpowder' and gun else 0.0)
+	towers = sum(1 for t in TOWER_TECHS if t in techs) / len(TOWER_TECHS)
+	best_power = max(power, default=0.0)
+	out = dict(siege=siege, gunpowder=gunpowder, towers=towers, power=best_power,
+		score=0.35 * siege + 0.35 * gunpowder + 0.15 * towers + 0.15 * best_power)
+	_FORTRESS[civ] = out
+	return out
+
+
+_HYBRID = {}
+
+
+def hybrid(civ, seat=None):
+	"""
+	How well a civ can use a hybrid map, each part 0..1: water (navy lines and dock techs: Gillnets, Careening, Dry
+	Dock, Shipwright), wood (lumber upgrades) and, for pockets, cavalry (its best melee cavalry line) that the fish
+	boom pays for. Known civ bonuses from HYBRID_BONUS make up part of water or wood.
+	score: flanks 55 water / 45 wood; pockets 35 water / 20 wood / 45 cavalry x fishing.
+	"""
+	key = (civ, seat)
+	if key in _HYBRID:
+		return _HYBRID[key]
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	navy = sum(techtree.civ_line_quality(civ, ln) for ln in NAVY_LINES) / len(NAVY_LINES)
+	docks = sum(1 for t in DOCK_TECHS if t in techs) / len(DOCK_TECHS)
+	bonus = HYBRID_BONUS.get(civ)
+	water = (1 - BONUS_SHARE) * (0.6 * navy + 0.4 * docks) + (BONUS_SHARE if bonus == 'water' else 0.0)
+	wood = (1 - BONUS_SHARE) * (sum(1 for t in WOOD_TECHS if t in techs) / len(WOOD_TECHS)) + \
+		(BONUS_SHARE if bonus == 'wood' else 0.0)
+	cav = 0.0
+	for ln in techtree.civ_lines(civ):
+		u = techtree.unit(techtree._best_unit(civ, ln)) or {}
+		if u and techtree._cavalry(techtree._best_unit(civ, ln)) and not techtree._ranged(techtree._best_unit(civ, ln)) \
+				and ln != 'Scouts/Hussars' and sum((u.get('cost') or {}).values()) < techtree.HERO_COST:
+			cav = max(cav, techtree.civ_line_quality(civ, ln))
+	cavalry = cav * (0.5 + 0.5 * water)  # the fish boom is what pays for the cavalry
+	if seat == 'Pocket':
+		score = 0.35 * water + 0.2 * wood + 0.45 * cavalry
+	else:
+		score = 0.55 * water + 0.45 * wood
+	out = dict(water=water, wood=wood, cavalry=cavalry if seat == 'Pocket' else 0.0, score=score)
+	_HYBRID[key] = out
+	return out
+
+
+def _top_quarter_hybrid(key, seat):
+	vals = sorted((hybrid(c, seat)[key] for c in ranked_civs()), reverse=True)
+	return vals[len(vals) // 4]
+
+
+def archer_line(civ):
+	""" 0..1: the civ's archer line, where missing Bracer, Thumb Ring or Arbalester costs a lot (KEY_ARCHER). """
+	q = techtree.civ_line_quality(civ, 'Archers')
+	have = set(techtree.data()['civs'].get(civ, {}).get('techs', [])) | set(techtree.data()['civs'].get(civ, {}).get('units', []))
+	for what, keep in KEY_ARCHER.items():
+		if what not in have:
+			q *= keep
+	return q
+
+
+def _melee_cavalry(civ):
+	""" 0..1: the civ's best melee cavalry line (not scouts), heroes left out. """
+	best = 0.0
+	for ln in techtree.civ_lines(civ):
+		name = techtree._best_unit(civ, ln)
+		u = techtree.unit(name) or {}
+		if u and techtree._cavalry(name) and not techtree._ranged(name) and ln != 'Scouts/Hussars' \
+				and sum((u.get('cost') or {}).values()) < techtree.HERO_COST:
+			best = max(best, techtree.civ_line_quality(civ, ln))
+	return best
+
+
+_SEMI = {}
+
+
+def semi(civ, seat=None):
+	"""
+	How well a civ suits a seat on a semi closed map, each part 0..1.
+	Pockets: food (a known food bonus, else farming upgrades), cavalry (best melee cavalry line plus a known
+	cavalry bonus) and late game (the closed-map score). Flanks: archers (archer_line), unique unit (its best unique
+	land fighting line) and men-at-arms with towers (militia line and feudal tower upgrades), plus known
+	aggression bonuses. score: half the best part plus half their average.
+	"""
+	key = (civ, seat)
+	if key in _SEMI:
+		return _SEMI[key]
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	if seat == 'Pocket':
+		farming = sum(1 for t in ('Horse Collar', 'Heavy Plow', 'Crop Rotation') if t in techs) / 3
+		food = (1 - BONUS_SHARE) * farming + (BONUS_SHARE if civ in FOOD_BONUS else 0.0)
+		cav = (1 - BONUS_SHARE) * _melee_cavalry(civ) + (BONUS_SHARE if civ in CAV_BONUS else 0.0)
+		late = fortress(civ)['score']
+		parts = dict(food=food, cavalry=cav, late=late)
+	else:
+		bonus = FLANK_BONUS.get(civ)
+		archers = (1 - BONUS_SHARE) * archer_line(civ) + (BONUS_SHARE if bonus == 'archers' else 0.0)
+		unique = 0.0
+		for ln in techtree.civ_lines(civ):
+			if ln in techtree.LINES:
+				continue
+			name = techtree._best_unit(civ, ln)
+			u = techtree.unit(name) or {}
+			cost = sum((u.get('cost') or {}).values())
+			if u and u.get('speed', 0) > 0 and cost < techtree.HERO_COST and GUNPOWDER_CLASS not in (u.get('armours') or {}) \
+					and not (u.get('blast') and u.get('range', 0) >= 5):
+				unique = max(unique, techtree.civ_line_quality(civ, ln))
+		towers = sum(1 for t in FEUDAL_TOWER_TECHS if t in techs) / len(FEUDAL_TOWER_TECHS)
+		maa = (1 - BONUS_SHARE) * (0.6 * techtree.civ_line_quality(civ, 'Militia line') + 0.4 * towers) + \
+			(BONUS_SHARE if bonus == 'infantry' else 0.0)
+		parts = dict(archers=archers, unique=(1 - BONUS_SHARE) * unique, maa_towers=MAA_TOWERS_SHARE * maa)
+	vals = list(parts.values())
+	out = dict(parts, score=0.5 * max(vals) + 0.5 * sum(vals) / len(vals))
+	_SEMI[key] = out
+	return out
+
+
+_OPEN = {}
+
+
+def open_map(civ, seat=None):
+	""" How well a civ suits a seat on an open map, each part 0..1: eco (a known eco bonus, else the early eco
+	upgrades), archers for flanks (archer_line plus a known archer bonus), cavalry for pockets (best melee cavalry
+	line plus a known cavalry bonus). """
+	key = (civ, seat)
+	if key in _OPEN:
+		return _OPEN[key]
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	early = sum(1 for t in ('Double-Bit Axe', 'Horse Collar', 'Wheelbarrow', 'Gold Mining') if t in techs) / 4
+	eco = (1 - BONUS_SHARE) * early + (BONUS_SHARE if civ in ECO_BONUS else 0.0)
+	if seat == 'Pocket':
+		cav = (1 - BONUS_SHARE) * _melee_cavalry(civ) + (BONUS_SHARE if civ in CAV_BONUS else 0.0)
+		out = dict(eco=eco, cavalry=cav, score=0.65 * cav + 0.35 * eco)
+	else:
+		archers = (1 - BONUS_SHARE) * archer_line(civ) + (BONUS_SHARE if FLANK_BONUS.get(civ) == 'archers' else 0.0)
+		out = dict(eco=eco, archers=archers, score=0.65 * archers + 0.35 * eco)
+	_OPEN[key] = out
+	return out
+
+
+def _top_quarter_open(key, seat):
+	vals = sorted((open_map(c, seat).get(key, 0) for c in ranked_civs()), reverse=True)
+	return vals[len(vals) // 4]
+
+
+def _top_quarter_semi(key, seat):
+	vals = sorted((semi(c, seat)[key] for c in ranked_civs()), reverse=True)
+	return vals[len(vals) // 4]
 
 
 class Prior:
@@ -270,13 +510,60 @@ class Model:
 			self._cache[key] = fits[len(fits) // 2]
 		return TECH_WEIGHT * (self._seat_fit(civ, seat) - self._cache[key])
 
+	def closed_strength(self, civ, category):
+		""" Head start on closed maps for strong siege, gunpowder, towers and power units (0 on open maps). """
+		lean = CLOSED_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		if 'median_fortress' not in self._cache:
+			scores = sorted(fortress(c)['score'] for c in ranked_civs())
+			self._cache['median_fortress'] = scores[len(scores) // 2]
+		return lean * CLOSED_WEIGHT * (fortress(civ)['score'] - self._cache['median_fortress'])
+
+	def hybrid_strength(self, civ, seat, category):
+		""" Head start on hybrid maps for navy and fishing, wood, and (pockets) cavalry with a fish boom. """
+		lean = HYBRID_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		key = ('median_hybrid', seat)
+		if key not in self._cache:
+			scores = sorted(hybrid(c, seat)['score'] for c in ranked_civs())
+			self._cache[key] = scores[len(scores) // 2]
+		return lean * HYBRID_WEIGHT * (hybrid(civ, seat)['score'] - self._cache[key])
+
+	def open_strength(self, civ, seat, category):
+		""" Head start on open maps: archers for flanks, cavalry for pockets, an eco bonus for both. """
+		lean = OPEN_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		key = ('median_open', seat)
+		if key not in self._cache:
+			scores = sorted(open_map(c, seat)['score'] for c in ranked_civs())
+			self._cache[key] = scores[len(scores) // 2]
+		return lean * OPEN_WEIGHT * (open_map(civ, seat)['score'] - self._cache[key])
+
+	def semi_strength(self, civ, seat, category):
+		""" Head start on semi closed maps: food, cavalry or late game for pockets, aggression for flanks. """
+		lean = SEMI_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		key = ('median_semi', seat)
+		if key not in self._cache:
+			scores = sorted(semi(c, seat)['score'] for c in ranked_civs())
+			self._cache[key] = scores[len(scores) // 2]
+		return lean * SEMI_WEIGHT * (semi(civ, seat)['score'] - self._cache[key])
+
 	def strength(self, civ, seat, map_name, category=None):
 		""" (rating 0..1, games on this map, games in all) for the civ in this seat on this map. """
 		key = ('strength', civ, seat, _norm(map_name), category)
 		if key in self._cache:
 			return self._cache[key]
 		mine = [r for r in self.rows if r['civ'] == civ and r.get('resid') is not None]
-		base = self.tech_strength(civ, seat)
+		# Map types with their own seat rules (open, semi closed, hybrid) replace the tech tree's generic seat fit.
+		seat_rules = category in OPEN_LEAN or category in SEMI_LEAN or category in HYBRID_LEAN
+		base = (0.0 if seat_rules else self.tech_strength(civ, seat)) + self.closed_strength(civ, category) + \
+			self.hybrid_strength(civ, seat, category) + self.semi_strength(civ, seat, category) + \
+			self.open_strength(civ, seat, category)
 		prior = self.prior(civ, seat, category)
 		if prior is not None:
 			base = prior - 0.5
@@ -527,18 +814,27 @@ def recommend(model: Model, draft: Draft, team: int = None, top: int = 5):
 	return best[:top]
 
 
-def simulate(model: Model, draft: Draft):
-	""" Play the rest of the draft with each team taking the top recommendation. Returns the picks made. """
+def simulate(model: Model, draft: Draft, rng=None, spread=0.0):
+	"""
+	Play the rest of the draft with each team taking the top recommendation. With rng and spread, a team takes a
+	random one of the civs within `spread` of the best for the same seat instead, so the same strong civs don't
+	come up every time.
+	Returns the picks made.
+	"""
 	d = Draft(draft.map_name, draft.map_category, list(draft.available), draft.teams, list(draft.order), list(draft.picks),
 		list(draft.bans))
 	made = []
 	while len(d.picks) < len(d.order):
 		team = d.order[len(d.picks)]
-		best = recommend(model, d, team, top=1)
-		if not best:
+		options = recommend(model, d, team, top=12 if rng and spread else 1)
+		if not options:
 			break
-		d.picks.append((team, best[0]['slot'], best[0]['civ']))
-		made.append(dict(team=team, **best[0]))
+		pick = options[0]
+		if rng and spread:  # only civs for the same seat as the best pick, so a pocket slot never gets an archer civ
+			pick = rng.choice([o for o in options if o['score'] >= options[0]['score'] - spread
+				and o['seat'] == options[0]['seat']])
+		d.picks.append((team, pick['slot'], pick['civ']))
+		made.append(dict(team=team, **pick))
 	return made, d
 
 
@@ -590,3 +886,287 @@ def fair_first_pick(teams):
 
 def ranked_civs():
 	return [c for c in techtree.civs() if c not in CHRONICLES]
+
+
+# ---------------------------------------------------------------- /aoe draft
+
+TEAM_CIVS, PLAYER_CIVS = 'team', 'player'  # civs per team (players sort them out) / a civ and seat for each player
+PICK_SPREAD = 0.02  # each pick is a random one of the civs within 2% of the best, for variety
+EXCLUDE_MIN, EXCLUDE_MAX = 35, 40  # civs left out at random before every draft, so drafts don't repeat
+SEAT_PRIOR = 4  # a player's win rate in a seat starts as 4 games at 50%
+TEAM_CHOICES = 6  # civs each team gets to choose from in TEAM_CIVS mode (at least one per player)
+
+
+def seat_layout(size, choices=None):
+	"""
+	Seats of a team from one end to the other: flanks at the ends, pockets between (none below 3 players).
+	With choices (more civs than players), the extra civs are for flank, pocket, flank... in turn.
+	"""
+	seats = ['Flank'] + ['Pocket'] * (size - 2) + ['Flank'] if size >= 3 else [None] * size
+	extra = max(0, (choices or size) - size)
+	return seats + ([('Flank', 'Pocket')[i % 2] for i in range(extra)] if size >= 3 else [None] * extra)
+
+
+def civ_pool(rng, civs=None, low=EXCLUDE_MIN, high=EXCLUDE_MAX, keep=0):
+	""" (civs to draft from, civs left out): low..high ranked civs left out at random, at least `keep` kept. """
+	civs = sorted(civs or ranked_civs())
+	k = max(0, min(rng.randint(low, high), len(civs) - keep))
+	out = set(rng.sample(civs, k))
+	return [c for c in civs if c not in out], sorted(out)
+
+
+def seat_record(record, seat):
+	""" (win rate pulled towards 50%, games) of a player in a seat; record is one summaries.seat_stats() value. """
+	st = (record or {}).get('seats', {}).get(seat)
+	if not st or not st['games']:
+		return 0.5, 0
+	return (st['wins'] + SEAT_PRIOR * 0.5) / (st['decided'] + SEAT_PRIOR), st['games']
+
+
+def assign_seats(team, records, rng):
+	"""
+	Seats for one team's players (dicts of name, elo, user_id): the split into flanks and pockets where the
+	players' own records in those seats add up best; even splits are decided at random. -> Slots, end to end.
+	"""
+	layout = seat_layout(len(team))
+	if len(team) < 3:
+		return [Slot(seat, p.get('elo'), p.get('name'), user_id=p.get('user_id')) for seat, p in zip(layout, team)]
+	best = None
+	for flanks in combinations(range(len(team)), 2):
+		score = sum(seat_record(records.get(p.get('user_id')), 'Flank' if i in flanks else 'Pocket')[0]
+			for i, p in enumerate(team))
+		key = (round(score, 6), rng.random())
+		if best is None or key > best[0]:
+			best = (key, flanks)
+	flanks = [team[i] for i in best[1]]
+	pockets = [p for i, p in enumerate(team) if i not in best[1]]
+	return [Slot(seat, p.get('elo'), p.get('name'), user_id=p.get('user_id'))
+		for seat, p in zip(layout, [flanks[0], *pockets, flanks[1]])]
+
+
+def pick_order(sizes, first):
+	""" Snake order (A-B-B-A-A-B...) for teams of these sizes; a full team is skipped. """
+	order, counts, t, step = [], [0, 0], first, 0
+	while len(order) < sum(sizes):
+		if counts[t] < sizes[t]:
+			order.append(t)
+			counts[t] += 1
+		step += 1
+		if step % 2 == 1:  # A, then B B, then A A ...
+			t = 1 - t
+	return order
+
+
+def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=None, records=None, civs=None):
+	"""
+	A whole draft for a started match. teams: two lists of dicts(name, elo, user_id). In TEAM_CIVS mode each team
+	gets TEAM_CHOICES civs (team average Elo, no player) to choose its players' civs from; in PLAYER_CIVS mode every
+	player gets a seat (assign_seats, from their flank/pocket records) and a civ. Both teams take the best civ
+	left in turn (snake order, a coin flip for first pick) from the civs not left out at random. Elos still shape
+	which civs suit each player (elo_fit, player_fit) but never which team gets the better civs.
+	-> dict(mode, map, category, teams (Slots with civs), picks, excluded, first, balance)
+	"""
+	rng = rng or random.Random()
+	picks = sum(len(t) if mode == PLAYER_CIVS else max(len(t), TEAM_CHOICES) for t in teams)
+	pool, excluded = civ_pool(rng, civs, keep=picks + 2)  # a couple spare, so the last picks still have a choice
+	if mode == PLAYER_CIVS:
+		slots = [assign_seats(t, records or {}, rng) for t in teams]
+	else:
+		slots = []
+		for t in teams:
+			elos = [p['elo'] for p in t if p.get('elo') is not None]
+			avg = round(sum(elos) / len(elos)) if elos else None
+			slots.append([Slot(seat, avg) for seat in seat_layout(len(t), max(len(t), TEAM_CHOICES))])
+	# Elo is not evened out by civs: the rating change already does that (a favourite gains little and loses more).
+	# So the snake draft only finds the strongest civs for the map and seats; they are then split between the teams
+	# (same seats each side) so that both sides' civs are as even as possible.
+	first = rng.randrange(2)
+	d = Draft(map_name, category, pool, slots, pick_order([len(t) for t in slots], first))
+	made, d = simulate(model, d, rng, PICK_SPREAD)
+	drafted, _ = _apply(d)
+	final, _ = fair_split(model, drafted, map_name, category, rng, per_player=mode == PLAYER_CIVS)
+	d = Draft(map_name, category, pool, final, [], [(t, i, s.civ) for t in (0, 1) for i, s in enumerate(final[t])])
+	return dict(mode=mode, map=map_name, category=category, teams=final, picks=made, excluded=excluded, first=first,
+		balance=balance(model, d), civ_count=len(civs or ranked_civs()))
+
+
+EVEN_TOLERANCE = 0.01  # splits within 1% of the most even one count as even ...
+EVEN_ENOUGH = 0.004    # ... and of those, the ones this close to the best seat fit are picked from at random
+
+
+def fair_split(model: Model, teams, map_name, category=None, rng=None, per_player=False):
+	"""
+	Share the drafted civs between the two teams so that their civs are as even as possible: every way of splitting
+	them is tried, and within a team each civ goes to the seat (and, per_player, the player) it suits best, so a
+	civ drafted for a flank can still end up a pocket.
+	-> (teams of Slots with civs, civ edge of team 0)
+	"""
+	rng = rng or random.Random()
+	seats = sorted({s.seat for t in teams for s in t}, key=str)
+	base, m_cache = {}, {}
+
+	def own(t, i, civ):  # a civ's value in a slot, apart from the matchups
+		k = (t, i, civ)
+		if k not in base:
+			slot = teams[t][i]
+			strength = model.strength(civ, slot.seat, map_name, category)[0]
+			fit = model.elo_fit(civ, slot.elo)[0]
+			pfit = model.player_fit(slot, civ)[0] if per_player else 0.5
+			base[k] = strength + ELO_FIT_WEIGHT * (fit - 0.5) + PLAYER_FIT_WEIGHT * (pfit - 0.5)
+		return base[k]
+
+	def vs(civ, seat, lineup):  # matchup part of a civ's value against an enemy line-up [(civ, seat)]
+		total = weight = 0.0
+		for ec, es in lineup:
+			k = (civ, seat, ec, es)
+			if k not in m_cache:
+				m_cache[k] = model.matchup(civ, seat, ec, es, map_name, category)[0]
+			face = SAME_SEAT_FACE if es == seat else CROSS_SEAT_FACE
+			total += face * (m_cache[k] - 0.5)
+			weight += face
+		return total / weight if weight else 0.0
+
+	placements = {}
+
+	def place(t, civs):  # civs -> {slot index: civ}: every civ in the seat (and, per player, with the player) it suits best
+		key = (t, frozenset(civs))
+		if key in placements:
+			return placements[key]
+		idx = list(range(len(teams[t])))
+		if per_player and len(idx) <= 6:
+			order = max(permutations(civs), key=lambda o: sum(own(t, i, c) for i, c in zip(idx, o)))
+			out = dict(zip(idx, order))
+		else:  # slots of a seat are alike (team average Elo): only which civs go to which seat matters
+			out, best = None, None
+			groups = {seat: [i for i in idx if teams[t][i].seat == seat] for seat in seats}
+			if len(seats) == 1:
+				out = dict(zip(idx, civs))
+			else:
+				a, b = seats
+				for combo in combinations(range(len(civs)), len(groups[a])):
+					to_a = [civs[j] for j in combo]
+					to_b = [c for j, c in enumerate(civs) if j not in combo]
+					total = sum(own(t, i, c) for i, c in zip(groups[a], to_a)) + sum(own(t, i, c) for i, c in zip(groups[b], to_b))
+					if best is None or total > best:
+						best, out = total, {**dict(zip(groups[a], to_a)), **dict(zip(groups[b], to_b))}
+		placements[key] = out
+		return out
+
+	every = [s.civ for t in teams for s in t]
+	options = []
+	for combo in combinations(range(len(every)), len(teams[0])):
+		mine = [[every[j] for j in combo], [c for j, c in enumerate(every) if j not in combo]]
+		placed = [place(0, mine[0]), place(1, mine[1])]
+		lineups = [[(civ, teams[t][i].seat) for i, civ in placed[t].items()] for t in (0, 1)]
+		values = [[own(t, i, civ) + MATCHUP_WEIGHT * vs(civ, teams[t][i].seat, lineups[1 - t])
+			for i, civ in placed[t].items()] for t in (0, 1)]
+		edge = sum(values[0]) / len(values[0]) - sum(values[1]) / len(values[1])
+		fit = sum(own(t, i, civ) for t in (0, 1) for i, civ in placed[t].items())  # civs in seats that suit them
+		options.append((abs(edge), edge, placed, fit))
+	# Among the splits that are about as even as the most even one, take one where the civs suit their seats best
+	# (a team handed three pocket civs and one flank civ would have to play a pocket civ on a flank).
+	best = min(o[0] for o in options)
+	even = [o for o in options if o[0] <= best + EVEN_TOLERANCE]
+	top_fit = max(o[3] for o in even)
+	_, edge, placed, _ = rng.choice([o for o in even if o[3] >= top_fit - EVEN_ENOUGH])
+	out = [[Slot(s.seat, s.elo, s.name, placed[t][i], s.user_id) for i, s in enumerate(teams[t])] for t in (0, 1)]
+	return out, edge
+
+
+STRONG_MATCHUP = 0.53  # a matchup worth naming in a pick's reason
+CLOSED_STRONG = 0.6    # a part of the closed-map score worth naming in a pick's reason (and in the top quarter of civs)
+
+
+def _top_quarter(key):
+	""" The value of a closed-map score part that only the best quarter of ranked civs reach. """
+	vals = sorted((fortress(c)[key] for c in ranked_civs()), reverse=True)
+	return vals[len(vals) // 4]
+GAMES_TO_TRUST = 3     # with fewer games of a civ, a reason says the pick is mostly the tech tree's guess
+
+
+def pick_reason(model: Model, res, team, slot, seat_as=None):
+	""" One line on why a civ is in a civ_draft() result: what it is good at for the seat (on a closed map also its
+	siege, gunpowder, towers or power units), how it did here against Elo, and its best matchup against the other
+	team's civs. """
+	s = res['teams'][team][slot]
+	if seat_as:  # judge the civ in another seat (the one it suits better, for a team to choose from)
+		s = Slot(seat_as, s.elo, s.name, s.civ, s.user_id)
+	seat = s.seat.lower() if s.seat else None
+	strength, n_map, n_all = model.strength(s.civ, s.seat, res['map'], res.get('category'))
+	lines = main_lines(model, s.civ, s.seat)
+	units = " and ".join(lines[:2])
+	parts = []
+	if n_all >= GAMES_TO_TRUST:
+		diff = round(100 * (strength - 0.5))
+		parts.append(f"{units}; {'even' if diff == 0 else f'{diff:+d}%'} against Elo in {n_all} games here" +
+			(f" ({n_map} on this map)" if n_map else ""))
+	else:
+		parts.append(f"{units} {'suit a ' + seat if seat else 'are strong'} by its tech tree"
+			+ (f" (only {n_all} game{'s' if n_all != 1 else ''} with it here)" if n_all else " (no games with it here yet)"))
+	if CLOSED_LEAN.get(res.get('category')):
+		f = fortress(s.civ)
+		strong = [name for name, key in (('gunpowder', 'gunpowder'), ('siege', 'siege'), ('towers', 'towers'),
+			('power units', 'power')) if f[key] >= max(CLOSED_STRONG, _top_quarter(key))]
+		if strong:
+			parts.append(f"strong {' and '.join(strong[:2])} for a {res['category'].lower()} map")
+	if OPEN_LEAN.get(res.get('category')):
+		om = open_map(s.civ, s.seat)
+		good = []
+		if 'archers' in om and om['archers'] >= max(CLOSED_STRONG, _top_quarter_open('archers', s.seat)):
+			good.append("a top archer civ")
+		if 'cavalry' in om and om['cavalry'] >= max(CLOSED_STRONG, _top_quarter_open('cavalry', s.seat)):
+			good.append("a top cavalry civ")
+		if s.civ in ECO_BONUS:
+			good.append("an eco bonus for a fast attack")
+		if good:
+			parts.append(f"open map {seat or 'seat'}: " + ", ".join(good))
+	if SEMI_LEAN.get(res.get('category')):
+		sm = semi(s.civ, s.seat)
+		names = (('food', 'a food bonus' if s.civ in FOOD_BONUS else None),
+			('cavalry', 'strong cavalry'), ('late', 'a strong late game'),
+			('archers', 'a strong archer line'), ('unique', 'a strong unique unit'),
+			('maa_towers', 'men-at-arms and towers aggression'))
+		good = [label for key, label in names
+			if label and key in sm and sm[key] >= max(CLOSED_STRONG, _top_quarter_semi(key, s.seat))]
+		if good:
+			parts.append(f"semi closed {seat or 'seat'}: " + ", ".join(good[:2]))
+	if HYBRID_LEAN.get(res.get('category')):
+		h = hybrid(s.civ, s.seat)
+		good = []
+		if h['water'] >= max(CLOSED_STRONG, _top_quarter_hybrid('water', s.seat)):
+			good.append("strong navy and fishing")
+		if HYBRID_BONUS.get(s.civ) == 'wood':
+			good.append("a wood bonus")
+		if h['cavalry'] >= max(CLOSED_STRONG, _top_quarter_hybrid('cavalry', s.seat)):
+			good.append("cavalry a fish boom can pay for")
+		if good:
+			parts.append("on a hybrid map: " + ", ".join(good))
+	best = None
+	for e in res['teams'][1 - team]:
+		m, _, _ = model.matchup(s.civ, s.seat, e.civ, e.seat, res['map'], res.get('category'))
+		if best is None or m > best[0]:
+			best = (m, e.civ)
+	if best and best[0] >= STRONG_MATCHUP:
+		parts.append(f"good against {best[1]} ({best[0]:.0%})")
+	return "; ".join(parts)
+
+
+
+def better_seat(model: Model, civ, map_name, category=None):
+	""" 'Flank' or 'Pocket': where the civ is stronger on this map. """
+	return max(('Flank', 'Pocket'), key=lambda seat: model.strength(civ, seat, map_name, category)[0])
+
+
+def main_lines(model: Model, civ, seat, top=2):
+	""" The civ's top fighting unit lines for the seat (siege, monks and heroes left out), for showing with a pick. """
+	army = model.army(civ, seat)
+	lines, seen = [], set()
+	for k, _ in sorted(army.items(), key=lambda kv: -kv[1]):
+		base = re.sub(r'^(Elite|Heavy|Imperial) ', '', k)  # "Heavy Hei Guang Cavalry" is the same line as "Hei Guang Cavalry"
+		if base not in seen:
+			seen.add(base)
+			lines.append(k)
+	hero = lambda k: sum(((techtree.unit(k) or {}).get('cost') or {}).values()) >= techtree.HERO_COST  # noqa: E731
+	fighting = [k for k in lines if k not in SUPPORT_LINES and not hero(k)]
+	return (fighting or lines)[:top]
+

@@ -811,6 +811,17 @@ async def _aoe_seats(
 ): await run_slash(bot.commands.aoe_seats, interaction=interaction, player=player, map=map)
 
 
+@groups.aoe.subcommand(name='draft', description='Civ draft for your started match: civs per team, or a civ and position per player.')
+async def _aoe_draft(
+		interaction: Interaction,
+		mode: str = SlashOption(description="What the bot decides.", choices={
+			"Civs for each team (you decide who plays what)": "team",
+			"A civ and position for each player": "player"}),
+		map: str = SlashOption(required=False, description="The map, when the match has none."),
+		redraw: bool = SlashOption(required=False, default=False, description="Moderators: replace this match's draft.")
+): await run_slash(bot.commands.aoe_draft, interaction=interaction, mode=mode, map=map, redraw=redraw)
+
+
 # Right-click (or long-press) an analysis post → Apps → Explain analysis. Works in forum threads too, which are not
 # queue channels, so it does not go through run_slash.
 @dc.message_command(name="Explain analysis", **guild_kwargs)
