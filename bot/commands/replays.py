@@ -3,7 +3,7 @@ __all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_
 import asyncio
 from io import BytesIO
 
-from nextcord import Attachment, Member, Embed, ForumChannel, File
+from nextcord import Attachment, Member, Embed, ForumChannel, File, Forbidden
 
 from core.utils import get_nick, find
 
@@ -159,20 +159,20 @@ async def aoe_seats(ctx, player: Member = None, map: str = None):
 async def explain_analysis(interaction, message):
 	"""
 	"Explain analysis" (right-click or long-press an analysis post → Apps): why each player got their scores.
-	Works on the post or on any message in its thread. Answers everyone in the thread.
+	Works on the post or on any message in its thread. Only whoever asked sees the answer.
 	"""
 	try:
 		title, messages = await bot.replays.explain_post(interaction.channel_id, message.id)
 	except bot.replays.ReplayError as e:
 		await interaction.response.send_message(str(e), ephemeral=True)
 		return
-	await interaction.response.send_message(content=f"**{title}**", embeds=messages[0])
+	await interaction.response.send_message(content=f"**{title}**", embeds=messages[0], ephemeral=True)
 	for embeds in messages[1:]:
-		await interaction.followup.send(embeds=embeds)
+		await interaction.followup.send(embeds=embeds, ephemeral=True)
 
 
 async def aoe_explain(ctx, *args):
-	""" !explain as a reply to an analysis post in a queue channel: why each player got their scores. """
+	""" !explain as a reply to an analysis post in a queue channel: why each player got their scores (sent by DM). """
 	ref = getattr(ctx.message, 'reference', None)
 	if not ref or not ref.message_id:
 		raise bot.Exc.SyntaxError("Reply to a game analysis post with this command, or use Apps → Explain analysis on the post.")
@@ -180,9 +180,16 @@ async def aoe_explain(ctx, *args):
 		title, messages = await bot.replays.explain_post(ctx.message.channel.id, ref.message_id)
 	except bot.replays.ReplayError as e:
 		raise bot.Exc.NotFoundError(str(e))
-	for i, embeds in enumerate(messages):
-		await ctx.message.channel.send(content=f"**{title}**" if i == 0 else None, embeds=embeds,
-			reference=ctx.message if i == 0 else None)
+	# A text command can't answer privately in the channel: the explanation goes to the asker's DMs (to the channel
+	# only when their DMs are closed).
+	try:
+		for i, embeds in enumerate(messages):
+			await ctx.message.author.send(content=f"**{title}**" if i == 0 else None, embeds=embeds)
+		await ctx.message.add_reaction('📬')
+	except Forbidden:
+		for i, embeds in enumerate(messages):
+			await ctx.message.channel.send(content=f"**{title}**" if i == 0 else None, embeds=embeds,
+				reference=ctx.message if i == 0 else None)
 
 
 async def aoe_export(ctx, map: str = None, days: int = None, details: bool = False):
