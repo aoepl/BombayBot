@@ -2037,10 +2037,11 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 	return out
 
 
-def _feudal_lines(A, pid, t0, t1, army):
+def _feudal_lines(A, pid, t0, t1, army, carried_militia=0):
 	"""
 	The Feudal Age army lines in the order they were first made, up to three with 3+ units each. Men-at-Arms are
-	always included when the upgrade was researched in Feudal (a handful of them is the whole plan).
+	always named when the upgrade was researched in Feudal (a handful of them is the whole plan), also when they
+	are a Drush's Militia carried into Feudal Age and upgraded (carried_militia).
 	"""
 	first, merged = {}, Counter()
 	for a in A:
@@ -2052,8 +2053,12 @@ def _feudal_lines(A, pid, t0, t1, army):
 				first.setdefault(label, a['t'])
 	maa = any(a['a'] == 'RESEARCH' and a.get('player_id') == pid and t0 <= a['t'] < t1
 		and _name('technologies', a['technology_id']) == 'Man-at-Arms' for a in A)
-	keep = [l for l, c in merged.items() if c >= 3 or (l == 'Men-at-Arms' and maa and c >= 1)]
-	keep = sorted(keep, key=lambda l: -merged[l])[:3]
+	if maa and carried_militia and 'Men-at-Arms' not in merged:
+		merged['Men-at-Arms'] = carried_militia
+		first['Men-at-Arms'] = t0  # there from the start of Feudal Age
+	forced = maa and merged.get('Men-at-Arms', 0) >= 1  # always named, on top of the three biggest other lines
+	keep = [l for l, c in merged.items() if c >= 3 and (l != 'Men-at-Arms' or not forced)]
+	keep = sorted(keep, key=lambda l: -merged[l])[:3] + (['Men-at-Arms'] if forced else [])
 	return sorted(keep, key=lambda l: first[l])
 
 
@@ -2135,12 +2140,35 @@ def _line_label(unit, researched):
 	return label
 
 
-def _army_lines(counter, minimum=5, researched=None):
-	""" Top two unit lines, plus any siege the player made (2 or more) that isn't already listed; each line named by
-	the upgrades researched by then when `researched` is given. """
-	names = LINE_NAMES if researched is None else {n: _line_label(n, researched) for n in counter}
+RECENT_BEFORE_AGE = 5 * 60000  # units made this long before an age-up count for it once their line is upgraded in it
+
+
+def _carried_upgraded(A, pid, t0, t1):
+	"""
+	Units made in the RECENT_BEFORE_AGE before t0 whose line got an upgrade from t0 up to t1 (Feudal archers
+	upgraded to Crossbows, Castle Knights to Paladins): they fight on in the new age. Older units have mostly died.
+	"""
+	done = _researched(A, pid, t1) - _researched(A, pid, t0)
+	upgraded = {unit for unit, chain in UPGRADE_NAMES.items() if any(tech in done for tech, _ in chain)}
+	recent = _army_between(A, pid, max(0, t0 - RECENT_BEFORE_AGE), t0)
+	return Counter({unit: n for unit, n in recent.items() if unit in upgraded})
+
+
+def _army_lines(counter, minimum=5, researched=None, carried=None):
+	"""
+	Top two unit lines, plus any siege the player made (2 or more) that isn't already listed; each line named by
+	the upgrades researched by then when `researched` is given. carried: earlier units upgraded in this age; they
+	count too, after the lines made in this age (so the main unit stays what the player made now).
+	"""
+	carried = carried or Counter()
+	total = counter + carried
+	names = LINE_NAMES if researched is None else {n: _line_label(n, researched) for n in total}
 	lines = _top_lines(counter, minimum, names)
-	for n, c in counter.most_common():
+	if carried:
+		for label in _top_lines(total, minimum, names, limit=4):
+			if label not in lines and len(lines) < 2:
+				lines.append(label)
+	for n, c in total.most_common():
 		label = names.get(n, n)
 		if n in SIEGE and c >= 2 and label not in lines:
 			lines.append(label)
@@ -2220,7 +2248,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	dark_count = sum(dark_army.values())
 	dark_units = _top_lines(dark_army, 1) if dark_count >= DARK_ARMY_MIN else []
 	feudal_army = _army_between(A, pid, feudal, castle or end) if feudal else Counter()
-	feudal_units = _feudal_lines(A, pid, feudal, castle or end, feudal_army) if feudal else []
+	# Militia queued before the Feudal click carry into Feudal Age (later ones are counted as Feudal army already).
+	carried = sum(a.get('amount', 1) or 1 for a in A if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid
+		and feudal and a['t'] < feudal and _name('objects', a['unit_id']) == 'Militia')
+	feudal_units = _feudal_lines(A, pid, feudal, castle or end, feudal_army, carried) if feudal else []
 	feudal_attacks = sum(1 for t in attack_times if feudal and feudal <= t < (castle or end))
 	feudal_attack = feudal_attacks >= 10
 
@@ -2254,6 +2285,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 		opening = "No Castle Age"
 	else:
 		opening = "Standard"
+	# A Drush (3+ Militia in the Dark Age) leads the name: "Drush → Feudal archers".
+	drush = dark_army['Militia'] >= DARK_ARMY_MIN
+	if drush:
+		opening = "Drush" if opening in ("Standard", "No Castle Age") else f"Drush → {opening}"
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
 	# Fish boom: 5+ fishing ships that went to work (not left idle), up to 10 minutes after Castle Age.
 	boom_end = (castle or end) + 10 * 60000
@@ -2263,8 +2298,9 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	boom_label = "farm + fish boom" if boom and fish_boom else "fish boom" if fish_boom else "farm boom" if boom else ""
 
 	# Castle Age and Imperial Age armies, separately.
-	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
-	imperial_units = _army_lines(_army_between(A, pid, imp, end)) if imp else []
+	castle_units = _army_lines(_army_between(A, pid, castle, imp or end),
+		carried=_carried_upgraded(A, pid, castle, imp or end)) if castle else []
+	imperial_units = _army_lines(_army_between(A, pid, imp, end), carried=_carried_upgraded(A, pid, imp, end)) if imp else []
 	# The saved unit lines keep their usual names (drafting and the tech tree match on them); the strategy's name
 	# shows the upgraded forms: 'Crossbows' in Castle Age, 'Arbalesters' in Imperial.
 	castle_names = _army_lines(_army_between(A, pid, castle, imp or end), researched=_researched(A, pid, imp or end)) if castle else []
@@ -2295,7 +2331,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	if extras:
 		parts.append(", ".join(extras))
 	return dict(
-		dark_units=dark_units, dark_army=dark_count,
+		dark_units=dark_units, dark_army=dark_count, drush=drush,
 		name=" → ".join(parts) if parts else "Standard play",
 		opening=opening, feudal_boom=feudal_boom, boom=boom, fish_boom=fish_boom, fishing_ships=fish,
 		fishing_ships_working=fish_working, feudal_units=feudal_units, feudal_attack=feudal_attack,
