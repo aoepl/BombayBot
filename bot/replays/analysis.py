@@ -2254,6 +2254,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 		opening = "No Castle Age"
 	else:
 		opening = "Standard"
+	# A Drush (3+ Militia in the Dark Age) leads the name: "Drush → Feudal archers".
+	drush = dark_army['Militia'] >= DARK_ARMY_MIN
+	if drush:
+		opening = "Drush" if opening in ("Standard", "No Castle Age") else f"Drush → {opening}"
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
 	# Fish boom: 5+ fishing ships that went to work (not left idle), up to 10 minutes after Castle Age.
 	boom_end = (castle or end) + 10 * 60000
@@ -2295,7 +2299,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	if extras:
 		parts.append(", ".join(extras))
 	return dict(
-		dark_units=dark_units, dark_army=dark_count,
+		dark_units=dark_units, dark_army=dark_count, drush=drush,
 		name=" → ".join(parts) if parts else "Standard play",
 		opening=opening, feudal_boom=feudal_boom, boom=boom, fish_boom=fish_boom, fishing_ships=fish,
 		fishing_ships_working=fish_working, feudal_units=feudal_units, feudal_attack=feudal_attack,

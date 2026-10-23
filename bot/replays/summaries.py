@@ -77,7 +77,8 @@ def army_style(row):
 	stages = []  # (style, seconds spent in that age)
 	if (row.get('dark_army') or 0) >= DARK_ARMY_MIN and row.get('dark_units'):
 		stages.append((early(row['dark_units']), (feudal_s or end) or 0))
-	feudal_army = opening.startswith('Feudal ') and 'boom' not in opening
+	after = opening[len('Drush → '):] if opening.startswith('Drush → ') else opening  # the opening after a Drush
+	feudal_army = after.startswith('Feudal ') and 'boom' not in after
 	if feudal_army and row.get('feudal_units'):
 		stages.append((early(row['feudal_units']), ((castle_s or end) or 0) - (feudal_s or 0)))
 	if castle:
