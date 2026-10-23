@@ -132,12 +132,15 @@ NOMAD_LEAN = {'Nomad': 1.0}
 NOMAD_WEIGHT = 0.3
 # Edit freely: 'wood' and 'water' bonuses add to HYBRID_BONUS for nomad maps.
 NOMAD_BONUS = {'Persians': {'wood', 'water'}, 'Malians': {'wood', 'water'}, 'Japanese': {'wood', 'water'}}
-# Nomad start bonuses: (what it is, how much it helps 0..1).
+# Nomad start bonuses, and extra starting villagers, food or wood: (what it is, how much it helps 0..1).
 NOMAD_START = {
 	'Vietnamese': ("sees the enemy's start", 1.0), 'Huns': ("an extra horse and no houses", 1.0),
 	'Berbers': ("faster villagers", 1.0), 'Spanish': ("faster building for the first Town Center", 0.5),
 	'Koreans': ("villagers see further", 1.0), 'Gurjaras': ("food next to the first Town Center", 0.5),
-	'Chinese': ("extra villagers at the start", 1.0),
+	'Chinese': ("extra villagers at the start", 1.0), 'Mayans': ("an extra villager at the start", 1.0),
+	# Extra food or wood at the start: an early eco bonus.
+	# (Persians' extra food and wood at the start is the wood bonus they're in NOMAD_BONUS for.)
+	'Lithuanians': ("extra food at the start", 1.0),
 }
 # Unique units strong enough for a Fast Castle into them, whatever they cost (wood-cost ranged ones count anyway).
 NOMAD_UU = {
