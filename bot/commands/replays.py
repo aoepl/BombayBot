@@ -309,14 +309,15 @@ async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = Fal
 	Civ draft for your started match: civs for each team to share out (mode team), or a civ and position for every
 	player (mode player). 35-40 random civs are left out first. One draft per match; moderators can redraw.
 	"""
-	import random
-	from bot.replays import draft, insights, summaries
 	match = find(lambda m: m.qc == ctx.qc and ctx.author in m.players, bot.active_matches)
 	if match is None:
 		raise bot.Exc.NotFoundError("You are not in a started match in this channel. /aoe draft works once your "
 			"queue has started.")
 	if len(match.teams[2]) or not len(match.teams[0]) or not len(match.teams[1]):
 		raise bot.Exc.MatchStateError("The teams are not set yet: run /aoe draft once both teams are picked.")
+	# Making a draft takes a few seconds: a second /aoe draft in that time would make a second draft, so it waits.
+	if getattr(match, 'civ_draft_busy', False):
+		raise bot.Exc.MatchStateError("A civ draft for this match is being made right now: it will be posted in a moment.")
 	saved = getattr(match, 'civ_draft', None)
 	if saved and not redraw:
 		number = max(match.civ_draft_details)
@@ -328,6 +329,17 @@ async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = Fal
 	map_name = map or (match.maps[0] if match.maps else None)
 	if not map_name:
 		raise bot.Exc.ValueError("This match has no map: give one with the map option.")
+	match.civ_draft_busy = True  # set before the first await, so no other draft can start
+	try:
+		await _make_draft(ctx, match, mode, map_name)
+	finally:
+		match.civ_draft_busy = False
+
+
+async def _make_draft(ctx, match, mode, map_name):
+	""" The draft itself (aoe_draft has checked it may be made). """
+	import random
+	from bot.replays import draft, insights, summaries
 	category = await insights.map_type(map_name)  # looked up online once for maps the bot doesn't know
 	rows, matchups, fights = await summaries.load_draft_data(ctx.qc.id)
 	records = summaries.seat_stats(rows)
