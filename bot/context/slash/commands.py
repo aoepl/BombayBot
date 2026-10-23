@@ -822,6 +822,15 @@ async def _aoe_draft(
 ): await run_slash(bot.commands.aoe_draft, interaction=interaction, mode=mode, map=map, redraw=redraw)
 
 
+@groups.aoe.subcommand(name='map_type', description='Show a map\'s type (open, closed ...), or (moderators) set it.')
+async def _aoe_map_type(
+		interaction: Interaction,
+		map: str = SlashOption(description="The map name, as the queue shows it."),
+		type: str = SlashOption(required=False, description="Moderators: the map's type.", choices={
+			t: t for t in ('Open', 'Closed', 'Semi Closed', 'Hybrid', 'Nomad', 'Water')})
+): await run_slash(bot.commands.aoe_map_type, interaction=interaction, map=map, type=type)
+
+
 # Right-click (or long-press) an analysis post → Apps → Explain analysis. Works in forum threads too, which are not
 # queue channels, so it does not go through run_slash.
 @dc.message_command(name="Explain analysis", **guild_kwargs)

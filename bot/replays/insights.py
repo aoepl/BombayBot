@@ -252,6 +252,83 @@ db.ensure_table(dict(
 ))
 
 
+# Map types not in MAP_CATEGORIES: looked up online once (source "lookup") or set by a moderator ("moderator").
+db.ensure_table(dict(
+	tname="aoe_map_types",
+	columns=[
+		dict(cname="map_key", ctype=db.types.str),
+		dict(cname="map_name", ctype=db.types.str),
+		dict(cname="category", ctype=db.types.str),
+		dict(cname="source", ctype=db.types.str),
+		dict(cname="set_by", ctype=db.types.int),
+		dict(cname="at", ctype=db.types.int)
+	],
+	primary_keys=["map_key"]
+))
+
+MAP_TYPES = ('Open', 'Closed', 'Semi Closed', 'Hybrid', 'Nomad', 'Water')
+
+
+def map_key(map_name):
+	""" "nCZ_PalisadeArena_1.0" -> "nczpalisadearena": letters and digits only, version numbers left off. """
+	key = re.sub(r'[^0-9a-z]', '', re.sub(r'[\s_\-]*v?\d+(\.\d+)*$', '', (map_name or '').strip().lower()))
+	return key or re.sub(r'[^0-9a-z]', '', (map_name or '').lower())
+
+
+async def map_type(map_name, lookup=True):
+	"""
+	The map's type: a moderator's setting first, then the names in MAP_CATEGORIES, then a type looked up online
+	before, then (lookup) a new online lookup, saved for next time. 'Other' when none is known.
+	"""
+	if not map_name:
+		return 'Other'
+	key = map_key(map_name)
+	try:
+		row = await db.select_one(('category', 'source'), 'aoe_map_types', where=dict(map_key=key))
+	except Exception:  # noqa: BLE001 - a missing table or a busy database must not stop a post
+		row = None
+	if row and row.get('source') == 'moderator':
+		return row['category']
+	known = map_category(map_name)
+	if known != 'Other':
+		return known
+	if row:
+		return row['category']
+	if not lookup:
+		return 'Other'
+	from core.config import cfg
+	if not getattr(cfg, 'GOOGLE_AI_API_KEY', None):
+		return 'Other'
+	from bot.bombay.ai import classify_map
+	found = await classify_map(map_name)
+	if found:
+		try:
+			await db.insert('aoe_map_types', dict(map_key=key, map_name=map_name, category=found, source='lookup',
+				set_by=None, at=int(time.time())), on_dublicate="replace")
+		except Exception as e:  # noqa: BLE001
+			log.info(f"Could not save the map type of {map_name}: {e}")
+		log.info(f"Map type of {map_name} looked up: {found}")
+	return found or 'Other'
+
+
+async def set_map_type(map_name, category, user_id):
+	""" A moderator's map type for a map; wins over the built-in names and online lookups. """
+	await db.insert('aoe_map_types', dict(map_key=map_key(map_name), map_name=map_name, category=category,
+		source='moderator', set_by=user_id, at=int(time.time())), on_dublicate="replace")
+
+
+async def map_type_info(map_name):
+	""" (type, where it came from: 'moderator', 'built in', 'looked up' or None) without a new lookup. """
+	row = await db.select_one(('category', 'source'), 'aoe_map_types', where=dict(map_key=map_key(map_name)))
+	if row and row.get('source') == 'moderator':
+		return row['category'], 'moderator'
+	if (known := map_category(map_name)) != 'Other':
+		return known, 'built in'
+	if row:
+		return row['category'], 'looked up'
+	return 'Other', None
+
+
 def map_category(map_name):
 	""" Map type from the name; spaces, underscores and symbols ignored ("nCZ_PalisadeArena_1.0" is Semi Closed). """
 	name = re.sub(r'[^0-9a-z]', '', (map_name or '').lower())
@@ -308,7 +385,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 		for p in players.values():
 			teams[p['team_id']] = teams.get(p['team_id'], 0) + 1
 		team_size = max(teams.values()) if teams else None
-		category = map_category(map_name)
+		category = await map_type(map_name)
 		now = int(time.time())
 		we_id = int(key[3:]) if key.startswith('we:') else None
 		# Keep the pickup match link if this game was already saved from a report.

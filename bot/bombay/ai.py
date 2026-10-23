@@ -2,6 +2,7 @@
 import asyncio
 
 from google import genai
+from google.genai import types
 from core.config import cfg
 from core.console import log
 
@@ -98,3 +99,44 @@ async def generate_replay_summary(game_text: str) -> str | None:
 			f"{game_text}"
 		)
 	)
+
+
+MAP_TYPES = ('Open', 'Closed', 'Semi Closed', 'Hybrid', 'Nomad', 'Water')
+
+
+async def classify_map(map_name: str) -> str | None:
+	"""
+	The map type of an Age of Empires II map (one of MAP_TYPES), looked up with Google Search when a model supports
+	it, else from the model's own knowledge. None when no model answers with a type.
+	"""
+	prompt = (
+		f"Age of Empires II: Definitive Edition map \"{map_name}\" (it may be a community or tournament map; version "
+		"numbers and prefixes like nCZ_ are not part of the name). Which one of these types is it, for team games?\n"
+		"Open: open land, no walls (e.g. Arabia, Golden Pit).\n"
+		"Closed: players walled in by forest or walls from the start (e.g. Arena, Black Forest, Fortress).\n"
+		"Semi Closed: partly closed bases, some open space (e.g. Palisade Arena, Hideout, Oasis).\n"
+		"Hybrid: land with lakes or water where docks and fishing matter (e.g. Four Lakes, Golden Lakes).\n"
+		"Nomad: no starting town center (e.g. Nomad, Land Nomad).\n"
+		"Water: mostly water, decided by ships (e.g. Islands, Team Islands).\n"
+		"Answer with the type only."
+	)
+	search = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
+	answer = None
+	for model in _models():
+		try:
+			resp = await _get_client().aio.models.generate_content(model=model, contents=prompt, config=search)
+			answer = resp.text
+			break
+		except Exception as e:  # noqa: BLE001 - not every model can search: try the next one
+			log.info(f"Map lookup with search on {model} failed ({e}).")
+	if not answer:
+		try:
+			answer = await _generate(prompt)
+		except Exception as e:  # noqa: BLE001
+			log.info(f"Map lookup failed ({e}).")
+			return None
+	text = (answer or '').strip().lower()
+	for t in sorted(MAP_TYPES, key=len, reverse=True):  # "semi closed" before "closed"
+		if t.lower() in text:
+			return t
+	return None
