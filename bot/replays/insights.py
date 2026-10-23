@@ -19,7 +19,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 60  # 60: Champis and Serjeants that build aren't villagers; army sent with villagers stays army
+ANALYSIS_VERSION = 61  # 61: Dark Age army saved (army style counts every age); 60: Champis and Serjeants that build aren't villagers; army sent with villagers stays army
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -180,6 +180,8 @@ db.ensure_table(dict(
 		dict(cname="fast_imp", ctype=db.types.bool),
 		dict(cname="forward_castles", ctype=db.types.int),
 		dict(cname="tower_creep", ctype=db.types.bool),
+		dict(cname="dark_units", ctype=db.types.str),
+		dict(cname="dark_army", ctype=db.types.int),
 		dict(cname="feudal_s", ctype=db.types.int),
 		dict(cname="castle_s", ctype=db.types.int),
 		dict(cname="imperial_s", ctype=db.types.int),
@@ -414,6 +416,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				strategy=(s['strategy'] or '')[:191], opening=parts.get('opening'), boom=parts.get('boom'), fish_boom=parts.get('fish_boom'), feudal_boom=parts.get('feudal_boom'),
 				main_units=", ".join(parts.get('main_units', [])), fast_imp=parts.get('fast_imp'),
 				feudal_units=", ".join(parts.get('feudal_units', [])), feudal_attack=parts.get('feudal_attack'),
+				dark_units=", ".join(parts.get('dark_units', [])), dark_army=parts.get('dark_army'),
 				forward_towers=parts.get('forward_towers'), castle_units=", ".join(parts.get('castle_units', [])),
 				imperial_units=", ".join(parts.get('imperial_units', [])),
 				forward_castles=parts.get('forward_castles'), tower_creep=parts.get('tower_creep'),

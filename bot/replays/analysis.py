@@ -2197,6 +2197,8 @@ def working_fishing_ships(A, pid, until, villagers=()):
 # takes 2:10), with little Feudal army: a Fast Castle. Seen in test games: Fast Castles click up 2.4-6 minutes apart,
 # Feudal openings 10+ minutes apart.
 FAST_CASTLE_GAP = 6.5 * 60000
+DARK_ARMY_MIN = 3  # military units made in Dark Age that make a Dark Age army (drush, scouts)
+FEUDAL_RESEARCH_MS = 130 * 1000  # Feudal Age research time: Dark Age lasts until the click plus this
 
 
 def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villagers=()):
@@ -2212,6 +2214,11 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 		forward_towers = sum(1 for a in A if a['a'] == 'BUILD' and a.get('player_id') == pid
 			and _name('objects', a['building_id']) in TOWERS and feudal <= a['t'] < (castle or end)
 			and players[base_of(a['x'], a['y'])]['team_id'] != team)
+	# Dark Age army (a drush, scouts...): units queued before Feudal Age was reached (click + research time; militia
+	# are often made while Feudal Age researches), counted from DARK_ARMY_MIN units.
+	dark_army = _army_between(A, pid, 0, min(feudal + FEUDAL_RESEARCH_MS, end) if feudal else end)
+	dark_count = sum(dark_army.values())
+	dark_units = _top_lines(dark_army, 1) if dark_count >= DARK_ARMY_MIN else []
 	feudal_army = _army_between(A, pid, feudal, castle or end) if feudal else Counter()
 	feudal_units = _feudal_lines(A, pid, feudal, castle or end, feudal_army) if feudal else []
 	feudal_attacks = sum(1 for t in attack_times if feudal and feudal <= t < (castle or end))
@@ -2288,6 +2295,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	if extras:
 		parts.append(", ".join(extras))
 	return dict(
+		dark_units=dark_units, dark_army=dark_count,
 		name=" → ".join(parts) if parts else "Standard play",
 		opening=opening, feudal_boom=feudal_boom, boom=boom, fish_boom=fish_boom, fishing_ships=fish,
 		fishing_ships_working=fish_working, feudal_units=feudal_units, feudal_attack=feudal_attack,

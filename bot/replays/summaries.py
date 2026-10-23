@@ -13,7 +13,7 @@ MIN_GAMES = 2        # games in a seat/style/strategy before it can be someone's
 MIN_CIV_GAMES = 2    # games with a civ before it can be listed among the best civs
 ELO_RANGES = ((0, 1400, "under 1400"), (1400, 1600, "1400–1599"), (1600, 1800, "1600–1799"), (1800, 99999, "1800+"))
 
-# Army style of a game, from the unit lines a player made (castle and imperial armies, then Feudal units).
+# Army style of a game, from the unit lines a player made in each age (see army_style).
 STYLE_WORDS = (
 	('Monks', ('Monk',)),
 	('Naval', ('Galley', 'Hulk', 'Fire ship', 'Demo ship', 'Galleon', 'Carrack', 'Longboat', 'Caravel', 'Dromon',
@@ -29,21 +29,63 @@ STYLE_WORDS = (
 )
 
 
-SIEGE_WORDS = ('Ram', 'Mangonel', 'Onager', 'Scorpion', 'Trebuchet', 'Bombard', 'Siege', 'Organ', 'Rocket')
+SIEGE_WORDS = ('Ram', 'Mangonel', 'Onager', 'Scorpion', 'Trebuchet', 'Bombard', 'Siege', 'Organ', 'Rocket', 'Armored Elephant',
+	'Houfnice')
+
+
+def _styles_of(field_values):
+	""" The styles of the unit lines, in order, without repeats; siege left out. """
+	out = []
+	for value in field_values:
+		for line in (value or '').replace(' + ', ', ').split(', '):
+			line = line.strip()
+			if not line or any(w in line for w in SIEGE_WORDS):
+				continue
+			style = next((st for st, words in STYLE_WORDS if any(w.lower() in line.lower() for w in words)), None)
+			if style and style not in out:
+				out.append(style)
+	return out
+
+
+def _style_of(field_values):
+	styles = _styles_of(field_values)
+	return styles[0] if styles else None
+
+
+DARK_ARMY_MIN = 3  # Dark Age military units that count as a Dark Age army (drush, scouts)
 
 
 def army_style(row):
-	""" The style of the player's main unit line (Castle Age army first), siege left out. """
-	lines = []
-	for field in ('castle_units', 'imperial_units', 'main_units', 'feudal_units'):
-		for line in (row.get(field) or '').replace(' + ', ', ').split(', '):
-			if line.strip() and not any(w in line for w in SIEGE_WORDS):
-				lines.append(line.strip())
-	for line in lines:
-		for style, words in STYLE_WORDS:
-			if any(w.lower() in line.lower() for w in words):
-				return style
-	return 'Other'
+	"""
+	The style of the army the player relied on, over every age they made one in:
+	- Dark Age army: 3+ military units before Feudal Age (a drush);
+	- Feudal Age army: a Feudal army opening (8+ units, "Feudal archers" ...);
+	- Castle Age army: the Castle (else Imperial) army.
+	A mixed early army (spears + scouts) takes the style of the line the player carried on with in Castle Age.
+	When the ages' styles still differ, the age the player spent longest in decides (Dark Age: game start to Feudal;
+	Feudal: to Castle; Castle: to the end of the game). Siege is left out.
+	"""
+	opening = row.get('opening') or ''
+	feudal_s, castle_s, imperial_s = row.get('feudal_s'), row.get('castle_s'), row.get('imperial_s')
+	end = row.get('duration_s') or max(t for t in (feudal_s, castle_s, imperial_s, 0) if t is not None)
+	castle = _style_of([row.get('castle_units'), row.get('imperial_units'), row.get('main_units')])
+
+	def early(value):  # a mixed early army takes the style of the line the player carried on with, if any
+		styles = _styles_of([value])
+		return castle if castle in styles else (styles[0] if styles else None)
+
+	stages = []  # (style, seconds spent in that age)
+	if (row.get('dark_army') or 0) >= DARK_ARMY_MIN and row.get('dark_units'):
+		stages.append((early(row['dark_units']), (feudal_s or end) or 0))
+	feudal_army = opening.startswith('Feudal ') and 'boom' not in opening
+	if feudal_army and row.get('feudal_units'):
+		stages.append((early(row['feudal_units']), ((castle_s or end) or 0) - (feudal_s or 0)))
+	if castle:
+		stages.append((castle, (end or 0) - (castle_s or end or 0)))
+	stages = [(st, t) for st, t in stages if st]
+	if stages:
+		return max(stages, key=lambda x: x[1])[0]
+	return _style_of([row.get('feudal_units')]) or 'Other'  # a few Feudal units, nothing else
 
 
 def strategy_key(row):
@@ -60,12 +102,13 @@ def strategy_key(row):
 
 async def load_rows(channel_id):
 	""" Player rows of every game analysed in this queue channel. """
-	games = {g['game_key']: g for g in await db.select(('game_key', 'channel_id', 'map_name', 'map_category'), 'aoe_games',
-		where=dict(channel_id=channel_id))}
+	games = {g['game_key']: g for g in await db.select(('game_key', 'channel_id', 'map_name', 'map_category', 'duration_s'),
+		'aoe_games', where=dict(channel_id=channel_id))}
 	cols = ('game_key', 'user_id', 'name', 'civ', 'team', 'seat', 'won', 'elo', 'apm', 'opening', 'boom', 'fish_boom',
 		'feudal_boom', 'main_units', 'feudal_units', 'castle_units', 'imperial_units', 'score_overall', 'elo_delta',
-		'map_name', 'map_category', 'fight_vs_elo')
-	return [r for r in await db.select(cols, 'aoe_game_players') if r['game_key'] in games]
+		'map_name', 'map_category', 'fight_vs_elo', 'dark_units', 'dark_army', 'feudal_s', 'castle_s', 'imperial_s')
+	return [dict(r, duration_s=games[r['game_key']].get('duration_s')) for r in await db.select(cols, 'aoe_game_players')
+		if r['game_key'] in games]
 
 
 async def load_draft_data(channel_id):

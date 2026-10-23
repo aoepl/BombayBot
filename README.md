@@ -41,7 +41,9 @@ nano config.cfg
 Reports over the games analysed in the queue channel (uploads and automatic breakdowns):
 * `/aoe stat [player]`: games and win rate; flank and pocket games with their win rates; average APM; how the player
   does against their BombayBot Elo (average difference and how often above or below); their best position, army style
-  (Cavalry, Archers, Cavalry archers, Infantry, Gunpowder, Monks, Naval, from their main unit line) and strategy
+  (Cavalry, Archers, Cavalry archers, Infantry, Gunpowder, Monks, Naval: the army they relied on over every age
+  they made one in, a Dark Age army of 3+ units, a Feudal army opening and the Castle Age army; a mixed early army
+  takes the style of the line they carried on with, and when the ages differ the longest age decides) and strategy
   (opening plus boom), each by average score over 2+ games; **individual luck**, the share of those bests they got
   per game; **team luck**, the share of their teammates' own bests the teammates got per game; most played civs.
 * `/aoe civs [map]`: win rate of every civ, overall or on one map (name or type, e.g. `Arena`, `Golden Lakes`,
