@@ -744,7 +744,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		fights=fights, lanes=lanes,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
 		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end},
-			army, vest, A, end),
+			army, vest, A, end, villagers),
 	)
 
 
@@ -2522,7 +2522,106 @@ def _units_lost(army, p, t0, t1):
 	return f"{n} unit{'s' if n != 1 else ''}"
 
 
-def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0):
+EARLY_KILLS_UNTIL = 12 * 60000  # villagers killed before this (or the killer's Dark Age, if longer) are early kills
+EARLY_KILL_GAP = 90000         # early kills by one player on one enemy this close together are one moment
+EARLY_KILL_LINES = 4           # early kills listed at most (on top of the bigger moments)
+UNIT_ORDERS = {'ORDER', 'MOVE', 'PATROL', 'DE_ATTACK_MOVE', 'STOP', 'GUARD', 'FOLLOW', 'FORMATION', 'STANCE'}
+
+
+def early_villager_kills(A, players, stats, villagers, end):
+	"""
+	Villagers killed in the early game, unit by unit (the villager count estimate misses one or two at a time).
+	A unit counts as a villager when its owner sent it to build or onto something nobody commands (a resource) and
+	never gave it an army-only command; it was killed when an enemy's units were ordered onto it and its owner never
+	commanded it again. -> [(t, killer, victim, attacker kinds Counter)], by time.
+	"""
+	team = {p: players[p]['team_id'] for p in players}
+	last_sel, filled = {}, []
+	for a in A:  # commands that reuse the last selection carry no unit ids: give them that selection
+		p = a.get('player_id')
+		ids = a.get('object_ids') or []
+		if a['a'] in UNIT_ORDERS or a['a'] in ('BUILD', 'REPAIR', 'WALL'):
+			if ids:
+				last_sel[p] = ids
+			else:
+				ids = last_sel.get(p, [])
+		filled.append((a, ids))
+	owner, commanders, first_cmd, last_cmd = {}, defaultdict(set), {}, {}
+	for a, ids in filled:
+		for i in ids:
+			commanders[i].add(a.get('player_id'))
+			owner.setdefault(i, a.get('player_id'))
+			first_cmd.setdefault(i, a['t'])
+			last_cmd[i] = a['t']
+	# Builders are villagers (a stance or formation given to a group they were in doesn't change that); units only
+	# seen gathering are villagers unless they also got army-only commands (army attacking a building looks the same).
+	army_only = {i for a, ids in filled if a['a'] in ARMY_COMMANDS for i in ids}
+	builders, gatherers = set(villagers), set()
+	for a, ids in filled:
+		tg = a.get('target_id')
+		mine = [i for i in ids if owner.get(i) == a.get('player_id')]
+		if a['a'] in ('BUILD', 'REPAIR', 'WALL'):
+			builders.update(mine)
+		elif a['a'] == 'ORDER' and tg and tg not in commanders:
+			gatherers.update(mine)
+	worker = builders | (gatherers - army_only)
+	queued = defaultdict(list)
+	for a in A:
+		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players:
+			n = _name('objects', a.get('unit_id'))
+			if n not in MILITARY_SKIP:
+				queued[a['player_id']].append((a['t'], n))
+
+	def kind(k, u, t):
+		""" What an attacker was: villagers build; the starting scout; else the one army line made by then. """
+		if u in builders:
+			return 'villagers'
+		if first_cmd.get(u, end) < 30000:
+			return 'scout'  # the only starting unit that isn't a villager
+		made = {n for q, n in queued[k] if q < t}
+		if len(made) == 1:
+			return next(iter(made))
+		return 'villagers' if u in gatherers else 'army'
+
+	attacks = defaultdict(list)  # victim unit -> [(t, attacker, attacking ids)]
+	for a, ids in filled:
+		tg, k = a.get('target_id'), a.get('player_id')
+		if a['a'] == 'ORDER' and tg in worker and k in players and owner.get(tg) in players \
+				and team[owner[tg]] != team[k] and len(commanders[tg]) == 1:
+			attacks[tg].append((a['t'], k, ids))
+	out = []
+	for u, hits in attacks.items():
+		t, k, _ = hits[-1]
+		feudal = stats[k]['ages'].get('Feudal Age')
+		until = max(EARLY_KILLS_UNTIL, feudal + FEUDAL_RESEARCH_MS if feudal else 0)
+		# Dead: its owner stopped commanding it around the attack (and had used it shortly before), well before the end.
+		if t > until or end - t < 120000 or not (t - 120000 <= last_cmd[u] <= t + 20000):
+			continue
+		by = Counter(kind(k, i, t) for ta, q, ids in hits if q == k and t - 60000 <= ta for i in set(ids))
+		out.append((t, k, owner[u], by))
+	return sorted(out, key=lambda x: x[0])
+
+
+def early_kill_moments(kills, players):
+	""" Early villager kills as moments, one per killer and enemy per burst: [(t, text)]. """
+	groups = []
+	for t, k, v, by in kills:
+		g = next((g for g in groups if g['k'] == k and g['v'] == v and t - g['end'] <= EARLY_KILL_GAP), None)
+		if g:
+			g['end'], g['n'] = t, g['n'] + 1
+			g['by'] += by
+		else:
+			groups.append(dict(k=k, v=v, t=t, end=t, n=1, by=Counter(by)))
+	out = []
+	for g in groups:
+		who = ' and '.join(x for x, _ in g['by'].most_common(2)) or 'units'
+		span = f" ({mmss(g['t'])}–{mmss(g['end'])})" if g['end'] - g['t'] >= 5000 else ""
+		what = "one" if g['n'] == 1 else str(g['n'])
+		out.append((g['t'], f"{players[g['k']]['name']}'s {who} killed {what} of {players[g['v']]['name']}'s villagers{span}"))
+	return out
+
+
+def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0, villagers=()):
 	"""
 	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
 	big raids on villagers, castles destroyed, players eliminated (a regicide king killed or a defeat: their
@@ -2601,6 +2700,14 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 	first_resign = min(resigns.items(), key=lambda kv: kv[1]) if resigns else None
 	top = sorted(ev, key=lambda e: -e[0])[:MOMENTS_MAX - (1 if first_resign else 0)]
 	out = [(t, text) for _, t, text in top]
+	# Early villager kills (a scout or a Drush picking off villagers): too small for the raids above but they shape
+	# the early game, so they're listed as well (the first few), unless a raid at that time already says it.
+	if A:
+		early = early_kill_moments(early_villager_kills(A, players, stats, villagers, end), players)
+		for t, text in early[:EARLY_KILL_LINES]:
+			killer = text.split("'s ")[0]
+			if not any(abs(t0 - t) <= 60000 and txt.startswith(killer) and 'raided' in txt for t0, txt in out):
+				out.append((t, text))
 	if first_resign:
 		p, t = first_resign
 		out.append((t, f"{name(p)} ({players[p]['civ']}) resigns"))

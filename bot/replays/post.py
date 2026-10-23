@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
 """ Build the Discord embed and the plain-text game summary from an analysis result. """
+import re
+
 from nextcord import Embed, Colour
 
 from .analysis import mmss
 
 SEAT_ORDER = {'Flank': 0, 'Pocket': 1, None: 2}
 COLOR_EMOJI = {0: '🔵', 1: '🔴', 2: '🟢', 3: '🟡', 4: '🩵', 5: '🟣', 6: '⚪', 7: '🟠'}
+
+
+EARLY_KILL = re.compile(r"'s .+ killed (one|\d+) of .+'s villagers")  # analysis.early_kill_moments
 
 
 def _teams(result):
@@ -121,6 +126,11 @@ def build_embed(result, title, narrative=None, footer=None, url=None, links=None
 		embed.add_field(name=name, value=value, inline=False)
 	if result['moments']:
 		lines = [f"`{t}` {txt}" for t, txt in result['moments']]
+		# Too long for one section: drop early villager kills (the smallest moments), latest first, before cutting
+		# the big ones at the end.
+		early = [i for i, (_, txt) in enumerate(result['moments']) if EARLY_KILL.search(txt)]
+		while early and len("\n".join(lines)) > 1000:
+			lines.pop(early.pop())
 		value = ""
 		for line in lines:
 			if len(value) + len(line) + 1 > 1000:
