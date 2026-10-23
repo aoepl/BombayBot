@@ -135,15 +135,16 @@ NOMAD_BONUS = {'Persians': {'wood', 'water'}, 'Malians': {'wood', 'water'}, 'Jap
 # Nomad start bonuses: (what it is, how much it helps 0..1).
 NOMAD_START = {
 	'Vietnamese': ("sees the enemy's start", 1.0), 'Huns': ("an extra horse and no houses", 1.0),
-	'Berbers': ("faster villagers", 1.0), 'Spanish': ("faster building for the first Town Center", 1.0),
+	'Berbers': ("faster villagers", 1.0), 'Spanish': ("faster building for the first Town Center", 0.5),
 	'Koreans': ("villagers see further", 1.0), 'Gurjaras': ("food next to the first Town Center", 0.5),
+	'Chinese': ("extra villagers at the start", 1.0),
 }
 # Unique units strong enough for a Fast Castle into them, whatever they cost (wood-cost ranged ones count anyway).
 NOMAD_UU = {
 	'Spanish': "Conquistadors, very strong in Castle Age",
 	'Tupi': "Blackwood Archers: cheap and quick to mass, a Fast Castle into them",
 }
-NOMAD_UU_STRENGTH = 1.4  # a NOMAD_UU unit is a whole plan (Fast Castle into it): worth more than a good unit
+NOMAD_UU_STRENGTH = 1.2  # a NOMAD_UU unit is a whole plan (Fast Castle into it): worth more than a good unit
 NOMAD_UU_WOOD = 0.6  # a unique unit whose cost is this much wood (or more) counts in full; less wood, less
 LAND_NOMAD = ('land nomad', 'african clearing', 'bedouin')  # nomad maps without water
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
@@ -326,8 +327,8 @@ def nomad(civ, water=True):
 	How well a civ suits a nomad start, each part 0..1: both (a wood bonus and a dock or fishing bonus: the Town
 	Center and Dock opening), wood (lumber upgrades, a wood bonus), water (navy and dock techs, a dock or fishing
 	bonus), start (a nomad start bonus, NOMAD_BONUS) and unique (a strong ranged unique unit that costs wood).
-	score with water: 25 both / 15 water / 20 wood / 15 start / 25 unique; land nomad (no water): 45 wood / 20 start /
-	35 unique. A NOMAD_UU unit counts NOMAD_UU_STRENGTH as unique.
+	score with water: 25 both / 20 water / 20 wood / 22 start / 13 unique; land nomad (no water): 42 wood / 38 start /
+	20 unique. A NOMAD_UU unit counts NOMAD_UU_STRENGTH as unique.
 	"""
 	key = (civ, water)
 	if key in _NOMAD:
@@ -341,8 +342,9 @@ def nomad(civ, water=True):
 	if civ in NOMAD_UU:
 		unique = NOMAD_UU_STRENGTH
 	both = 1.0 if {'wood', 'water'} <= extra else 0.0  # made for the Town Center and Dock opening
-	score = (0.25 * both + 0.15 * wet + 0.2 * wood + 0.15 * start + 0.25 * unique) if water else \
-		(0.45 * wood + 0.2 * start + 0.35 * unique)
+	# Start and early eco bonuses (wood, dock) count more than a unit, which only comes later.
+	score = (0.25 * both + 0.2 * wet + 0.2 * wood + 0.22 * start + 0.13 * unique) if water else \
+		(0.42 * wood + 0.38 * start + 0.2 * unique)
 	out = dict(both=both if water else 0.0, wood=wood, water=wet if water else 0.0, start=start, unique=unique,
 		unique_unit=unit, gunpowder=gunpowder, score=score)
 	_NOMAD[key] = out
