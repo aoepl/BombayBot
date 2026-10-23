@@ -77,9 +77,15 @@ POWER_COST = 150        # a land unit costing this much or more (elephants, war 
 CLOSED_BONUS = {
 	'Celts': 'siege', 'Mongols': 'siege', 'Ethiopians': 'siege', 'Koreans': 'siege', 'Slavs': 'siege',
 	'Spanish': 'gunpowder', 'Turks': 'gunpowder', 'Bohemians': 'gunpowder', 'Hindustanis': 'gunpowder',
-	'Portuguese': 'gunpowder',
+	'Portuguese': 'gunpowder', 'Italians': 'gunpowder',
 }
 BONUS_SHARE = 0.25      # how much a bonus adds to that part (0..1)
+# Team trade bonuses (Spanish: trade units bring in more gold): closed maps last long enough for trade to pay off,
+# and the whole team gets it. Edit freely.
+TRADE_BONUS = {'Spanish'}
+# Closed maps: strong gunpowder civs (gunpowder part this high: Turks, Spanish, Portuguese, Italians ...) are shared
+# out, at most one more on either team, so neither team gets all of them.
+SPREAD_ON_CLOSED = {'gunpowder': 0.72}
 # Hybrid maps (land and water): a strong navy and fishing, and wood bonuses, count; a cavalry civ in the pocket
 # that can fish boom is very strong. How much that counts per map type, and its weight next to Elo results.
 HYBRID_LEAN = {'Hybrid': 1.0}
@@ -231,7 +237,8 @@ def fortress(civ):
 	How well a civ can use a closed map, from its tech tree, each 0..1: siege (Bombard Cannons, Onagers, Rams,
 	Scorpions with Siege Engineers and Chemistry), gunpowder (its gunpowder lines, unique ones too: two good lines
 	count as full), towers (Bombard Tower, Keep and tower upgrades) and power (its best expensive land unit line).
-	score weighs them 35 / 35 / 15 / 15. Civ bonuses missing from the data come from CLOSED_BONUS.
+	score weighs them 32 / 32 / 13 / 13, plus 10 for a team trade bonus (TRADE_BONUS). Civ bonuses missing from the
+	data come from CLOSED_BONUS.
 	"""
 	if civ in _FORTRESS:
 		return _FORTRESS[civ]
@@ -256,8 +263,9 @@ def fortress(civ):
 	gunpowder = (1 - BONUS_SHARE) * gunpowder + (BONUS_SHARE if bonus == 'gunpowder' and gun else 0.0)
 	towers = sum(1 for t in TOWER_TECHS if t in techs) / len(TOWER_TECHS)
 	best_power = max(power, default=0.0)
-	out = dict(siege=siege, gunpowder=gunpowder, towers=towers, power=best_power,
-		score=0.35 * siege + 0.35 * gunpowder + 0.15 * towers + 0.15 * best_power)
+	trade = 1.0 if civ in TRADE_BONUS else 0.0
+	out = dict(siege=siege, gunpowder=gunpowder, towers=towers, power=best_power, trade=trade,
+		score=0.32 * siege + 0.32 * gunpowder + 0.13 * towers + 0.13 * best_power + 0.1 * trade)
 	_FORTRESS[civ] = out
 	return out
 
@@ -1182,6 +1190,13 @@ def fair_split(model: Model, teams, map_name, category=None, rng=None, per_playe
 		options.append((abs(edge), edge, placed, fit))
 	# Among the splits that are about as even as the most even one, take one where the civs suit their seats best
 	# (a team handed three pocket civs and one flank civ would have to play a pocket civ on a flank).
+	if CLOSED_LEAN.get(category):
+		# Closed maps: share out the strong gunpowder civs (at most one more on either team) when the draft allows.
+		def spread(o):
+			counts = [[sum(1 for civ in o[2][t].values() if fortress(civ)[k] >= v) for t in (0, 1)]
+				for k, v in SPREAD_ON_CLOSED.items()]
+			return all(abs(a - b) <= 1 for a, b in counts)
+		options = [o for o in options if spread(o)] or options
 	best = min(o[0] for o in options)
 	even = [o for o in options if o[0] <= best + EVEN_TOLERANCE]
 	top_fit = max(o[3] for o in even)
@@ -1226,6 +1241,8 @@ def pick_reason(model: Model, res, team, slot, seat_as=None):
 			('power units', 'power')) if f[key] >= max(CLOSED_STRONG, _top_quarter(key))]
 		if strong:
 			parts.append(f"strong {' and '.join(strong[:2])} for a {res['category'].lower()} map")
+		if f['trade']:
+			parts.append("a team trade bonus, which pays off in a long closed-map game")
 	if OPEN_LEAN.get(res.get('category')):
 		om = open_map(s.civ, s.seat)
 		good = []
