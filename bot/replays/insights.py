@@ -24,7 +24,7 @@ ANALYSIS_VERSION = 62  # 62: a Drush leads the strategy name, units upgraded in 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
 	('Semi Closed', ('palisade arena', 'hideout', 'oasis')),
-	('Closed', ('arena', 'black forest', 'fortress')),
+	('Closed', ('arena', 'black forest', 'rage forest', 'fortress')),
 	('Hybrid', ('four lakes', 'kawasan', 'golden lakes')),
 	('Nomad', ('land nomad', 'nomad', 'african clearing', 'bedouin')),
 	('Open', ('arabia', 'golden pit', 'valley', 'grand bara')),
