@@ -295,7 +295,7 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
 * First 35-40 random ranked civs are left out, so drafts differ from match to match.
 * **mode team**: each team gets 6 civs to choose its players' civs from (one per seat, flanks at the ends and
   pockets between for 3+ players, then extra flank and pocket choices), judged at the team's average Elo; the
-  players decide who plays which civ and where; the post says flank and pocket are only suggestions.
+  players decide who plays which civ and where. Both modes say flank and pocket are only suggestions.
 * **mode player**: every player gets a seat and a civ. Seats go where the players' own flank and pocket win rates
   (from `/aoe seats`, pulled towards 50% when they have few games) add up best; even splits are random. Picks then
   also count each player's own record with the civ.
