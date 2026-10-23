@@ -59,3 +59,28 @@ async def prediction_seasons(interaction: Interaction, season: str) -> List[str]
 	options.reverse()  # most recent first so it tops the autocomplete dropdown
 	prefix = (season or '').lower()
 	return [s for s in options if s.lower().startswith(prefix)][:4]
+
+
+async def maps(interaction: Interaction, map: str) -> List[str]:
+	""" Maps to suggest for a map option: the map of your current match first, then this channel's queue maps,
+	then maps of games analysed here. Matches what was typed anywhere in the name; at most 25 (Discord's limit). """
+	if (qc := bot.queue_channels.get(interaction.channel_id)) is None:
+		return []
+	names = []
+	if (match := find(lambda m: m.qc == qc and interaction.user in m.players, bot.active_matches)) is not None:
+		names += list(match.maps or [])
+	for q in qc.queues:
+		names += [m['name'] for m in (q.cfg.maps or []) if m.get('name')]
+	try:
+		from core.database import db
+		names += [g['map_name'] for g in await db.select(('map_name',), 'aoe_games', where=dict(channel_id=qc.id))
+			if g.get('map_name')]
+	except Exception:  # noqa: BLE001 - suggestions are a convenience
+		pass
+	typed = (map or '').lower()
+	seen, out = set(), []
+	for n in names:
+		if n.lower() not in seen and typed in n.lower():
+			seen.add(n.lower())
+			out.append(n[:100])
+	return out[:25]
