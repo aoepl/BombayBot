@@ -123,15 +123,24 @@ OPEN_WEIGHT = 0.3
 ECO_BONUS = FOOD_BONUS | {'Huns', 'Mongols', 'Aztecs', 'Persians', 'Celts', 'Japanese', 'Malians', 'Ethiopians'}
 # Nomad maps: everyone starts with villagers and no Town Center. On Nomad (with water) the opening is a Town
 # Center and a Dock together, so civs with a wood bonus and a dock or fishing bonus are favoured (Persians, Malians,
-# Japanese); a start bonus helps on any nomad map (Vietnamese see the enemy's position, Huns get an extra horse
-# and need no houses). Land nomad maps have no water: the dock part doesn't count there.
+# Japanese); a nomad start bonus helps on any nomad map (seeing the enemy's start, an extra horse, faster or
+# tougher villagers, faster building, a llama to scout); and a strong ranged unique unit that costs wood (War
+# Wagons, Hussite Wagons ...) is good, as nomad maps are full of wood. Land nomad maps have no water.
 NOMAD_LEAN = {'Nomad': 1.0}
 NOMAD_WEIGHT = 0.3
-# Edit freely: 'wood' and 'water' bonuses add to HYBRID_BONUS for nomad maps; 'start' is a nomad start bonus.
+# Edit freely: 'wood' and 'water' bonuses add to HYBRID_BONUS for nomad maps; 'start' is a nomad start bonus
+# (NOMAD_START says what it is).
 NOMAD_BONUS = {
 	'Persians': {'wood', 'water'}, 'Malians': {'wood', 'water'}, 'Japanese': {'wood', 'water'},
-	'Vietnamese': {'start'}, 'Huns': {'start'},
+	'Vietnamese': {'start'}, 'Huns': {'start'}, 'Berbers': {'start'}, 'Spanish': {'start'}, 'Poles': {'start'},
+	'Koreans': {'start'}, 'Incas': {'start'}, 'Gurjaras': {'start'}, 'Tupi': {'start'},
 }
+NOMAD_START = {
+	'Vietnamese': "sees the enemy's start", 'Huns': "an extra horse and no houses", 'Berbers': "faster villagers",
+	'Spanish': "faster building for the first Town Center", 'Poles': "tougher villagers", 'Koreans': "villagers see further",
+	'Incas': "a llama to scout with", 'Gurjaras': "food next to the first Town Center", 'Tupi': "a nomad start bonus",
+}
+NOMAD_UU_WOOD = 0.6  # a unique unit whose cost is this much wood (or more) counts in full; less wood, less
 LAND_NOMAD = ('land nomad', 'african clearing', 'bedouin')  # nomad maps without water
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
 CHRONICLES = {'Achaemenids', 'Athenians', 'Spartans'}  # not in ranked games
@@ -283,11 +292,30 @@ def has_water(map_name):
 	return not any(m in _norm(map_name) for m in LAND_NOMAD)
 
 
+def wood_unique_unit(civ):
+	""" (0..1, name): the civ's best ranged unique unit that costs wood, by quality and how much of its cost is wood. """
+	best, name = 0.0, None
+	for ln, units in techtree.civ_lines(civ).items():
+		if ln in techtree.LINES:
+			continue
+		u = techtree.unit(units[-1]) or {}
+		cost = u.get('cost') or {}
+		total = sum(cost.values())
+		if not cost.get('Wood') or not techtree._ranged(units[-1]) or '16' in u.get('armours', {}) or total >= 300:
+			continue  # not ranged, a ship, or siege (Houfnice ...)
+		v = techtree.civ_line_quality(civ, ln) * min(1.0, cost['Wood'] / total / NOMAD_UU_WOOD)
+		if v > best:
+			best, name = v, ln
+	return best, name
+
+
 def nomad(civ, water=True):
 	"""
-	How well a civ suits a nomad start, each part 0..1: wood (lumber upgrades, a wood bonus), water (navy and dock
-	techs, a dock or fishing bonus; only on maps with water) and start (a nomad start bonus, NOMAD_BONUS).
-	score with water: 40 water / 40 wood / 20 start; land nomad: 70 wood / 30 start.
+	How well a civ suits a nomad start, each part 0..1: both (a wood bonus and a dock or fishing bonus: the Town
+	Center and Dock opening), wood (lumber upgrades, a wood bonus), water (navy and dock techs, a dock or fishing
+	bonus), start (a nomad start bonus, NOMAD_BONUS) and unique (a strong ranged unique unit that costs wood).
+	score with water: 25 both / 20 water / 20 wood / 15 start / 20 unique; land nomad (no water): 45 wood / 20 start /
+	35 unique.
 	"""
 	key = (civ, water)
 	if key in _NOMAD:
@@ -297,8 +325,12 @@ def nomad(civ, water=True):
 	wood = min(1.0, h['wood'] + (BONUS_SHARE if 'wood' in extra and HYBRID_BONUS.get(civ) != 'wood' else 0.0))
 	wet = min(1.0, h['water'] + (BONUS_SHARE if 'water' in extra and HYBRID_BONUS.get(civ) != 'water' else 0.0))
 	start = 1.0 if 'start' in extra else 0.0
-	score = (0.4 * wet + 0.4 * wood + 0.2 * start) if water else (0.7 * wood + 0.3 * start)
-	out = dict(wood=wood, water=wet if water else 0.0, start=start, score=score)
+	unique, unit = wood_unique_unit(civ)
+	both = 1.0 if {'wood', 'water'} <= extra else 0.0  # made for the Town Center and Dock opening
+	score = (0.25 * both + 0.2 * wet + 0.2 * wood + 0.15 * start + 0.2 * unique) if water else \
+		(0.45 * wood + 0.2 * start + 0.35 * unique)
+	out = dict(both=both if water else 0.0, wood=wood, water=wet if water else 0.0, start=start, unique=unique,
+		unique_unit=unit, score=score)
 	_NOMAD[key] = out
 	return out
 
@@ -1198,13 +1230,16 @@ def pick_reason(model: Model, res, team, slot, seat_as=None):
 		nm = nomad(s.civ, water)
 		extra = NOMAD_BONUS.get(s.civ, set())
 		good = []
-		if water and ('water' in extra or HYBRID_BONUS.get(s.civ) == 'water'):
+		if nm['both']:
+			good.append("wood and dock bonuses for the Town Center and Dock start")
+		elif water and ('water' in extra or HYBRID_BONUS.get(s.civ) == 'water'):
 			good.append("a dock or fishing bonus for the Town Center and Dock start")
-		if 'wood' in extra or HYBRID_BONUS.get(s.civ) == 'wood':
+		elif 'wood' in extra or HYBRID_BONUS.get(s.civ) == 'wood':
 			good.append("a wood bonus")
 		if nm['start']:
-			good.append({'Vietnamese': "sees the enemy's start", 'Huns': "an extra horse and no houses"}.get(s.civ,
-				"a nomad start bonus"))
+			good.append(NOMAD_START.get(s.civ, "a nomad start bonus"))
+		if nm['unique'] >= 0.9:
+			good.append(f"{nm['unique_unit']}s that cost wood")
 		if good:
 			parts.append("on a nomad map: " + ", ".join(good[:2]))
 	best = None
