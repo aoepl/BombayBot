@@ -660,8 +660,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			pr_parts[2]['note'] = "includes " + "; ".join(notes)
 		if st.get('macro_disrupted'):
 			raided = sorted({players[x['victim']]['name'] for x in st['macro_disruptions']})
-			text = (f"{st['macro_disrupted']:,} of enemy macro disrupted (production that stalled while their army was in "
-				f"{', '.join(raided)}'s base)")
+			text = (f"{st['macro_disrupted']:,} value of {' and '.join(raided)}'s production stalled while "
+				f"{players[p]['name']}'s army was in their base")
 			pr_parts[2]['note'] = (pr_parts[2]['note'] + "; " + text) if notes else "includes " + text
 		why = (f"its damage was {round(army[p]['damage_for_size'] * 100)}% of the lobby median for its size and "
 			f"{round(army[p]['damage_in_total'] * 100)}% of the lobby's most in total; the better counts")
