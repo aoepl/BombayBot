@@ -380,7 +380,12 @@ def explain_text(name, civ, ex):
 		out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}\n• Held {round(100 * sv['held'])}% of the economy at "
 			f"home ({round(100 * sv['home'])}% of new economy buildings, {sv['moved_tcs']} Town Centers elsewhere) under {level} "
 			f"pressure (difficulty {sv['difficulty']:g} of 1){cleared}.")
+		if sv.get('hold_credit'):
+			out.append(f"• Held for {sv['hold_minutes']:g} minutes under pressure"
+				+ (f" before the economy moved out at {sv['lost_at']}" if sv.get('lost_at') else "")
+				+ f": +{sv['hold_credit']:g} (full credit from 10 minutes, for the part of the base that was lost).")
 		out.append(f"= 1 + {sv['held']:g} × (4 + 5 × {sv['difficulty']:g})" + (f" + {sv['cleared']:g}" if sv.get('cleared') else "")
+			+ (f" + {sv['hold_credit']:g}" if sv.get('hold_credit') else "")
 			+ f" → **{_fmt_score(sc['surv'])}**" + (" (capped at 10)" if sc['surv'] >= 10 else ""))
 
 	out.append(f"\n**Team play {_fmt_score(sc['team'])}**\n" + _parts_text(ex['team']))

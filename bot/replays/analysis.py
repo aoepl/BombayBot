@@ -546,10 +546,23 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		# Holding a light attack is worth less than holding a heavy one.
 		# Being attacked by two or more enemies at once makes holding harder.
 		difficulty = min(1.0, pressure[p] / (0.6 * max_in) + min(FOCUS_DIFFICULTY_MAX, FOCUS_DIFFICULTY * len(focused[p]['focused'])))
-		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0)
+		# How long the base held: from the pressure starting until the economy moved out (the first new economy
+		# building away from home after which most of them were away), else to the end of the game. A base lost after
+		# 10 minutes of holding is worth more than one lost in 5: credit for the part of the base that was lost.
+		lost_at = None
+		for i, a in enumerate(eco):
+			if base_of(a['x'], a['y']) != p:
+				rest = eco[i:]
+				if sum(1 for b in rest if base_of(b['x'], b['y']) != p) >= 0.6 * len(rest):
+					lost_at = a['t']
+					break
+		hold_min = max(0.0, ((lost_at if lost_at is not None else end) - pressure_start) / 60000)
+		hold_credit = round(HOLD_TIME_MAX * min(1.0, hold_min / HOLD_TIME_FULL) * (0.5 + 0.5 * difficulty) * (1 - held), 2)
+		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0) + hold_credit
 		survival[p] = max(1.0, min(10.0, value))
 		surv_detail[p] = dict(home=round(home, 2), held=round(held, 2), moved_tcs=moved_tcs, difficulty=round(difficulty, 2),
-			cleared=round(min(cleared[p], 1.0), 2), focused=len(focused[p]['focused']), pressure=pressure[p], max_pressure=max_in)
+			cleared=round(min(cleared[p], 1.0), 2), focused=len(focused[p]['focused']), pressure=pressure[p], max_pressure=max_in,
+			hold_minutes=round(hold_min, 1), hold_credit=hold_credit, lost_at=mmss(lost_at) if lost_at is not None else None)
 		n_cleared = stats[p]['enemy_castles_cleared']
 		cleared_txt = f", cleared {n_cleared} enemy castle{'s' if n_cleared != 1 else ''}" if n_cleared else ""
 		n_focus = len(focused[p]['focused'])
@@ -557,11 +570,13 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			cleared_txt += f", attacked by 2+ enemies at once in {n_focus} minute{'s' if n_focus != 1 else ''}"
 		level = 'heavy' if difficulty >= 0.66 else 'moderate' if difficulty >= 0.33 else 'light'
 		stats[p]['pressure_level'] = level
+		mins = round(hold_min)
+		held_txt = f" after holding for {mins} minute{'s' if mins != 1 else ''} under pressure" if lost_at is not None else ""
 		survival_note[p] = (
 			f"held the base under {level} pressure ({round(home * 100)}% of new economy buildings at home{cleared_txt})" if held >= 0.75 else
-			f"base partly lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
+			f"base partly lost{held_txt} ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 			if held >= 0.4 else
-			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
+			f"main base lost{held_txt} ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
 		stats[p]['base_lost'] = held < 0.4
 	# Who took each lost base: the enemy with the most army orders into it, a castle they built there counting
@@ -1110,6 +1125,8 @@ MULTI_FULL, MULTI_BONUS_MAX = 0.25, 0.75
 # ... and at a fifth of them attacked by 2+ enemies with even trades (each minute counts by how the player traded).
 FOCUS_FULL, FOCUS_BONUS_MAX = 0.2, 0.75
 MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that count as fighting them
+HOLD_TIME_FULL = 10.0     # minutes of holding under pressure that earn the full holding-time credit ...
+HOLD_TIME_MAX = 3.0       # ... worth up to this much, for the part of the base that was lost in the end
 HOLD_UNTESTED = 7.0       # holding position for a base never seriously attacked: the enemy was kept out
 FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
 FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
