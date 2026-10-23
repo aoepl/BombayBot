@@ -2037,10 +2037,11 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 	return out
 
 
-def _feudal_lines(A, pid, t0, t1, army):
+def _feudal_lines(A, pid, t0, t1, army, carried_militia=0):
 	"""
 	The Feudal Age army lines in the order they were first made, up to three with 3+ units each. Men-at-Arms are
-	always included when the upgrade was researched in Feudal (a handful of them is the whole plan).
+	always named when the upgrade was researched in Feudal (a handful of them is the whole plan), also when they
+	are a Drush's Militia carried into Feudal Age and upgraded (carried_militia).
 	"""
 	first, merged = {}, Counter()
 	for a in A:
@@ -2052,8 +2053,12 @@ def _feudal_lines(A, pid, t0, t1, army):
 				first.setdefault(label, a['t'])
 	maa = any(a['a'] == 'RESEARCH' and a.get('player_id') == pid and t0 <= a['t'] < t1
 		and _name('technologies', a['technology_id']) == 'Man-at-Arms' for a in A)
-	keep = [l for l, c in merged.items() if c >= 3 or (l == 'Men-at-Arms' and maa and c >= 1)]
-	keep = sorted(keep, key=lambda l: -merged[l])[:3]
+	if maa and carried_militia and 'Men-at-Arms' not in merged:
+		merged['Men-at-Arms'] = carried_militia
+		first['Men-at-Arms'] = t0  # there from the start of Feudal Age
+	forced = maa and merged.get('Men-at-Arms', 0) >= 1  # always named, on top of the three biggest other lines
+	keep = [l for l, c in merged.items() if c >= 3 and (l != 'Men-at-Arms' or not forced)]
+	keep = sorted(keep, key=lambda l: -merged[l])[:3] + (['Men-at-Arms'] if forced else [])
 	return sorted(keep, key=lambda l: first[l])
 
 
@@ -2220,7 +2225,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	dark_count = sum(dark_army.values())
 	dark_units = _top_lines(dark_army, 1) if dark_count >= DARK_ARMY_MIN else []
 	feudal_army = _army_between(A, pid, feudal, castle or end) if feudal else Counter()
-	feudal_units = _feudal_lines(A, pid, feudal, castle or end, feudal_army) if feudal else []
+	# Militia queued before the Feudal click carry into Feudal Age (later ones are counted as Feudal army already).
+	carried = sum(a.get('amount', 1) or 1 for a in A if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid
+		and feudal and a['t'] < feudal and _name('objects', a['unit_id']) == 'Militia')
+	feudal_units = _feudal_lines(A, pid, feudal, castle or end, feudal_army, carried) if feudal else []
 	feudal_attacks = sum(1 for t in attack_times if feudal and feudal <= t < (castle or end))
 	feudal_attack = feudal_attacks >= 10
 
