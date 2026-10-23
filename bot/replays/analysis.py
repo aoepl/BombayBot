@@ -2140,12 +2140,35 @@ def _line_label(unit, researched):
 	return label
 
 
-def _army_lines(counter, minimum=5, researched=None):
-	""" Top two unit lines, plus any siege the player made (2 or more) that isn't already listed; each line named by
-	the upgrades researched by then when `researched` is given. """
-	names = LINE_NAMES if researched is None else {n: _line_label(n, researched) for n in counter}
+RECENT_BEFORE_AGE = 5 * 60000  # units made this long before an age-up count for it once their line is upgraded in it
+
+
+def _carried_upgraded(A, pid, t0, t1):
+	"""
+	Units made in the RECENT_BEFORE_AGE before t0 whose line got an upgrade from t0 up to t1 (Feudal archers
+	upgraded to Crossbows, Castle Knights to Paladins): they fight on in the new age. Older units have mostly died.
+	"""
+	done = _researched(A, pid, t1) - _researched(A, pid, t0)
+	upgraded = {unit for unit, chain in UPGRADE_NAMES.items() if any(tech in done for tech, _ in chain)}
+	recent = _army_between(A, pid, max(0, t0 - RECENT_BEFORE_AGE), t0)
+	return Counter({unit: n for unit, n in recent.items() if unit in upgraded})
+
+
+def _army_lines(counter, minimum=5, researched=None, carried=None):
+	"""
+	Top two unit lines, plus any siege the player made (2 or more) that isn't already listed; each line named by
+	the upgrades researched by then when `researched` is given. carried: earlier units upgraded in this age; they
+	count too, after the lines made in this age (so the main unit stays what the player made now).
+	"""
+	carried = carried or Counter()
+	total = counter + carried
+	names = LINE_NAMES if researched is None else {n: _line_label(n, researched) for n in total}
 	lines = _top_lines(counter, minimum, names)
-	for n, c in counter.most_common():
+	if carried:
+		for label in _top_lines(total, minimum, names, limit=4):
+			if label not in lines and len(lines) < 2:
+				lines.append(label)
+	for n, c in total.most_common():
 		label = names.get(n, n)
 		if n in SIEGE and c >= 2 and label not in lines:
 			lines.append(label)
@@ -2275,8 +2298,9 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	boom_label = "farm + fish boom" if boom and fish_boom else "fish boom" if fish_boom else "farm boom" if boom else ""
 
 	# Castle Age and Imperial Age armies, separately.
-	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
-	imperial_units = _army_lines(_army_between(A, pid, imp, end)) if imp else []
+	castle_units = _army_lines(_army_between(A, pid, castle, imp or end),
+		carried=_carried_upgraded(A, pid, castle, imp or end)) if castle else []
+	imperial_units = _army_lines(_army_between(A, pid, imp, end), carried=_carried_upgraded(A, pid, imp, end)) if imp else []
 	# The saved unit lines keep their usual names (drafting and the tech tree match on them); the strategy's name
 	# shows the upgraded forms: 'Crossbows' in Castle Age, 'Arbalesters' in Imperial.
 	castle_names = _army_lines(_army_between(A, pid, castle, imp or end), researched=_researched(A, pid, imp or end)) if castle else []
