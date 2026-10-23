@@ -1,4 +1,4 @@
-__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain', 'aoe_export', 'aoe_seats', 'aoe_draft']
+__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain', 'aoe_export', 'aoe_seats', 'aoe_draft', 'aoe_map_type']
 
 import asyncio
 from io import BytesIO
@@ -278,6 +278,7 @@ async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = Fal
 	map_name = map or (match.maps[0] if match.maps else None)
 	if not map_name:
 		raise bot.Exc.ValueError("This match has no map: give one with the map option.")
+	category = await insights.map_type(map_name)  # looked up online once for maps the bot doesn't know
 	rows, matchups, fights = await summaries.load_draft_data(ctx.qc.id)
 	records = summaries.seat_stats(rows)
 	teams = [[dict(name=get_nick(p), elo=match.ratings.get(p.id), user_id=p.id) for p in match.teams[i]] for i in (0, 1)]
@@ -285,9 +286,26 @@ async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = Fal
 
 	def work():  # a few seconds of number crunching: kept off the bot's event loop
 		model = draft.Model(rows, matchups, fights)
-		res = draft.civ_draft(model, teams, map_name, insights.map_category(map_name), mode, random.Random(), records)
+		res = draft.civ_draft(model, teams, map_name, category, mode, random.Random(), records)
 		return model, res
 	model, res = await asyncio.to_thread(work)
 	embed = _draft_embed(match, res, model, len({r['game_key'] for r in rows}), get_nick(ctx.author))
 	match.civ_draft = embed
 	await ctx.reply(embed=embed)
+
+
+async def aoe_map_type(ctx, map: str, type: str = None):
+	""" Show a map's type (open, closed ...), or (moderators) set it when the bot has it wrong. """
+	from bot.replays import insights
+	if type:
+		ctx.check_perms(ctx.Perms.MODERATOR)
+		await insights.set_map_type(map, type, ctx.author.id)
+		await ctx.success(f"**{map}** is now a **{type}** map for drafts and stats.")
+		return
+	found, source = await insights.map_type_info(map)
+	if source is None:
+		found = await insights.map_type(map)
+		source = 'looked up now' if found != 'Other' else None
+	where = {'moderator': "set by a moderator", 'built in': "the bot's own list", 'looked up': "looked up online",
+		'looked up now': "just looked up online"}.get(source, "not known")
+	await ctx.reply(f"**{map}**: {found} ({where}). Moderators can change it with `/aoe map_type map:{map} type:...`.")

@@ -327,6 +327,10 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
   wood (lumber upgrades), and a cavalry civ in the pocket that a fish boom pays for. `hybrid()` scores that per
   seat; `HYBRID_BONUS` adds known water and wood bonuses (Japanese, Malay, Italians, Vikings, Dravidians,
   Portuguese, Byzantines and Berbers water; Celts, Burmese, Huns and Mayans wood).
+* The map is the one the queue drew for the match (the `map` option is only for queues without maps). Its type
+  comes from a moderator's setting (`/aoe map_type`), else the built-in names (`insights.MAP_CATEGORIES`), else an
+  online lookup: the AI model searches the map (Google Search where the model supports it) and the answer is saved
+  in `aoe_map_types`, so each map is looked up once. Newly analysed games use the same map types.
 * One draft per match: asking again shows the same draft, and moderators can redraw it (`redraw`).
 
 Civ tech trees and unit stats come from `bot/replays/techtree.json`, built from the
