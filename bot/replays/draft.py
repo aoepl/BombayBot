@@ -341,7 +341,7 @@ def nomad(civ, water=True):
 	Gillnets: the fishing economy, not the navy), start (a nomad start bonus or extra starting villagers, food or
 	wood, NOMAD_START) and unique (a strong ranged unique unit that costs wood or a gunpowder one from the Castle, or
 	a unique unit worth a Fast Castle, NOMAD_UU).
-	score with water: 25 both / 20 water / 20 wood / 22 start / 13 unique; land nomad (no water): 42 wood / 38 start /
+	score with water: 25 both / 20 water / 20 wood / 18 start / 13 unique; land nomad (no water): 42 wood / 32 start /
 	20 unique. A NOMAD_UU unit counts NOMAD_UU_STRENGTH as unique.
 	"""
 	key = (civ, water)
@@ -360,8 +360,8 @@ def nomad(civ, water=True):
 		unique = NOMAD_UU_STRENGTH
 	both = 1.0 if {'wood', 'water'} <= extra else 0.0  # made for the Town Center and Dock opening
 	# Start and early eco bonuses (wood, dock) count more than a unit, which only comes later.
-	score = (0.25 * both + 0.2 * wet + 0.2 * wood + 0.22 * start + 0.13 * unique) if water else \
-		(0.42 * wood + 0.38 * start + 0.2 * unique)
+	score = (0.25 * both + 0.2 * wet + 0.2 * wood + 0.18 * start + 0.13 * unique) if water else \
+		(0.42 * wood + 0.32 * start + 0.2 * unique)
 	out = dict(both=both if water else 0.0, wood=wood, water=wet if water else 0.0, start=start, unique=unique,
 		unique_unit=unit, gunpowder=gunpowder, score=score)
 	_NOMAD[key] = out
