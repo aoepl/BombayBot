@@ -121,6 +121,18 @@ OPEN_LEAN = {'Open': 1.0}
 OPEN_WEIGHT = 0.3
 # Edit freely: known eco bonuses that speed up an early attack (food bonuses count too).
 ECO_BONUS = FOOD_BONUS | {'Huns', 'Mongols', 'Aztecs', 'Persians', 'Celts', 'Japanese', 'Malians', 'Ethiopians'}
+# Nomad maps: everyone starts with villagers and no Town Center. On Nomad (with water) the opening is a Town
+# Center and a Dock together, so civs with a wood bonus and a dock or fishing bonus are favoured (Persians, Malians,
+# Japanese); a start bonus helps on any nomad map (Vietnamese see the enemy's position, Huns get an extra horse
+# and need no houses). Land nomad maps have no water: the dock part doesn't count there.
+NOMAD_LEAN = {'Nomad': 1.0}
+NOMAD_WEIGHT = 0.3
+# Edit freely: 'wood' and 'water' bonuses add to HYBRID_BONUS for nomad maps; 'start' is a nomad start bonus.
+NOMAD_BONUS = {
+	'Persians': {'wood', 'water'}, 'Malians': {'wood', 'water'}, 'Japanese': {'wood', 'water'},
+	'Vietnamese': {'start'}, 'Huns': {'start'},
+}
+LAND_NOMAD = ('land nomad', 'african clearing', 'bedouin')  # nomad maps without water
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
 CHRONICLES = {'Achaemenids', 'Athenians', 'Spartans'}  # not in ranked games
 
@@ -260,6 +272,34 @@ def hybrid(civ, seat=None):
 		score = 0.55 * water + 0.45 * wood
 	out = dict(water=water, wood=wood, cavalry=cavalry if seat == 'Pocket' else 0.0, score=score)
 	_HYBRID[key] = out
+	return out
+
+
+_NOMAD = {}
+
+
+def has_water(map_name):
+	""" A nomad map with water (Nomad), not a land nomad map. """
+	return not any(m in _norm(map_name) for m in LAND_NOMAD)
+
+
+def nomad(civ, water=True):
+	"""
+	How well a civ suits a nomad start, each part 0..1: wood (lumber upgrades, a wood bonus), water (navy and dock
+	techs, a dock or fishing bonus; only on maps with water) and start (a nomad start bonus, NOMAD_BONUS).
+	score with water: 40 water / 40 wood / 20 start; land nomad: 70 wood / 30 start.
+	"""
+	key = (civ, water)
+	if key in _NOMAD:
+		return _NOMAD[key]
+	h = hybrid(civ)
+	extra = NOMAD_BONUS.get(civ, set())
+	wood = min(1.0, h['wood'] + (BONUS_SHARE if 'wood' in extra and HYBRID_BONUS.get(civ) != 'wood' else 0.0))
+	wet = min(1.0, h['water'] + (BONUS_SHARE if 'water' in extra and HYBRID_BONUS.get(civ) != 'water' else 0.0))
+	start = 1.0 if 'start' in extra else 0.0
+	score = (0.4 * wet + 0.4 * wood + 0.2 * start) if water else (0.7 * wood + 0.3 * start)
+	out = dict(wood=wood, water=wet if water else 0.0, start=start, score=score)
+	_NOMAD[key] = out
 	return out
 
 
@@ -553,6 +593,18 @@ class Model:
 			self._cache[key] = scores[len(scores) // 2]
 		return lean * SEMI_WEIGHT * (semi(civ, seat)['score'] - self._cache[key])
 
+	def nomad_strength(self, civ, map_name, category):
+		""" Head start on nomad maps: wood and dock or fishing bonuses (with water), a nomad start bonus. """
+		lean = NOMAD_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		water = has_water(map_name)
+		key = ('median_nomad', water)
+		if key not in self._cache:
+			scores = sorted(nomad(c, water)['score'] for c in ranked_civs())
+			self._cache[key] = scores[len(scores) // 2]
+		return lean * NOMAD_WEIGHT * (nomad(civ, water)['score'] - self._cache[key])
+
 	def strength(self, civ, seat, map_name, category=None):
 		""" (rating 0..1, games on this map, games in all) for the civ in this seat on this map. """
 		key = ('strength', civ, seat, _norm(map_name), category)
@@ -563,7 +615,7 @@ class Model:
 		seat_rules = category in OPEN_LEAN or category in SEMI_LEAN or category in HYBRID_LEAN
 		base = (0.0 if seat_rules else self.tech_strength(civ, seat)) + self.closed_strength(civ, category) + \
 			self.hybrid_strength(civ, seat, category) + self.semi_strength(civ, seat, category) + \
-			self.open_strength(civ, seat, category)
+			self.open_strength(civ, seat, category) + self.nomad_strength(civ, map_name, category)
 		prior = self.prior(civ, seat, category)
 		if prior is not None:
 			base = prior - 0.5
@@ -1141,6 +1193,20 @@ def pick_reason(model: Model, res, team, slot, seat_as=None):
 			good.append("cavalry a fish boom can pay for")
 		if good:
 			parts.append("on a hybrid map: " + ", ".join(good))
+	if NOMAD_LEAN.get(res.get('category')):
+		water = has_water(res['map'])
+		nm = nomad(s.civ, water)
+		extra = NOMAD_BONUS.get(s.civ, set())
+		good = []
+		if water and ('water' in extra or HYBRID_BONUS.get(s.civ) == 'water'):
+			good.append("a dock or fishing bonus for the Town Center and Dock start")
+		if 'wood' in extra or HYBRID_BONUS.get(s.civ) == 'wood':
+			good.append("a wood bonus")
+		if nm['start']:
+			good.append({'Vietnamese': "sees the enemy's start", 'Huns': "an extra horse and no houses"}.get(s.civ,
+				"a nomad start bonus"))
+		if good:
+			parts.append("on a nomad map: " + ", ".join(good[:2]))
 	best = None
 	for e in res['teams'][1 - team]:
 		m, _, _ = model.matchup(s.civ, s.seat, e.civ, e.seat, res['map'], res.get('category'))

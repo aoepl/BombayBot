@@ -262,6 +262,8 @@ def _draft_embeds(match, res, model, games, author):
 		'Semi Closed': "on a semi closed map food, cavalry or a strong late game for pockets and aggression for flanks",
 		'Open': "on an open map archers for flanks, cavalry for pockets and eco bonuses for a fast attack",
 		'Hybrid': "on a hybrid map navy, fishing and wood, and for pockets cavalry backed by a fish boom",
+		'Nomad': "on a nomad map wood bonuses, dock and fishing bonuses for the Town Center and Dock start (on maps "
+			"with water) and nomad start bonuses",
 	}.get(res.get('category'))
 	details.add_field(name="How the draft works", inline=False, value=(
 		"Random civs are left out first, so drafts differ from match to match. "
