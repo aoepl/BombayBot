@@ -135,7 +135,7 @@ NOMAD_BONUS = {'Persians': {'wood', 'water'}, 'Malians': {'wood', 'water'}, 'Jap
 # Nomad start bonuses, and extra starting villagers, food or wood: (what it is, how much it helps 0..1).
 NOMAD_START = {
 	'Vietnamese': ("sees the enemy's start", 1.0), 'Huns': ("an extra horse and no houses", 1.0),
-	'Berbers': ("faster villagers", 1.0), 'Spanish': ("faster building for the first Town Center", 0.5),
+	'Berbers': ("faster villagers", 0.3), 'Spanish': ("faster building for the first Town Center", 0.5),
 	'Koreans': ("villagers see further", 1.0), 'Gurjaras': ("food next to the first Town Center", 0.5),
 	'Chinese': ("extra villagers at the start", 1.0), 'Mayans': ("an extra villager at the start", 0.5),
 	# Extra food or wood at the start: an early eco bonus.
@@ -147,6 +147,9 @@ NOMAD_UU = {
 	'Spanish': "Conquistadors, very strong in Castle Age",
 	'Tupi': "Blackwood Archers: cheap and quick to mass, a Fast Castle into them",
 }
+# Dock eco bonuses (faster or cheaper fishing, faster docks): what counts for the Town Center and Dock opening.
+# A stronger navy (faster or cheaper warships) doesn't. Edit freely.
+NOMAD_DOCK_ECO = {'Persians', 'Malians', 'Japanese', 'Italians', 'Dravidians', 'Malay'}
 NOMAD_UU_STRENGTH = 1.2  # a NOMAD_UU unit is a whole plan (Fast Castle into it): worth more than a good unit
 NOMAD_FOOT_ARCHER = 0.6  # a foot archer unique unit counts this much next to a mounted or gunpowder one
 NOMAD_UU_WOOD = 0.6  # a unique unit whose cost is this much wood (or more) counts in full; less wood, less
@@ -332,8 +335,10 @@ def wood_unique_unit(civ):
 def nomad(civ, water=True):
 	"""
 	How well a civ suits a nomad start, each part 0..1: both (a wood bonus and a dock or fishing bonus: the Town
-	Center and Dock opening), wood (lumber upgrades, a wood bonus), water (navy and dock techs, a dock or fishing
-	bonus), start (a nomad start bonus, NOMAD_BONUS) and unique (a strong ranged unique unit that costs wood).
+	Center and Dock opening), wood (lumber upgrades, a wood bonus), water (a dock eco bonus, NOMAD_DOCK_ECO, and
+	Gillnets: the fishing economy, not the navy), start (a nomad start bonus or extra starting villagers, food or
+	wood, NOMAD_START) and unique (a strong ranged unique unit that costs wood or a gunpowder one from the Castle, or
+	a unique unit worth a Fast Castle, NOMAD_UU).
 	score with water: 25 both / 20 water / 20 wood / 22 start / 13 unique; land nomad (no water): 42 wood / 38 start /
 	20 unique. A NOMAD_UU unit counts NOMAD_UU_STRENGTH as unique.
 	"""
@@ -343,7 +348,8 @@ def nomad(civ, water=True):
 	h = hybrid(civ)
 	extra = NOMAD_BONUS.get(civ, set())
 	wood = min(1.0, h['wood'] + (BONUS_SHARE if 'wood' in extra and HYBRID_BONUS.get(civ) != 'wood' else 0.0))
-	wet = min(1.0, h['water'] + (BONUS_SHARE if 'water' in extra and HYBRID_BONUS.get(civ) != 'water' else 0.0))
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	wet = 0.6 * (civ in NOMAD_DOCK_ECO) + 0.4 * ('Gillnets' in techs)  # fishing economy, not the navy
 	start = NOMAD_START.get(civ, ('', 0.0))[1]
 	unique, unit, gunpowder = wood_unique_unit(civ)
 	if civ in NOMAD_UU:
@@ -1255,8 +1261,8 @@ def pick_reason(model: Model, res, team, slot, seat_as=None):
 		good = []
 		if nm['both']:
 			good.insert(0, "wood and dock bonuses for the Town Center and Dock start")
-		elif water and ('water' in extra or HYBRID_BONUS.get(s.civ) == 'water'):
-			good.append("a dock or fishing bonus for the Town Center and Dock start")
+		elif water and s.civ in NOMAD_DOCK_ECO:
+			good.append("a dock eco bonus for the Town Center and Dock start")
 		elif 'wood' in extra or HYBRID_BONUS.get(s.civ) == 'wood':
 			good.append("a wood bonus")
 		if s.civ in NOMAD_UU:
