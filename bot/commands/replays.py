@@ -277,16 +277,16 @@ def _draft_view(match_id, number):
 
 
 async def draft_button(interaction):
-	""" A click on "Why these civs?": the draft's details, shown only to whoever clicked. """
+	""" A click on "Why these civs?": the draft's details, shown only to whoever clicked. -> True when handled. """
 	from nextcord import InteractionType
 	cid = (interaction.data or {}).get('custom_id') or '' if interaction.type == InteractionType.component else ''
 	if not cid.startswith(DRAFT_BUTTON + ':'):
-		return
+		return False
 	try:
 		_, match_id, number = cid.split(':')
 		match_id, number = int(match_id), int(number)
 	except ValueError:
-		return
+		return False
 	match = find(lambda m: m.id == match_id, bot.active_matches)
 	details = (getattr(match, 'civ_draft_details', None) or {}).get(number) if match else None
 	if details:
@@ -294,6 +294,7 @@ async def draft_button(interaction):
 	else:
 		await interaction.response.send_message("The details of this draft aren't available any more (the match "
 			"has ended, or the bot restarted since).", ephemeral=True)
+	return True
 
 
 async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = False):
