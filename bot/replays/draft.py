@@ -814,18 +814,25 @@ def recommend(model: Model, draft: Draft, team: int = None, top: int = 5):
 	return best[:top]
 
 
-def simulate(model: Model, draft: Draft):
-	""" Play the rest of the draft with each team taking the top recommendation. Returns the picks made. """
+def simulate(model: Model, draft: Draft, rng=None, spread=0.0):
+	"""
+	Play the rest of the draft with each team taking the top recommendation. With rng and spread, a team takes a
+	random one of the civs within `spread` of the best instead, so the same strong civs don't come up every time.
+	Returns the picks made.
+	"""
 	d = Draft(draft.map_name, draft.map_category, list(draft.available), draft.teams, list(draft.order), list(draft.picks),
 		list(draft.bans))
 	made = []
 	while len(d.picks) < len(d.order):
 		team = d.order[len(d.picks)]
-		best = recommend(model, d, team, top=1)
-		if not best:
+		options = recommend(model, d, team, top=12 if rng and spread else 1)
+		if not options:
 			break
-		d.picks.append((team, best[0]['slot'], best[0]['civ']))
-		made.append(dict(team=team, **best[0]))
+		pick = options[0]
+		if rng and spread:
+			pick = rng.choice([o for o in options if o['score'] >= options[0]['score'] - spread])
+		d.picks.append((team, pick['slot'], pick['civ']))
+		made.append(dict(team=team, **pick))
 	return made, d
 
 
@@ -882,6 +889,7 @@ def ranked_civs():
 # ---------------------------------------------------------------- /aoe draft
 
 TEAM_CIVS, PLAYER_CIVS = 'team', 'player'  # civs per team (players sort them out) / a civ and seat for each player
+PICK_SPREAD = 0.02  # each pick is a random one of the civs within 2% of the best, for variety
 EXCLUDE_MIN, EXCLUDE_MAX = 35, 35  # civs left out at random before every draft, so drafts don't repeat
 SEAT_PRIOR = 4  # a player's win rate in a seat starts as 4 games at 50%
 TEAM_CHOICES = 6  # civs each team gets to choose from in TEAM_CIVS mode (at least one per player)
@@ -972,7 +980,7 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 	# (same seats each side) so that both sides' civs are as even as possible.
 	first = rng.randrange(2)
 	d = Draft(map_name, category, pool, slots, pick_order([len(t) for t in slots], first))
-	made, d = simulate(model, d)
+	made, d = simulate(model, d, rng, PICK_SPREAD)
 	drafted, _ = _apply(d)
 	final, _ = fair_split(model, drafted, map_name, category, rng, per_player=mode == PLAYER_CIVS)
 	d = Draft(map_name, category, pool, final, [], [(t, i, s.civ) for t in (0, 1) for i, s in enumerate(final[t])])

@@ -299,7 +299,8 @@ players with Elo. Chronicles civs are left out. Community votes (the civ voting 
 * **mode player**: every player gets a seat and a civ. Seats go where the players' own flank and pocket win rates
   (from `/aoe seats`, pulled towards 50% when they have few games) add up best; even splits are random. Picks then
   also count each player's own record with the civ.
-* A snake draft (coin flip for first pick) finds the strongest civs for the map and seats. They are then split
+* A snake draft (coin flip for first pick) finds strong civs for the map and seats: each pick is a random one of
+  the civs within 2% of the best (`PICK_SPREAD`), so the same strongest civs don't come up every time. They are then split
   between the teams, trying every split, so that both sides' civs are as even as possible; within a team every civ
   goes to the seat (and in player mode the player) it suits best, so a civ drafted for a flank can end up a pocket.
   In team mode each civ is shown with the seat it suits better on the map. On map types with their own seat rules
