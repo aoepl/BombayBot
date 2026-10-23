@@ -20,6 +20,17 @@ def _set_healthy(value: bool):
             pass
 
 
+async def _component_click(interaction):
+	# Buttons on the bot's posts (the civ draft's "Why these civs?"). A listener, so slash commands work as before.
+	from bot.commands.replays import draft_button
+	try:
+		await draft_button(interaction)
+	except Exception:  # noqa: BLE001 - a failed button never takes the bot down
+		log.error(traceback.format_exc())
+
+dc.add_listener(_component_click, 'on_interaction')
+
+
 @dc.event
 async def on_init():
 	await bot.stats.check_match_id_counter()
