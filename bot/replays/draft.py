@@ -121,6 +121,41 @@ OPEN_LEAN = {'Open': 1.0}
 OPEN_WEIGHT = 0.3
 # Edit freely: known eco bonuses that speed up an early attack (food bonuses count too).
 ECO_BONUS = FOOD_BONUS | {'Huns', 'Mongols', 'Aztecs', 'Persians', 'Celts', 'Japanese', 'Malians', 'Ethiopians'}
+# Nomad maps: everyone starts with villagers and no Town Center. On Nomad (with water) the opening is a Town
+# Center and a Dock together, so civs with a wood bonus and a dock or fishing bonus are favoured (Persians, Malians,
+# Japanese); a nomad start bonus helps on any nomad map (seeing the enemy's start, an extra horse, faster
+# villagers, faster building); a strong ranged unique unit that costs wood (War Wagons, Hussite Wagons ...) is good,
+# as nomad maps are full of wood, and so are gunpowder unique units from the Castle (Janissaries, Organ Guns ...)
+# and a unique unit worth a Fast Castle (Conquistadors, Blackwood Archers).
+# Land nomad maps have no water.
+NOMAD_LEAN = {'Nomad': 1.0}
+NOMAD_WEIGHT = 0.3
+# Edit freely: 'wood' and 'water' bonuses add to HYBRID_BONUS for nomad maps.
+NOMAD_BONUS = {'Persians': {'wood', 'water'}, 'Malians': {'wood', 'water'}, 'Japanese': {'wood', 'water'}}
+# Nomad start bonuses, and extra starting villagers, food or wood: (what it is, how much it helps 0..1).
+NOMAD_START = {
+	'Vietnamese': ("sees the enemy's start", 1.0), 'Huns': ("an extra horse and no houses", 1.0),
+	'Berbers': ("faster villagers", 0.3), 'Spanish': ("faster building for the first Town Center", 0.5),
+	'Koreans': ("villagers see further", 1.0), 'Gurjaras': ("food next to the first Town Center", 0.5),
+	'Chinese': ("extra villagers at the start", 1.0), 'Mayans': ("an extra villager at the start", 1.0),
+	# Extra food or wood at the start: an early eco bonus.
+	# (Persians' extra food and wood at the start is the wood bonus they're in NOMAD_BONUS for.)
+	'Lithuanians': ("extra food at the start", 1.0),
+}
+# Unique units strong enough for a Fast Castle into them, whatever they cost (wood-cost ranged ones count anyway).
+NOMAD_UU = {
+	'Spanish': "Conquistadors, very strong in Castle Age",
+	'Tupi': "Blackwood Archers: cheap and quick to mass, a Fast Castle into them",
+}
+# Dock eco bonuses (faster or cheaper fishing, faster docks): what counts for the Town Center and Dock opening.
+# A stronger navy (faster or cheaper warships) doesn't. Edit freely.
+NOMAD_DOCK_ECO = {'Persians', 'Malians', 'Japanese', 'Italians', 'Dravidians', 'Malay'}
+# Wood bonuses that don't speed up wood collection (resources lasting longer), so they don't count on nomad maps.
+NOMAD_NOT_WOOD = {'Mayans'}
+NOMAD_UU_STRENGTH = 1.2  # a NOMAD_UU unit is a whole plan (Fast Castle into it): worth more than a good unit
+NOMAD_FOOT_ARCHER = 0.6  # a foot archer unique unit counts this much next to a mounted or gunpowder one
+NOMAD_UU_WOOD = 0.6  # a unique unit whose cost is this much wood (or more) counts in full; less wood, less
+LAND_NOMAD = ('land nomad', 'african clearing', 'bedouin')  # nomad maps without water
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
 CHRONICLES = {'Achaemenids', 'Athenians', 'Spartans'}  # not in ranked games
 
@@ -260,6 +295,76 @@ def hybrid(civ, seat=None):
 		score = 0.55 * water + 0.45 * wood
 	out = dict(water=water, wood=wood, cavalry=cavalry if seat == 'Pocket' else 0.0, score=score)
 	_HYBRID[key] = out
+	return out
+
+
+_NOMAD = {}
+
+
+def has_water(map_name):
+	""" A nomad map with water (Nomad), not a land nomad map. """
+	return not any(m in _norm(map_name) for m in LAND_NOMAD)
+
+
+def wood_unique_unit(civ):
+	"""
+	(0..1, name, gunpowder?): the civ's best ranged unique unit for a nomad map: one that costs wood (by quality and
+	how much of its cost is wood), or a gunpowder unique unit from the Castle (by quality, whatever it costs). Foot
+	archers count NOMAD_FOOT_ARCHER: mounted archers and gunpowder or siege-like units are faster or hit harder.
+	"""
+	best, name, gun = 0.0, None, False
+	for ln, units in techtree.civ_lines(civ).items():
+		if ln in techtree.LINES:
+			continue
+		u = techtree.unit(units[-1]) or {}
+		cost = u.get('cost') or {}
+		total = sum(cost.values())
+		armours = u.get('armours') or {}
+		if not techtree._ranged(units[-1]) or '16' in armours or not total or total >= 300:
+			continue  # not ranged, a ship, or siege (Houfnice ...)
+		gunpowder = GUNPOWDER_CLASS in armours
+		if not gunpowder and not cost.get('Wood'):
+			continue
+		share = 1.0 if gunpowder else min(1.0, cost['Wood'] / total / NOMAD_UU_WOOD)
+		mounted = techtree._cavalry(units[-1]) or (u.get('speed') or 0) >= 1.3  # Camel Archers aren't marked cavalry
+		kind = 1.0 if gunpowder or mounted else NOMAD_FOOT_ARCHER  # speed matters for a ranged unit
+		v = techtree.civ_line_quality(civ, ln) * share * kind
+		if v > best:
+			best, name, gun = v, ln, gunpowder
+	return best, name, gun
+
+
+def nomad(civ, water=True):
+	"""
+	How well a civ suits a nomad start, each part 0..1: both (a wood bonus and a dock or fishing bonus: the Town
+	Center and Dock opening), wood (lumber upgrades, a wood bonus), water (a dock eco bonus, NOMAD_DOCK_ECO, and
+	Gillnets: the fishing economy, not the navy), start (a nomad start bonus or extra starting villagers, food or
+	wood, NOMAD_START) and unique (a strong ranged unique unit that costs wood or a gunpowder one from the Castle, or
+	a unique unit worth a Fast Castle, NOMAD_UU).
+	score with water: 25 both / 20 water / 20 wood / 18 start / 13 unique; land nomad (no water): 42 wood / 32 start /
+	20 unique. A NOMAD_UU unit counts NOMAD_UU_STRENGTH as unique.
+	"""
+	key = (civ, water)
+	if key in _NOMAD:
+		return _NOMAD[key]
+	h = hybrid(civ)
+	extra = NOMAD_BONUS.get(civ, set())
+	wood = min(1.0, h['wood'] + (BONUS_SHARE if 'wood' in extra and HYBRID_BONUS.get(civ) != 'wood' else 0.0))
+	if civ in NOMAD_NOT_WOOD:
+		wood -= BONUS_SHARE
+	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
+	wet = 0.6 * (civ in NOMAD_DOCK_ECO) + 0.4 * ('Gillnets' in techs)  # fishing economy, not the navy
+	start = NOMAD_START.get(civ, ('', 0.0))[1]
+	unique, unit, gunpowder = wood_unique_unit(civ)
+	if civ in NOMAD_UU:
+		unique = NOMAD_UU_STRENGTH
+	both = 1.0 if {'wood', 'water'} <= extra else 0.0  # made for the Town Center and Dock opening
+	# Start and early eco bonuses (wood, dock) count more than a unit, which only comes later.
+	score = (0.25 * both + 0.2 * wet + 0.2 * wood + 0.18 * start + 0.13 * unique) if water else \
+		(0.42 * wood + 0.32 * start + 0.2 * unique)
+	out = dict(both=both if water else 0.0, wood=wood, water=wet if water else 0.0, start=start, unique=unique,
+		unique_unit=unit, gunpowder=gunpowder, score=score)
+	_NOMAD[key] = out
 	return out
 
 
@@ -553,6 +658,18 @@ class Model:
 			self._cache[key] = scores[len(scores) // 2]
 		return lean * SEMI_WEIGHT * (semi(civ, seat)['score'] - self._cache[key])
 
+	def nomad_strength(self, civ, map_name, category):
+		""" Head start on nomad maps: wood and dock or fishing bonuses (with water), a nomad start bonus. """
+		lean = NOMAD_LEAN.get(category, 0.0)
+		if not lean:
+			return 0.0
+		water = has_water(map_name)
+		key = ('median_nomad', water)
+		if key not in self._cache:
+			scores = sorted(nomad(c, water)['score'] for c in ranked_civs())
+			self._cache[key] = scores[len(scores) // 2]
+		return lean * NOMAD_WEIGHT * (nomad(civ, water)['score'] - self._cache[key])
+
 	def strength(self, civ, seat, map_name, category=None):
 		""" (rating 0..1, games on this map, games in all) for the civ in this seat on this map. """
 		key = ('strength', civ, seat, _norm(map_name), category)
@@ -563,7 +680,7 @@ class Model:
 		seat_rules = category in OPEN_LEAN or category in SEMI_LEAN or category in HYBRID_LEAN
 		base = (0.0 if seat_rules else self.tech_strength(civ, seat)) + self.closed_strength(civ, category) + \
 			self.hybrid_strength(civ, seat, category) + self.semi_strength(civ, seat, category) + \
-			self.open_strength(civ, seat, category)
+			self.open_strength(civ, seat, category) + self.nomad_strength(civ, map_name, category)
 		prior = self.prior(civ, seat, category)
 		if prior is not None:
 			base = prior - 0.5
@@ -1141,6 +1258,26 @@ def pick_reason(model: Model, res, team, slot, seat_as=None):
 			good.append("cavalry a fish boom can pay for")
 		if good:
 			parts.append("on a hybrid map: " + ", ".join(good))
+	if NOMAD_LEAN.get(res.get('category')):
+		water = has_water(res['map'])
+		nm = nomad(s.civ, water)
+		extra = NOMAD_BONUS.get(s.civ, set())
+		good = []
+		if nm['both']:
+			good.insert(0, "wood and dock bonuses for the Town Center and Dock start")
+		elif water and s.civ in NOMAD_DOCK_ECO:
+			good.append("a dock eco bonus for the Town Center and Dock start")
+		elif 'wood' in extra or (HYBRID_BONUS.get(s.civ) == 'wood' and s.civ not in NOMAD_NOT_WOOD):
+			good.append("a wood bonus")
+		if s.civ in NOMAD_UU:
+			good.append(NOMAD_UU[s.civ])
+		elif nm['unique'] >= 0.9:
+			good.append(f"{nm['unique_unit']}s from the Castle (gunpowder)" if nm['gunpowder']
+				else f"{nm['unique_unit']}s that cost wood")
+		if nm['start']:
+			good.append(NOMAD_START[s.civ][0])
+		if good:
+			parts.append("on a nomad map: " + ", ".join(good[:2]))
 	best = None
 	for e in res['teams'][1 - team]:
 		m, _, _ = model.matchup(s.civ, s.seat, e.civ, e.seat, res['map'], res.get('category'))
