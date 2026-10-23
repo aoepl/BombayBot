@@ -20,15 +20,20 @@ def _set_healthy(value: bool):
             pass
 
 
-async def _component_click(interaction):
-	# Buttons on the bot's posts (the civ draft's "Why these civs?"). A listener, so slash commands work as before.
+_default_on_interaction = type(dc).on_interaction  # nextcord's own: runs slash commands and autocomplete
+
+
+@dc.event
+async def on_interaction(interaction):
+	# Buttons on the bot's posts (the civ draft's "Why these civs?") are answered here; everything else goes to
+	# nextcord as before. (Client.add_listener only exists from nextcord 3.0.)
 	from bot.commands.replays import draft_button
 	try:
-		await draft_button(interaction)
+		if await draft_button(interaction):
+			return
 	except Exception:  # noqa: BLE001 - a failed button never takes the bot down
 		log.error(traceback.format_exc())
-
-dc.add_listener(_component_click, 'on_interaction')
+	await _default_on_interaction(dc, interaction)
 
 
 @dc.event
