@@ -801,6 +801,7 @@ async def _aoe_civs(
 		interaction: Interaction,
 		map: str = SlashOption(required=False, description="Map name or type (e.g. Arena, Golden Lakes, Closed).")
 ): await run_slash(bot.commands.aoe_civs, interaction=interaction, map=map)
+_aoe_civs.on_autocomplete("map")(autocomplete.maps)
 
 
 @groups.aoe.subcommand(name='seats', description='How often each player was flank and pocket, with win rates by map and civ.')
@@ -809,6 +810,29 @@ async def _aoe_seats(
 		player: Member = SlashOption(required=False, verify=False, description="One player's record by map and civ."),
 		map: str = SlashOption(required=False, description="Map name or type (e.g. Arena, Golden Lakes, Closed).")
 ): await run_slash(bot.commands.aoe_seats, interaction=interaction, player=player, map=map)
+_aoe_seats.on_autocomplete("map")(autocomplete.maps)
+
+
+@groups.aoe.subcommand(name='draft', description='Civ draft for your started match: civs per team, or a civ and position per player.')
+async def _aoe_draft(
+		interaction: Interaction,
+		mode: str = SlashOption(description="What the bot decides.", choices={
+			"Civs for each team (you decide who plays what)": "team",
+			"A civ and position for each player": "player"}),
+		map: str = SlashOption(required=False, description="The map, when the match has none."),
+		redraw: bool = SlashOption(required=False, default=False, description="Moderators: replace this match's draft.")
+): await run_slash(bot.commands.aoe_draft, interaction=interaction, mode=mode, map=map, redraw=redraw)
+_aoe_draft.on_autocomplete("map")(autocomplete.maps)
+
+
+@groups.aoe.subcommand(name='map_type', description='Show a map\'s type (open, closed ...), or (moderators) set it.')
+async def _aoe_map_type(
+		interaction: Interaction,
+		map: str = SlashOption(description="The map name, as the queue shows it."),
+		type: str = SlashOption(required=False, description="Moderators: the map's type.", choices={
+			t: t for t in ('Open', 'Closed', 'Semi Closed', 'Hybrid', 'Nomad', 'Water')})
+): await run_slash(bot.commands.aoe_map_type, interaction=interaction, map=map, type=type)
+_aoe_map_type.on_autocomplete("map")(autocomplete.maps)
 
 
 # Right-click (or long-press) an analysis post → Apps → Explain analysis. Works in forum threads too, which are not

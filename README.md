@@ -291,6 +291,48 @@ team with the lower total Elo. Any format works: bans, pick order (A-B-A-B and A
 players with Elo. Chronicles civs are left out. Community votes (the civ voting sheet) can be added through
 `Prior` later.
 
+`/aoe draft` runs a whole draft for a started match, on the match's map, from the games analysed in that channel:
+* First 35-40 random ranked civs are left out, so drafts differ from match to match.
+* **mode team**: each team gets 6 civs to choose its players' civs from (one per seat, flanks at the ends and
+  pockets between for 3+ players, then extra flank and pocket choices), judged at the team's average Elo; the
+  players decide who plays which civ and where. Both modes say flank and pocket are only suggestions.
+* **mode player**: every player gets a seat and a civ. Seats go where the players' own flank and pocket win rates
+  (from `/aoe seats`, pulled towards 50% when they have few games) add up best; even splits are random. Picks then
+  also count each player's own record with the civ.
+* A snake draft (coin flip for first pick) finds strong civs for the map and seats: each pick is a random one of
+  the civs within 2% of the best for the same seat (`PICK_SPREAD`), so the same strongest civs don't come up every
+  time. They are then split
+  between the teams, trying every split, so that both sides' civs are as even as possible; within a team every civ
+  goes to the seat (and in player mode the player) it suits best, so a civ drafted for a flank can end up a pocket.
+  In team mode each civ is shown with the seat it suits better on the map. On map types with their own seat rules
+  (open, semi closed, hybrid) those rules replace the tech tree's generic seat fit. Elo is not evened out with
+  civs (the rating change already accounts for it), so a higher rated team never gets weaker civs; Elo only
+  shapes which civs suit each player. The post shows each pick, why it is in the draft, which team's civs are
+  ahead and the civs left out.
+* **Closed maps** favour civs that can field siege,
+  gunpowder, towers and expensive power units. `fortress()` scores that from the tech tree: siege lines with Siege
+  Engineers and Chemistry, gunpowder lines (unique ones too), Bombard Tower and tower upgrades, and the best
+  expensive land unit; `CLOSED_BONUS` adds known civ bonuses the data can't show (Spanish, Turks, Bohemians,
+  Hindustanis and Portuguese gunpowder; Celts, Mongols, Ethiopians, Koreans and Slavs siege).
+* **Semi closed maps**: pockets want a food bonus, a cavalry bonus or a strong late game (the closed-map score);
+  flanks want an aggressive civ: a strong archer line, a strong unique unit, or men-at-arms and towers play.
+  `semi()` scores each part from the tech tree plus known bonuses (`FOOD_BONUS`, `CAV_BONUS`, `FLANK_BONUS`); a
+  civ great at one part counts most; men-at-arms and towers counts 80%, as it works less often than a feudal
+  archer plan. Archer lines missing Bracer, Thumb Ring or Arbalester are marked down
+  (`KEY_ARCHER`).
+* **Open maps**: flanks want top archer civs, pockets top cavalry civs, and both an eco bonus for a fast attack.
+  `open_map()` scores archers (`archer_line` plus archer bonuses), melee cavalry (plus `CAV_BONUS`) and eco (early
+  eco upgrades plus `ECO_BONUS`).
+* **Hybrid maps** favour a strong navy and fishing (navy lines, Gillnets, Careening, Dry Dock, Shipwright) and
+  wood (lumber upgrades), and a cavalry civ in the pocket that a fish boom pays for. `hybrid()` scores that per
+  seat; `HYBRID_BONUS` adds known water and wood bonuses (Japanese, Malay, Italians, Vikings, Dravidians,
+  Portuguese, Byzantines and Berbers water; Celts, Burmese, Huns and Mayans wood).
+* The map is the one the queue drew for the match (the `map` option is only for queues without maps). Its type
+  comes from a moderator's setting (`/aoe map_type`), else the built-in names (`insights.MAP_CATEGORIES`), else an
+  online lookup: the AI model searches the map (Google Search where the model supports it) and the answer is saved
+  in `aoe_map_types`, so each map is looked up once. Newly analysed games use the same map types.
+* One draft per match: asking again shows the same draft, and moderators can redraw it (`redraw`).
+
 Civ tech trees and unit stats come from `bot/replays/techtree.json`, built from the
 [aoe2techtree](https://github.com/SiegeEngineers/aoe2techtree) data. `bot/replays/techtree.py` holds the unit lines,
 line quality per civ (units and upgrades the civ has) and the stat-based counter estimate. Civ bonuses that are not
