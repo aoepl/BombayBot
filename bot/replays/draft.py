@@ -137,7 +137,7 @@ NOMAD_START = {
 	'Vietnamese': ("sees the enemy's start", 1.0), 'Huns': ("an extra horse and no houses", 1.0),
 	'Berbers': ("faster villagers", 0.3), 'Spanish': ("faster building for the first Town Center", 0.5),
 	'Koreans': ("villagers see further", 1.0), 'Gurjaras': ("food next to the first Town Center", 0.5),
-	'Chinese': ("extra villagers at the start", 1.0), 'Mayans': ("an extra villager at the start", 0.5),
+	'Chinese': ("extra villagers at the start", 1.0), 'Mayans': ("an extra villager at the start", 1.0),
 	# Extra food or wood at the start: an early eco bonus.
 	# (Persians' extra food and wood at the start is the wood bonus they're in NOMAD_BONUS for.)
 	'Lithuanians': ("extra food at the start", 1.0),
@@ -150,6 +150,8 @@ NOMAD_UU = {
 # Dock eco bonuses (faster or cheaper fishing, faster docks): what counts for the Town Center and Dock opening.
 # A stronger navy (faster or cheaper warships) doesn't. Edit freely.
 NOMAD_DOCK_ECO = {'Persians', 'Malians', 'Japanese', 'Italians', 'Dravidians', 'Malay'}
+# Wood bonuses that don't speed up wood collection (resources lasting longer), so they don't count on nomad maps.
+NOMAD_NOT_WOOD = {'Mayans'}
 NOMAD_UU_STRENGTH = 1.2  # a NOMAD_UU unit is a whole plan (Fast Castle into it): worth more than a good unit
 NOMAD_FOOT_ARCHER = 0.6  # a foot archer unique unit counts this much next to a mounted or gunpowder one
 NOMAD_UU_WOOD = 0.6  # a unique unit whose cost is this much wood (or more) counts in full; less wood, less
@@ -348,6 +350,8 @@ def nomad(civ, water=True):
 	h = hybrid(civ)
 	extra = NOMAD_BONUS.get(civ, set())
 	wood = min(1.0, h['wood'] + (BONUS_SHARE if 'wood' in extra and HYBRID_BONUS.get(civ) != 'wood' else 0.0))
+	if civ in NOMAD_NOT_WOOD:
+		wood -= BONUS_SHARE
 	techs = set(techtree.data()['civs'].get(civ, {}).get('techs', []))
 	wet = 0.6 * (civ in NOMAD_DOCK_ECO) + 0.4 * ('Gillnets' in techs)  # fishing economy, not the navy
 	start = NOMAD_START.get(civ, ('', 0.0))[1]
@@ -1263,7 +1267,7 @@ def pick_reason(model: Model, res, team, slot, seat_as=None):
 			good.insert(0, "wood and dock bonuses for the Town Center and Dock start")
 		elif water and s.civ in NOMAD_DOCK_ECO:
 			good.append("a dock eco bonus for the Town Center and Dock start")
-		elif 'wood' in extra or HYBRID_BONUS.get(s.civ) == 'wood':
+		elif 'wood' in extra or (HYBRID_BONUS.get(s.civ) == 'wood' and s.civ not in NOMAD_NOT_WOOD):
 			good.append("a wood bonus")
 		if s.civ in NOMAD_UU:
 			good.append(NOMAD_UU[s.civ])
