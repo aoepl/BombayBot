@@ -137,7 +137,7 @@ NOMAD_START = {
 	'Vietnamese': ("sees the enemy's start", 1.0), 'Huns': ("an extra horse and no houses", 1.0),
 	'Berbers': ("faster villagers", 1.0), 'Spanish': ("faster building for the first Town Center", 0.5),
 	'Koreans': ("villagers see further", 1.0), 'Gurjaras': ("food next to the first Town Center", 0.5),
-	'Chinese': ("extra villagers at the start", 1.0), 'Mayans': ("an extra villager at the start", 1.0),
+	'Chinese': ("extra villagers at the start", 1.0), 'Mayans': ("an extra villager at the start", 0.5),
 	# Extra food or wood at the start: an early eco bonus.
 	# (Persians' extra food and wood at the start is the wood bonus they're in NOMAD_BONUS for.)
 	'Lithuanians': ("extra food at the start", 1.0),
@@ -148,6 +148,7 @@ NOMAD_UU = {
 	'Tupi': "Blackwood Archers: cheap and quick to mass, a Fast Castle into them",
 }
 NOMAD_UU_STRENGTH = 1.2  # a NOMAD_UU unit is a whole plan (Fast Castle into it): worth more than a good unit
+NOMAD_FOOT_ARCHER = 0.6  # a foot archer unique unit counts this much next to a mounted or gunpowder one
 NOMAD_UU_WOOD = 0.6  # a unique unit whose cost is this much wood (or more) counts in full; less wood, less
 LAND_NOMAD = ('land nomad', 'african clearing', 'bedouin')  # nomad maps without water
 ELO_RANGES = ((0, 1400), (1400, 1600), (1600, 1800), (1800, 99999))
@@ -303,7 +304,8 @@ def has_water(map_name):
 def wood_unique_unit(civ):
 	"""
 	(0..1, name, gunpowder?): the civ's best ranged unique unit for a nomad map: one that costs wood (by quality and
-	how much of its cost is wood), or a gunpowder unique unit from the Castle (by quality, whatever it costs).
+	how much of its cost is wood), or a gunpowder unique unit from the Castle (by quality, whatever it costs). Foot
+	archers count NOMAD_FOOT_ARCHER: mounted archers and gunpowder or siege-like units are faster or hit harder.
 	"""
 	best, name, gun = 0.0, None, False
 	for ln, units in techtree.civ_lines(civ).items():
@@ -319,7 +321,9 @@ def wood_unique_unit(civ):
 		if not gunpowder and not cost.get('Wood'):
 			continue
 		share = 1.0 if gunpowder else min(1.0, cost['Wood'] / total / NOMAD_UU_WOOD)
-		v = techtree.civ_line_quality(civ, ln) * share
+		mounted = techtree._cavalry(units[-1]) or (u.get('speed') or 0) >= 1.3  # Camel Archers aren't marked cavalry
+		kind = 1.0 if gunpowder or mounted else NOMAD_FOOT_ARCHER  # speed matters for a ranged unit
+		v = techtree.civ_line_quality(civ, ln) * share * kind
 		if v > best:
 			best, name, gun = v, ln, gunpowder
 	return best, name, gun
