@@ -1,10 +1,11 @@
-__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain', 'aoe_export', 'aoe_seats']
+__all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_off', 'replay_auto_on', 'replay_lookup_off', 'replay_lookup_on', 'aoe_strats', 'aoe_civs', 'explain_analysis', 'aoe_explain', 'aoe_export', 'aoe_seats', 'aoe_draft']
 
+import asyncio
 from io import BytesIO
 
 from nextcord import Attachment, Member, Embed, ForumChannel, File
 
-from core.utils import get_nick
+from core.utils import get_nick, find
 
 import bot
 
@@ -196,3 +197,97 @@ async def aoe_export(ctx, map: str = None, days: int = None, details: bool = Fal
 	size = f"{len(data) / 1024:.0f} KB" if len(data) < 1024 * 1024 else f"{len(data) / 1024 / 1024:.1f} MB"
 	await ctx.reply(content=f"{len(cards)} analysed game{'s' if len(cards) != 1 else ''} ({size}). Upload the file to an AI "
 		"and ask, e.g. which civs do best per map type, seat and Elo.", file=File(BytesIO(data), filename=name))
+
+
+def _draft_embed(match, res, model, games, author):
+	""" The draft as an embed: each team's civs (and seats and players in player mode), why each civ was picked,
+	the balance and how many civs were left out. """
+	from bot.replays import draft
+	per_player = res['mode'] == draft.PLAYER_CIVS
+	where = f"{res['map']} ({res['category']})" if res.get('category') and res['category'] != 'Other' else res['map']
+	embed = Embed(title=f"Civ draft: {where}", colour=0x9a5b13)
+	embed.description = ("A civ and position for each player." if per_player else
+		f"{draft.TEAM_CHOICES} civs for each team: choose your players' civs from them and decide who plays where.")
+	for i, team in enumerate(res['teams']):
+		t = match.teams[i]
+		elo = round(sum(match.ratings.get(p.id) or 0 for p in t) / len(t)) if len(t) else 0
+		lines = []
+		for s in team:
+			if per_player:
+				lines.append((f"{s.seat} · " if s.seat else "") + f"**{s.name}** `〈{s.elo}〉` → **{s.civ}**")
+			else:
+				# The team decides who plays where: show the seat the civ suits better, not the slot it filled.
+				seat = draft.better_seat(model, s.civ, res['map'], res.get('category')) if s.seat else None
+				lines.append(f"**{s.civ}**" + (f" · {seat.lower()}" if seat else ""))
+		embed.add_field(name=f"{t.emoji} {t.name} `〈{elo}〉`", value="\n".join(lines)[:1024], inline=False)
+	for i, team in enumerate(res['teams']):
+		why = [f"**{s.civ}**: {draft.pick_reason(model, res, i, j, None if per_player or not s.seat else draft.better_seat(model, s.civ, res['map'], res.get('category')))}"
+			for j, s in enumerate(team)]
+		chunk, n = [], 0
+		for line in why:  # an embed field holds 1024 characters: carry on in another field rather than cut a line
+			if chunk and len("\n".join(chunk + [line])) > 1024:
+				embed.add_field(name=f"Why these civs: {match.teams[i].name}" if not n else "\u200b", value="\n".join(chunk), inline=False)
+				chunk, n = [], n + 1
+			chunk.append(line[:1024])
+		if chunk:
+			embed.add_field(name=f"Why these civs: {match.teams[i].name}" if not n else "\u200b", value="\n".join(chunk), inline=False)
+	edge = res['balance']['civ_edge']
+	ahead = match.teams[0 if edge >= 0 else 1].name
+	civ_line = "Civs: even." if abs(edge) < 0.005 else f"Civs: {ahead} ahead by {abs(edge):.1%}."
+	out = res['excluded']
+	embed.add_field(name="Balance", inline=False,
+		value=f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it.")
+	embed.add_field(name=f"Left out at random: {len(out)} of {res['civ_count']} civs", inline=False,
+		value=(", ".join(out) or "none")[:1024])
+	map_rules = {
+		'Closed': "on a closed map also its siege, gunpowder, towers and power units",
+		'Semi Closed': "on a semi closed map food, cavalry or a strong late game for pockets and aggression for flanks",
+		'Open': "on an open map archers for flanks, cavalry for pockets and eco bonuses for a fast attack",
+		'Hybrid': "on a hybrid map navy, fishing and wood, and for pockets cavalry backed by a fish boom",
+	}.get(res.get('category'))
+	embed.add_field(name="How the draft works", inline=False, value=(
+		"Random civs are left out first, so drafts differ from match to match. "
+		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map and these seats are then split "
+		"between the teams, the same number of flank and pocket civs each, so both sides' civs are as even as possible. "
+		"A civ's value is how it does against Elo in this seat and on this kind of map"
+		+ (f" ({map_rules})" if map_rules else "") + " and its matchups against the other team's civs.")[:1024])
+	embed.set_footer(text=f"Drawn by {author}. From {games} analysed game{'s' if games != 1 else ''} in this channel"
+		" plus the tech trees; with few games picks lean on the tech trees.")
+	return embed
+
+
+async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = False):
+	"""
+	Civ draft for your started match: civs for each team to share out (mode team), or a civ and position for every
+	player (mode player). 35-40 random civs are left out first. One draft per match; moderators can redraw.
+	"""
+	import random
+	from bot.replays import draft, insights, summaries
+	match = find(lambda m: m.qc == ctx.qc and ctx.author in m.players, bot.active_matches)
+	if match is None:
+		raise bot.Exc.NotFoundError("You are not in a started match in this channel. /aoe draft works once your "
+			"queue has started.")
+	if len(match.teams[2]) or not len(match.teams[0]) or not len(match.teams[1]):
+		raise bot.Exc.MatchStateError("The teams are not set yet: run /aoe draft once both teams are picked.")
+	saved = getattr(match, 'civ_draft', None)
+	if saved and not redraw:
+		await ctx.reply(content="This match already has a civ draft (moderators can redraw it):", embed=saved)
+		return
+	if saved and redraw:
+		ctx.check_perms(ctx.Perms.MODERATOR)
+	map_name = map or (match.maps[0] if match.maps else None)
+	if not map_name:
+		raise bot.Exc.ValueError("This match has no map: give one with the map option.")
+	rows, matchups, fights = await summaries.load_draft_data(ctx.qc.id)
+	records = summaries.seat_stats(rows)
+	teams = [[dict(name=get_nick(p), elo=match.ratings.get(p.id), user_id=p.id) for p in match.teams[i]] for i in (0, 1)]
+	mode = draft.PLAYER_CIVS if mode == draft.PLAYER_CIVS else draft.TEAM_CIVS
+
+	def work():  # a few seconds of number crunching: kept off the bot's event loop
+		model = draft.Model(rows, matchups, fights)
+		res = draft.civ_draft(model, teams, map_name, insights.map_category(map_name), mode, random.Random(), records)
+		return model, res
+	model, res = await asyncio.to_thread(work)
+	embed = _draft_embed(match, res, model, len({r['game_key'] for r in rows}), get_nick(ctx.author))
+	match.civ_draft = embed
+	await ctx.reply(embed=embed)

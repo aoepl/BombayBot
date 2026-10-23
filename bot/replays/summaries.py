@@ -64,8 +64,17 @@ async def load_rows(channel_id):
 		where=dict(channel_id=channel_id))}
 	cols = ('game_key', 'user_id', 'name', 'civ', 'team', 'seat', 'won', 'elo', 'apm', 'opening', 'boom', 'fish_boom',
 		'feudal_boom', 'main_units', 'feudal_units', 'castle_units', 'imperial_units', 'score_overall', 'elo_delta',
-		'map_name', 'map_category')
+		'map_name', 'map_category', 'fight_vs_elo')
 	return [r for r in await db.select(cols, 'aoe_game_players') if r['game_key'] in games]
+
+
+async def load_draft_data(channel_id):
+	""" (player rows, lost bases, fights) of the games analysed in this queue channel: what draft.Model learns from. """
+	rows = await load_rows(channel_id)
+	keys = {r['game_key'] for r in rows}
+	matchups = [r for r in await db.select(('*',), 'aoe_matchups') if r.get('game_key') in keys]
+	fights = [r for r in await db.select(('*',), 'aoe_fights') if r.get('game_key') in keys]
+	return rows, matchups, fights
 
 
 def _rate(wins, games):
