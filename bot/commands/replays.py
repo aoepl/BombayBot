@@ -284,7 +284,9 @@ def _draft_embeds(match, res, model, games, author):
 def _draft_view(match_id, number):
 	""" The "Why these civs?" button under a draft (answered by draft_button, also after the bot restarts). """
 	from nextcord import ButtonStyle, ui
-	view = ui.View(timeout=None)
+	# auto_defer off: otherwise nextcord acknowledges the click itself while the view is alive, often before
+	# draft_button answers, and Discord then refuses the answer (one response per click) so nothing shows.
+	view = ui.View(timeout=None, auto_defer=False)
 	view.add_item(ui.Button(label="Why these civs?", style=ButtonStyle.secondary,
 		custom_id=f"{DRAFT_BUTTON}:{match_id}:{number}"))
 	return view
