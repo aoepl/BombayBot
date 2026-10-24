@@ -20,6 +20,22 @@ def _set_healthy(value: bool):
             pass
 
 
+_default_on_interaction = type(dc).on_interaction  # nextcord's own: runs slash commands and autocomplete
+
+
+@dc.event
+async def on_interaction(interaction):
+	# Buttons on the bot's posts (the civ draft's "Why these civs?") are answered here; everything else goes to
+	# nextcord as before. (Client.add_listener only exists from nextcord 3.0.)
+	from bot.commands.replays import draft_button
+	try:
+		if await draft_button(interaction):
+			return
+	except Exception:  # noqa: BLE001 - a failed button never takes the bot down
+		log.error(traceback.format_exc())
+	await _default_on_interaction(dc, interaction)
+
+
 @dc.event
 async def on_init():
 	await bot.stats.check_match_id_counter()

@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
 """ Build the Discord embed and the plain-text game summary from an analysis result. """
+import re
+
 from nextcord import Embed, Colour
 
 from .analysis import mmss
 
 SEAT_ORDER = {'Flank': 0, 'Pocket': 1, None: 2}
 COLOR_EMOJI = {0: '🔵', 1: '🔴', 2: '🟢', 3: '🟡', 4: '🩵', 5: '🟣', 6: '⚪', 7: '🟠'}
+
+
+EARLY_KILL = re.compile(r"'s .+ killed (one|\d+) of .+'s villagers")  # analysis.early_kill_moments
 
 
 def _teams(result):
@@ -121,6 +126,11 @@ def build_embed(result, title, narrative=None, footer=None, url=None, links=None
 		embed.add_field(name=name, value=value, inline=False)
 	if result['moments']:
 		lines = [f"`{t}` {txt}" for t, txt in result['moments']]
+		# Too long for one section: drop early villager kills (the smallest moments), latest first, before cutting
+		# the big ones at the end.
+		early = [i for i, (_, txt) in enumerate(result['moments']) if EARLY_KILL.search(txt)]
+		while early and len("\n".join(lines)) > 1000:
+			lines.pop(early.pop())
 		value = ""
 		for line in lines:
 			if len(value) + len(line) + 1 > 1000:
@@ -370,7 +380,12 @@ def explain_text(name, civ, ex):
 		out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}\n• Held {round(100 * sv['held'])}% of the economy at "
 			f"home ({round(100 * sv['home'])}% of new economy buildings, {sv['moved_tcs']} Town Centers elsewhere) under {level} "
 			f"pressure (difficulty {sv['difficulty']:g} of 1){cleared}.")
+		if sv.get('hold_credit'):
+			out.append(f"• Held for {sv['hold_minutes']:g} minutes under pressure"
+				+ (f" before the economy moved out at {sv['lost_at']}" if sv.get('lost_at') else "")
+				+ f": +{sv['hold_credit']:g} (full credit from 10 minutes, for the part of the base that was lost).")
 		out.append(f"= 1 + {sv['held']:g} × (4 + 5 × {sv['difficulty']:g})" + (f" + {sv['cleared']:g}" if sv.get('cleared') else "")
+			+ (f" + {sv['hold_credit']:g}" if sv.get('hold_credit') else "")
 			+ f" → **{_fmt_score(sc['surv'])}**" + (" (capped at 10)" if sc['surv'] >= 10 else ""))
 
 	out.append(f"\n**Team play {_fmt_score(sc['team'])}**\n" + _parts_text(ex['team']))

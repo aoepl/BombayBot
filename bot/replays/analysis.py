@@ -480,8 +480,22 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	sent = _vs_best(sent_raw)  # against the game's best, not stretched between the top and the bottom
 	on_map = _minmax({p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
 		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids})
+	# First push: how soon the player's attack first did damage: the first enemy villager killed or enemy building
+	# razed (see first_damage). Earlier is better; never doing either counts as worst.
+	first_push, push_what = first_damage(A, players, vest, end)
+	# Early kills one by one (the villager estimate misses one or two at a time).
+	for t, k, v, _ in early_villager_kills(A, players, stats, villagers, end):
+		if first_push.get(k) is None or t < first_push[k]:
+			first_push[k], push_what[k] = t, f"a villager of {players[v]['name']}'s killed at {mmss(t)}"
+	for p in pids:
+		stats[p]['first_push'], stats[p]['first_push_what'] = first_push[p], push_what[p]
+	# Scored by the clock, not against the lobby (a late first push isn't as good as an early one just because
+	# nobody else pushed): 10 by PUSH_FAST, 1 at PUSH_SLOW or later, or never.
+	push = {p: 1.0 if t is None else 10 - 9 * min(1.0, max(0.0, (t - PUSH_FAST) / (PUSH_SLOW - PUSH_FAST)))
+		for p, t in first_push.items()}
 	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
-	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage)], p) for p in pids}
+	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage), (0.10, None, push)], p)
+		for p in pids}
 	# Forward castles, Donjons and towers only add: up to +1.5, by their cost and effect (see forward_value).
 	for p in pids:
 		bonus = round(FORWARD_BONUS_MAX * min(1.0, forward_raw[p] / FORWARD_BONUS_FULL), 2)
@@ -546,10 +560,23 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		# Holding a light attack is worth less than holding a heavy one.
 		# Being attacked by two or more enemies at once makes holding harder.
 		difficulty = min(1.0, pressure[p] / (0.6 * max_in) + min(FOCUS_DIFFICULTY_MAX, FOCUS_DIFFICULTY * len(focused[p]['focused'])))
-		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0)
+		# How long the base held: from the pressure starting until the economy moved out (the first new economy
+		# building away from home after which most of them were away), else to the end of the game. A base lost after
+		# 10 minutes of holding is worth more than one lost in 5: credit for the part of the base that was lost.
+		lost_at = None
+		for i, a in enumerate(eco):
+			if base_of(a['x'], a['y']) != p:
+				rest = eco[i:]
+				if sum(1 for b in rest if base_of(b['x'], b['y']) != p) >= 0.6 * len(rest):
+					lost_at = a['t']
+					break
+		hold_min = max(0.0, ((lost_at if lost_at is not None else end) - pressure_start) / 60000)
+		hold_credit = round(HOLD_TIME_MAX * min(1.0, hold_min / HOLD_TIME_FULL) * (0.5 + 0.5 * difficulty) * (1 - held), 2)
+		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0) + hold_credit
 		survival[p] = max(1.0, min(10.0, value))
 		surv_detail[p] = dict(home=round(home, 2), held=round(held, 2), moved_tcs=moved_tcs, difficulty=round(difficulty, 2),
-			cleared=round(min(cleared[p], 1.0), 2), focused=len(focused[p]['focused']), pressure=pressure[p], max_pressure=max_in)
+			cleared=round(min(cleared[p], 1.0), 2), focused=len(focused[p]['focused']), pressure=pressure[p], max_pressure=max_in,
+			hold_minutes=round(hold_min, 1), hold_credit=hold_credit, lost_at=mmss(lost_at) if lost_at is not None else None)
 		n_cleared = stats[p]['enemy_castles_cleared']
 		cleared_txt = f", cleared {n_cleared} enemy castle{'s' if n_cleared != 1 else ''}" if n_cleared else ""
 		n_focus = len(focused[p]['focused'])
@@ -557,11 +584,13 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			cleared_txt += f", attacked by 2+ enemies at once in {n_focus} minute{'s' if n_focus != 1 else ''}"
 		level = 'heavy' if difficulty >= 0.66 else 'moderate' if difficulty >= 0.33 else 'light'
 		stats[p]['pressure_level'] = level
+		mins = round(hold_min)
+		held_txt = f" after holding for {mins} minute{'s' if mins != 1 else ''} under pressure" if lost_at is not None else ""
 		survival_note[p] = (
 			f"held the base under {level} pressure ({round(home * 100)}% of new economy buildings at home{cleared_txt})" if held >= 0.75 else
-			f"base partly lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
+			f"base partly lost{held_txt} ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 			if held >= 0.4 else
-			f"main base lost ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
+			f"main base lost{held_txt} ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
 		stats[p]['base_lost'] = held < 0.4
 	# Who took each lost base: the enemy with the most army orders into it, a castle they built there counting
@@ -617,6 +646,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		("Army on the map", on_map_raw, lambda v: f"{v:,.0f} value", 0.35, on_map),
 		("Army sent at the enemy", sent_raw, lambda v: f"{v:,.0f} value", 0.40, sent),
 		("Damage done", dealt, lambda v: f"{v:,.0f} value", 0.15, damage),
+		("First push", first_push, lambda v: mmss(v) if v is not None else "never", 0.10, push),
 	]
 	team_info = [
 		("Tributes sent", team_raw[0], lambda v: f"{v:,.0f} resources", 0.5, team_parts[0]),
@@ -651,8 +681,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if i == 3:
 				part['note'] = "counts a quarter as much as the others"
 			ex_parts.append(part)
-		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w, range=lobby_range(raw, f, False))
-			for n, raw, f, w, sc_ in press_info]
+		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w,
+			range=lobby_range(raw, f, n == "First push")) for n, raw, f, w, sc_ in press_info]
+		pr_parts[3]['note'] = (f"first damage: {push_what[p]}; " if push_what[p] else "") + \
+			"how soon an attack first killed a villager or razed a building: 10 by 8:00, down to 1 at 30:00 or never"
 		notes = []
 		for x in st.get('buildings_destroyed_list', []):
 			notes.append(f"{x['value']:,} for {players[x['victim']]['name']}'s Town Center destroyed at {mmss(x['t'])}")
@@ -660,8 +692,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			pr_parts[2]['note'] = "includes " + "; ".join(notes)
 		if st.get('macro_disrupted'):
 			raided = sorted({players[x['victim']]['name'] for x in st['macro_disruptions']})
-			text = (f"{st['macro_disrupted']:,} of enemy macro disrupted (production that stalled while their army was in "
-				f"{', '.join(raided)}'s base)")
+			text = (f"{st['macro_disrupted']:,} value of {' and '.join(raided)}'s production stalled while "
+				f"{players[p]['name']}'s army was in their base")
 			pr_parts[2]['note'] = (pr_parts[2]['note'] + "; " + text) if notes else "includes " + text
 		why = (f"its damage was {round(army[p]['damage_for_size'] * 100)}% of the lobby median for its size and "
 			f"{round(army[p]['damage_in_total'] * 100)}% of the lobby's most in total; the better counts")
@@ -744,7 +776,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		fights=fights, lanes=lanes,
 		tributes=[(a, b, int(v)) for (a, b), v in trib_pairs.most_common()],
 		pressure=timeline_in, moments=key_moments(players, stats, castles, {p: t for p, t in resigns.items() if t <= end},
-			army, vest, A, end),
+			army, vest, A, end, villagers),
 	)
 
 
@@ -1110,6 +1142,8 @@ MULTI_FULL, MULTI_BONUS_MAX = 0.25, 0.75
 # ... and at a fifth of them attacked by 2+ enemies with even trades (each minute counts by how the player traded).
 FOCUS_FULL, FOCUS_BONUS_MAX = 0.2, 0.75
 MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that count as fighting them
+HOLD_TIME_FULL = 10.0     # minutes of holding under pressure that earn the full holding-time credit ...
+HOLD_TIME_MAX = 3.0       # ... worth up to this much, for the part of the base that was lost in the end
 HOLD_UNTESTED = 7.0       # holding position for a base never seriously attacked: the enemy was kept out
 FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
 FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
@@ -1191,6 +1225,51 @@ AGE_DELAY_BONUS = 1.0        # pressure bonus for destroying a Town Center with 
 AGE_DELAY_FULL = 4 * 60000   # ... in full when the age is delayed 4+ minutes (first click to the click again)
 RAZE_NEAR = 12               # tiles: enemy castles, Donjons and towers this close can have destroyed it
 RAZE_STRUCT_CLICKS = 5       # a nearby enemy castle counts like 5 attack clicks when sharing credit
+
+
+PUSH_FAST = 8 * 60000    # first damage by this time scores 10 ...
+PUSH_SLOW = 30 * 60000   # ... down to 1 by this time
+RAZE_USED_AFTER = 180000  # a building its owner kept using this long after the last enemy hit still stood
+RAZE_QUIET_END = 300000   # ... as did one still used in the game's last 5 minutes
+
+
+def first_damage(A, players, vest, end):
+	"""
+	({player: time of their first damage or None}, {player: what it was}): the first enemy villager they killed (the
+	villager estimate's kills, credited to the main killer) or the first enemy building they razed, whichever came
+	first. A building (something its owner trained, researched or set a gather point in) counts as razed when enemy
+	attack orders on it stopped a minute or more before the end and its owner stopped using it within 3 minutes of
+	the last hit, not in the game's last 5 minutes; credit goes to the player with the most hits on it.
+	"""
+	team = {p: players[p]['team_id'] for p in players}
+	first, what = {p: None for p in players}, {p: None for p in players}
+
+	def note(p, t, text):
+		if p in first and (first[p] is None or t < first[p]):
+			first[p], what[p] = t, text
+	for v in players:
+		for t, share, kind in vest[v].get('killed', []):
+			if kind == 'villager' and share:
+				note(max(share, key=share.get), t, f"a villager of {players[v]['name']}'s killed at {mmss(t)}")
+	owner, last_used, hits = {}, {}, defaultdict(list)
+	for a in A:
+		p = a.get('player_id')
+		if a['a'] in ('DE_QUEUE', 'RESEARCH', 'GATHER_POINT', 'DE_MULTI_GATHERPOINT') and p in players:
+			for i in a.get('object_ids') or []:
+				owner.setdefault(i, p)
+				last_used[i] = a['t']
+	for a in A:
+		p, tg = a.get('player_id'), a.get('target_id')
+		if a['a'] == 'ORDER' and tg in owner and p in players and team[p] != team[owner[tg]]:
+			hits[tg].append((a['t'], p))
+	for tg, hs in hits.items():
+		t_last = hs[-1][0]
+		used = last_used.get(tg)
+		if end - t_last < 60000 or (used is not None and (used > t_last + RAZE_USED_AFTER or end - used < RAZE_QUIET_END)):
+			continue
+		by = Counter(p for _, p in hs).most_common(1)[0][0]
+		note(by, t_last, f"a building of {players[owner[tg]]['name']}'s razed at {mmss(t_last)}")
+	return first, what
 
 
 def town_centers_destroyed(A, players, structs, pos, end):
@@ -2037,10 +2116,11 @@ def army_presence(A, players, base_of, villagers, end, offensive, imp_at=None, w
 	return out
 
 
-def _feudal_lines(A, pid, t0, t1, army):
+def _feudal_lines(A, pid, t0, t1, army, carried_militia=0):
 	"""
 	The Feudal Age army lines in the order they were first made, up to three with 3+ units each. Men-at-Arms are
-	always included when the upgrade was researched in Feudal (a handful of them is the whole plan).
+	always named when the upgrade was researched in Feudal (a handful of them is the whole plan), also when they
+	are a Drush's Militia carried into Feudal Age and upgraded (carried_militia).
 	"""
 	first, merged = {}, Counter()
 	for a in A:
@@ -2052,8 +2132,12 @@ def _feudal_lines(A, pid, t0, t1, army):
 				first.setdefault(label, a['t'])
 	maa = any(a['a'] == 'RESEARCH' and a.get('player_id') == pid and t0 <= a['t'] < t1
 		and _name('technologies', a['technology_id']) == 'Man-at-Arms' for a in A)
-	keep = [l for l, c in merged.items() if c >= 3 or (l == 'Men-at-Arms' and maa and c >= 1)]
-	keep = sorted(keep, key=lambda l: -merged[l])[:3]
+	if maa and carried_militia and 'Men-at-Arms' not in merged:
+		merged['Men-at-Arms'] = carried_militia
+		first['Men-at-Arms'] = t0  # there from the start of Feudal Age
+	forced = maa and merged.get('Men-at-Arms', 0) >= 1  # always named, on top of the three biggest other lines
+	keep = [l for l, c in merged.items() if c >= 3 and (l != 'Men-at-Arms' or not forced)]
+	keep = sorted(keep, key=lambda l: -merged[l])[:3] + (['Men-at-Arms'] if forced else [])
 	return sorted(keep, key=lambda l: first[l])
 
 
@@ -2135,12 +2219,35 @@ def _line_label(unit, researched):
 	return label
 
 
-def _army_lines(counter, minimum=5, researched=None):
-	""" Top two unit lines, plus any siege the player made (2 or more) that isn't already listed; each line named by
-	the upgrades researched by then when `researched` is given. """
-	names = LINE_NAMES if researched is None else {n: _line_label(n, researched) for n in counter}
+RECENT_BEFORE_AGE = 5 * 60000  # units made this long before an age-up count for it once their line is upgraded in it
+
+
+def _carried_upgraded(A, pid, t0, t1):
+	"""
+	Units made in the RECENT_BEFORE_AGE before t0 whose line got an upgrade from t0 up to t1 (Feudal archers
+	upgraded to Crossbows, Castle Knights to Paladins): they fight on in the new age. Older units have mostly died.
+	"""
+	done = _researched(A, pid, t1) - _researched(A, pid, t0)
+	upgraded = {unit for unit, chain in UPGRADE_NAMES.items() if any(tech in done for tech, _ in chain)}
+	recent = _army_between(A, pid, max(0, t0 - RECENT_BEFORE_AGE), t0)
+	return Counter({unit: n for unit, n in recent.items() if unit in upgraded})
+
+
+def _army_lines(counter, minimum=5, researched=None, carried=None):
+	"""
+	Top two unit lines, plus any siege the player made (2 or more) that isn't already listed; each line named by
+	the upgrades researched by then when `researched` is given. carried: earlier units upgraded in this age; they
+	count too, after the lines made in this age (so the main unit stays what the player made now).
+	"""
+	carried = carried or Counter()
+	total = counter + carried
+	names = LINE_NAMES if researched is None else {n: _line_label(n, researched) for n in total}
 	lines = _top_lines(counter, minimum, names)
-	for n, c in counter.most_common():
+	if carried:
+		for label in _top_lines(total, minimum, names, limit=4):
+			if label not in lines and len(lines) < 2:
+				lines.append(label)
+	for n, c in total.most_common():
 		label = names.get(n, n)
 		if n in SIEGE and c >= 2 and label not in lines:
 			lines.append(label)
@@ -2197,6 +2304,8 @@ def working_fishing_ships(A, pid, until, villagers=()):
 # takes 2:10), with little Feudal army: a Fast Castle. Seen in test games: Fast Castles click up 2.4-6 minutes apart,
 # Feudal openings 10+ minutes apart.
 FAST_CASTLE_GAP = 6.5 * 60000
+DARK_ARMY_MIN = 3  # military units made in Dark Age that make a Dark Age army (drush, scouts)
+FEUDAL_RESEARCH_MS = 130 * 1000  # Feudal Age research time: Dark Age lasts until the click plus this
 
 
 def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villagers=()):
@@ -2212,8 +2321,16 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 		forward_towers = sum(1 for a in A if a['a'] == 'BUILD' and a.get('player_id') == pid
 			and _name('objects', a['building_id']) in TOWERS and feudal <= a['t'] < (castle or end)
 			and players[base_of(a['x'], a['y'])]['team_id'] != team)
+	# Dark Age army (a drush, scouts...): units queued before Feudal Age was reached (click + research time; militia
+	# are often made while Feudal Age researches), counted from DARK_ARMY_MIN units.
+	dark_army = _army_between(A, pid, 0, min(feudal + FEUDAL_RESEARCH_MS, end) if feudal else end)
+	dark_count = sum(dark_army.values())
+	dark_units = _top_lines(dark_army, 1) if dark_count >= DARK_ARMY_MIN else []
 	feudal_army = _army_between(A, pid, feudal, castle or end) if feudal else Counter()
-	feudal_units = _feudal_lines(A, pid, feudal, castle or end, feudal_army) if feudal else []
+	# Militia queued before the Feudal click carry into Feudal Age (later ones are counted as Feudal army already).
+	carried = sum(a.get('amount', 1) or 1 for a in A if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid
+		and feudal and a['t'] < feudal and _name('objects', a['unit_id']) == 'Militia')
+	feudal_units = _feudal_lines(A, pid, feudal, castle or end, feudal_army, carried) if feudal else []
 	feudal_attacks = sum(1 for t in attack_times if feudal and feudal <= t < (castle or end))
 	feudal_attack = feudal_attacks >= 10
 
@@ -2247,6 +2364,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 		opening = "No Castle Age"
 	else:
 		opening = "Standard"
+	# A Drush (3+ Militia in the Dark Age) leads the name: "Drush → Feudal archers".
+	drush = dark_army['Militia'] >= DARK_ARMY_MIN
+	if drush:
+		opening = "Drush" if opening in ("Standard", "No Castle Age") else f"Drush → {opening}"
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
 	# Fish boom: 5+ fishing ships that went to work (not left idle), up to 10 minutes after Castle Age.
 	boom_end = (castle or end) + 10 * 60000
@@ -2256,8 +2377,9 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	boom_label = "farm + fish boom" if boom and fish_boom else "fish boom" if fish_boom else "farm boom" if boom else ""
 
 	# Castle Age and Imperial Age armies, separately.
-	castle_units = _army_lines(_army_between(A, pid, castle, imp or end)) if castle else []
-	imperial_units = _army_lines(_army_between(A, pid, imp, end)) if imp else []
+	castle_units = _army_lines(_army_between(A, pid, castle, imp or end),
+		carried=_carried_upgraded(A, pid, castle, imp or end)) if castle else []
+	imperial_units = _army_lines(_army_between(A, pid, imp, end), carried=_carried_upgraded(A, pid, imp, end)) if imp else []
 	# The saved unit lines keep their usual names (drafting and the tech tree match on them); the strategy's name
 	# shows the upgraded forms: 'Crossbows' in Castle Age, 'Arbalesters' in Imperial.
 	castle_names = _army_lines(_army_between(A, pid, castle, imp or end), researched=_researched(A, pid, imp or end)) if castle else []
@@ -2288,6 +2410,7 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	if extras:
 		parts.append(", ".join(extras))
 	return dict(
+		dark_units=dark_units, dark_army=dark_count, drush=drush,
 		name=" → ".join(parts) if parts else "Standard play",
 		opening=opening, feudal_boom=feudal_boom, boom=boom, fish_boom=fish_boom, fishing_ships=fish,
 		fishing_ships_working=fish_working, feudal_units=feudal_units, feudal_attack=feudal_attack,
@@ -2478,7 +2601,106 @@ def _units_lost(army, p, t0, t1):
 	return f"{n} unit{'s' if n != 1 else ''}"
 
 
-def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0):
+EARLY_KILLS_UNTIL = 12 * 60000  # villagers killed before this (or the killer's Dark Age, if longer) are early kills
+EARLY_KILL_GAP = 90000         # early kills by one player on one enemy this close together are one moment
+EARLY_KILL_LINES = 4           # early kills listed at most (on top of the bigger moments)
+UNIT_ORDERS = {'ORDER', 'MOVE', 'PATROL', 'DE_ATTACK_MOVE', 'STOP', 'GUARD', 'FOLLOW', 'FORMATION', 'STANCE'}
+
+
+def early_villager_kills(A, players, stats, villagers, end):
+	"""
+	Villagers killed in the early game, unit by unit (the villager count estimate misses one or two at a time).
+	A unit counts as a villager when its owner sent it to build or onto something nobody commands (a resource) and
+	never gave it an army-only command; it was killed when an enemy's units were ordered onto it and its owner never
+	commanded it again. -> [(t, killer, victim, attacker kinds Counter)], by time.
+	"""
+	team = {p: players[p]['team_id'] for p in players}
+	last_sel, filled = {}, []
+	for a in A:  # commands that reuse the last selection carry no unit ids: give them that selection
+		p = a.get('player_id')
+		ids = a.get('object_ids') or []
+		if a['a'] in UNIT_ORDERS or a['a'] in ('BUILD', 'REPAIR', 'WALL'):
+			if ids:
+				last_sel[p] = ids
+			else:
+				ids = last_sel.get(p, [])
+		filled.append((a, ids))
+	owner, commanders, first_cmd, last_cmd = {}, defaultdict(set), {}, {}
+	for a, ids in filled:
+		for i in ids:
+			commanders[i].add(a.get('player_id'))
+			owner.setdefault(i, a.get('player_id'))
+			first_cmd.setdefault(i, a['t'])
+			last_cmd[i] = a['t']
+	# Builders are villagers (a stance or formation given to a group they were in doesn't change that); units only
+	# seen gathering are villagers unless they also got army-only commands (army attacking a building looks the same).
+	army_only = {i for a, ids in filled if a['a'] in ARMY_COMMANDS for i in ids}
+	builders, gatherers = set(villagers), set()
+	for a, ids in filled:
+		tg = a.get('target_id')
+		mine = [i for i in ids if owner.get(i) == a.get('player_id')]
+		if a['a'] in ('BUILD', 'REPAIR', 'WALL'):
+			builders.update(mine)
+		elif a['a'] == 'ORDER' and tg and tg not in commanders:
+			gatherers.update(mine)
+	worker = builders | (gatherers - army_only)
+	queued = defaultdict(list)
+	for a in A:
+		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players:
+			n = _name('objects', a.get('unit_id'))
+			if n not in MILITARY_SKIP:
+				queued[a['player_id']].append((a['t'], n))
+
+	def kind(k, u, t):
+		""" What an attacker was: villagers build; the starting scout; else the one army line made by then. """
+		if u in builders:
+			return 'villagers'
+		if first_cmd.get(u, end) < 30000:
+			return 'scout'  # the only starting unit that isn't a villager
+		made = {n for q, n in queued[k] if q < t}
+		if len(made) == 1:
+			return next(iter(made))
+		return 'villagers' if u in gatherers else 'army'
+
+	attacks = defaultdict(list)  # victim unit -> [(t, attacker, attacking ids)]
+	for a, ids in filled:
+		tg, k = a.get('target_id'), a.get('player_id')
+		if a['a'] == 'ORDER' and tg in worker and k in players and owner.get(tg) in players \
+				and team[owner[tg]] != team[k] and len(commanders[tg]) == 1:
+			attacks[tg].append((a['t'], k, ids))
+	out = []
+	for u, hits in attacks.items():
+		t, k, _ = hits[-1]
+		feudal = stats[k]['ages'].get('Feudal Age')
+		until = max(EARLY_KILLS_UNTIL, feudal + FEUDAL_RESEARCH_MS if feudal else 0)
+		# Dead: its owner stopped commanding it around the attack (and had used it shortly before), well before the end.
+		if t > until or end - t < 120000 or not (t - 120000 <= last_cmd[u] <= t + 20000):
+			continue
+		by = Counter(kind(k, i, t) for ta, q, ids in hits if q == k and t - 60000 <= ta for i in set(ids))
+		out.append((t, k, owner[u], by))
+	return sorted(out, key=lambda x: x[0])
+
+
+def early_kill_moments(kills, players):
+	""" Early villager kills as moments, one per killer and enemy per burst: [(t, text)]. """
+	groups = []
+	for t, k, v, by in kills:
+		g = next((g for g in groups if g['k'] == k and g['v'] == v and t - g['end'] <= EARLY_KILL_GAP), None)
+		if g:
+			g['end'], g['n'] = t, g['n'] + 1
+			g['by'] += by
+		else:
+			groups.append(dict(k=k, v=v, t=t, end=t, n=1, by=Counter(by)))
+	out = []
+	for g in groups:
+		who = ' and '.join(x for x, _ in g['by'].most_common(2)) or 'units'
+		span = f" ({mmss(g['t'])}–{mmss(g['end'])})" if g['end'] - g['t'] >= 5000 else ""
+		what = "one" if g['n'] == 1 else str(g['n'])
+		out.append((g['t'], f"{players[g['k']]['name']}'s {who} killed {what} of {players[g['v']]['name']}'s villagers{span}"))
+	return out
+
+
+def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0, villagers=()):
 	"""
 	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
 	big raids on villagers, castles destroyed, players eliminated (a regicide king killed or a defeat: their
@@ -2557,6 +2779,14 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 	first_resign = min(resigns.items(), key=lambda kv: kv[1]) if resigns else None
 	top = sorted(ev, key=lambda e: -e[0])[:MOMENTS_MAX - (1 if first_resign else 0)]
 	out = [(t, text) for _, t, text in top]
+	# Early villager kills (a scout or a Drush picking off villagers): too small for the raids above but they shape
+	# the early game, so they're listed as well (the first few), unless a raid at that time already says it.
+	if A:
+		early = early_kill_moments(early_villager_kills(A, players, stats, villagers, end), players)
+		for t, text in early[:EARLY_KILL_LINES]:
+			killer = text.split("'s ")[0]
+			if not any(abs(t0 - t) <= 60000 and txt.startswith(killer) and 'raided' in txt for t0, txt in out):
+				out.append((t, text))
 	if first_resign:
 		p, t = first_resign
 		out.append((t, f"{name(p)} ({players[p]['civ']}) resigns"))

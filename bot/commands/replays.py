@@ -3,7 +3,7 @@ __all__ = ['aoe_link', 'aoe_unlink', 'aoe_names', 'replay_upload', 'replay_auto_
 import asyncio
 from io import BytesIO
 
-from nextcord import Attachment, Member, Embed, ForumChannel, File
+from nextcord import Attachment, Member, Embed, ForumChannel, File, Forbidden
 
 from core.utils import get_nick, find
 
@@ -159,20 +159,20 @@ async def aoe_seats(ctx, player: Member = None, map: str = None):
 async def explain_analysis(interaction, message):
 	"""
 	"Explain analysis" (right-click or long-press an analysis post → Apps): why each player got their scores.
-	Works on the post or on any message in its thread. Answers everyone in the thread.
+	Works on the post or on any message in its thread. Only whoever asked sees the answer.
 	"""
 	try:
 		title, messages = await bot.replays.explain_post(interaction.channel_id, message.id)
 	except bot.replays.ReplayError as e:
 		await interaction.response.send_message(str(e), ephemeral=True)
 		return
-	await interaction.response.send_message(content=f"**{title}**", embeds=messages[0])
+	await interaction.response.send_message(content=f"**{title}**", embeds=messages[0], ephemeral=True)
 	for embeds in messages[1:]:
-		await interaction.followup.send(embeds=embeds)
+		await interaction.followup.send(embeds=embeds, ephemeral=True)
 
 
 async def aoe_explain(ctx, *args):
-	""" !explain as a reply to an analysis post in a queue channel: why each player got their scores. """
+	""" !explain as a reply to an analysis post in a queue channel: why each player got their scores (sent by DM). """
 	ref = getattr(ctx.message, 'reference', None)
 	if not ref or not ref.message_id:
 		raise bot.Exc.SyntaxError("Reply to a game analysis post with this command, or use Apps → Explain analysis on the post.")
@@ -180,9 +180,16 @@ async def aoe_explain(ctx, *args):
 		title, messages = await bot.replays.explain_post(ctx.message.channel.id, ref.message_id)
 	except bot.replays.ReplayError as e:
 		raise bot.Exc.NotFoundError(str(e))
-	for i, embeds in enumerate(messages):
-		await ctx.message.channel.send(content=f"**{title}**" if i == 0 else None, embeds=embeds,
-			reference=ctx.message if i == 0 else None)
+	# A text command can't answer privately in the channel: the explanation goes to the asker's DMs (to the channel
+	# only when their DMs are closed).
+	try:
+		for i, embeds in enumerate(messages):
+			await ctx.message.author.send(content=f"**{title}**" if i == 0 else None, embeds=embeds)
+		await ctx.message.add_reaction('📬')
+	except Forbidden:
+		for i, embeds in enumerate(messages):
+			await ctx.message.channel.send(content=f"**{title}**" if i == 0 else None, embeds=embeds,
+				reference=ctx.message if i == 0 else None)
 
 
 async def aoe_export(ctx, map: str = None, days: int = None, details: bool = False):
@@ -199,62 +206,109 @@ async def aoe_export(ctx, map: str = None, days: int = None, details: bool = Fal
 		"and ask, e.g. which civs do best per map type, seat and Elo.", file=File(BytesIO(data), filename=name))
 
 
-def _draft_embed(match, res, model, games, author):
-	""" The draft as an embed: each team's civs (and seats and players in player mode), why each civ was picked,
-	the balance and how many civs were left out. """
+DRAFT_BUTTON = 'aoe_draft_why'  # custom id: aoe_draft_why:<match id>:<draft number>
+
+
+def _draft_embeds(match, res, model, games, author):
+	"""
+	The draft as two embeds: a short post (each team's civs, and seats and players in player mode; one line on the
+	balance) and the details shown to whoever clicks "Why these civs?" (why each civ, balance, the civs left out and
+	how the draft works).
+	"""
 	from bot.replays import draft
 	per_player = res['mode'] == draft.PLAYER_CIVS
 	where = f"{res['map']} ({res['category']})" if res.get('category') and res['category'] != 'Other' else res['map']
-	embed = Embed(title=f"Civ draft: {where}", colour=0x9a5b13)
-	embed.description = ("A civ and position for each player." if per_player else
-		f"{draft.TEAM_CHOICES} civs for each team: choose your players' civs from them and decide who plays where.") + \
-		" Flank and pocket are only suggestions: any civ can be played in any position if you choose to."
+	edge = res['balance']['civ_edge']
+	ahead = match.teams[0 if edge >= 0 else 1].name
+	civ_line = "Civs: even." if abs(edge) < 0.005 else f"Civs: {ahead} ahead by {abs(edge):.1%}."
+	out = res['excluded']
+
+	short = Embed(title=f"Civ draft: {where}", colour=0x9a5b13)
+	seated = any(s.seat for t in res['teams'] for s in t)  # nomad maps have no flanks and pockets
+	if seated:
+		short.description = ("A civ and position for each player." if per_player else
+			f"{draft.TEAM_CHOICES} civs per team: share them out and pick positions.") + " Positions are only suggestions."
+	else:
+		short.description = "A civ for each player." if per_player else f"{draft.TEAM_CHOICES} civs per team: share them out."
 	for i, team in enumerate(res['teams']):
 		t = match.teams[i]
 		elo = round(sum(match.ratings.get(p.id) or 0 for p in t) / len(t)) if len(t) else 0
 		lines = []
 		for s in team:
 			if per_player:
-				lines.append((f"{s.seat} · " if s.seat else "") + f"**{s.name}** `〈{s.elo}〉` → **{s.civ}**")
+				lines.append((f"{s.seat} · " if s.seat else "") + f"**{s.name}** → **{s.civ}**")
 			else:
 				# The team decides who plays where: show the seat the civ suits better, not the slot it filled.
 				seat = draft.better_seat(model, s.civ, res['map'], res.get('category')) if s.seat else None
 				lines.append(f"**{s.civ}**" + (f" · {seat.lower()}" if seat else ""))
-		embed.add_field(name=f"{t.emoji} {t.name} `〈{elo}〉`", value="\n".join(lines)[:1024], inline=False)
+		short.add_field(name=f"{t.emoji} {t.name} `〈{elo}〉`", value="\n".join(lines)[:1024], inline=True)
+	short.set_footer(text=f"{civ_line} {len(out)} of {res['civ_count']} civs left out at random. Drawn by {author}.")
+
+	details = Embed(title=f"Why these civs: {where}", colour=0x9a5b13)
 	for i, team in enumerate(res['teams']):
 		why = [f"**{s.civ}**: {draft.pick_reason(model, res, i, j, None if per_player or not s.seat else draft.better_seat(model, s.civ, res['map'], res.get('category')))}"
 			for j, s in enumerate(team)]
 		chunk, n = [], 0
 		for line in why:  # an embed field holds 1024 characters: carry on in another field rather than cut a line
 			if chunk and len("\n".join(chunk + [line])) > 1024:
-				embed.add_field(name=f"Why these civs: {match.teams[i].name}" if not n else "\u200b", value="\n".join(chunk), inline=False)
+				details.add_field(name=match.teams[i].name if not n else "\u200b", value="\n".join(chunk), inline=False)
 				chunk, n = [], n + 1
 			chunk.append(line[:1024])
 		if chunk:
-			embed.add_field(name=f"Why these civs: {match.teams[i].name}" if not n else "\u200b", value="\n".join(chunk), inline=False)
-	edge = res['balance']['civ_edge']
-	ahead = match.teams[0 if edge >= 0 else 1].name
-	civ_line = "Civs: even." if abs(edge) < 0.005 else f"Civs: {ahead} ahead by {abs(edge):.1%}."
-	out = res['excluded']
-	embed.add_field(name="Balance", inline=False,
-		value=f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it.")
-	embed.add_field(name=f"Left out at random: {len(out)} of {res['civ_count']} civs", inline=False,
+			details.add_field(name=match.teams[i].name if not n else "\u200b", value="\n".join(chunk), inline=False)
+	details.add_field(name="Balance", inline=False,
+		value=f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it."
+			+ (" Flank and pocket are only suggestions: any civ can be played in any position." if seated else ""))
+	details.add_field(name=f"Left out at random: {len(out)} of {res['civ_count']} civs", inline=False,
 		value=(", ".join(out) or "none")[:1024])
 	map_rules = {
 		'Closed': "on a closed map also its siege, gunpowder, towers and power units",
 		'Semi Closed': "on a semi closed map food, cavalry or a strong late game for pockets and aggression for flanks",
 		'Open': "on an open map archers for flanks, cavalry for pockets and eco bonuses for a fast attack",
 		'Hybrid': "on a hybrid map navy, fishing and wood, and for pockets cavalry backed by a fish boom",
+		'Nomad': "on a nomad map wood bonuses, dock and fishing bonuses for the Town Center and Dock start (on maps "
+			"with water) and nomad start bonuses",
 	}.get(res.get('category'))
-	embed.add_field(name="How the draft works", inline=False, value=(
+	details.add_field(name="How the draft works", inline=False, value=(
 		"Random civs are left out first, so drafts differ from match to match. "
-		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map and these seats are then split "
-		"between the teams, the same number of flank and pocket civs each, so both sides' civs are as even as possible. "
-		"A civ's value is how it does against Elo in this seat and on this kind of map"
+		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map" + (" and these seats" if seated else "")
+		+ " are then split between the teams" + (", the same number of flank and pocket civs each," if seated else "")
+		+ " so both sides' civs are as even as possible. "
+		"A civ's value is how it does against Elo" + (" in this seat" if seated else "") + " on this kind of map"
 		+ (f" ({map_rules})" if map_rules else "") + " and its matchups against the other team's civs.")[:1024])
-	embed.set_footer(text=f"Drawn by {author}. From {games} analysed game{'s' if games != 1 else ''} in this channel"
-		" plus the tech trees; with few games picks lean on the tech trees.")
-	return embed
+	details.set_footer(text=f"From {games} analysed game{'s' if games != 1 else ''} in this channel plus the tech trees; "
+		"with few games picks lean on the tech trees.")
+	return short, details
+
+
+def _draft_view(match_id, number):
+	""" The "Why these civs?" button under a draft (answered by draft_button, also after the bot restarts). """
+	from nextcord import ButtonStyle, ui
+	view = ui.View(timeout=None)
+	view.add_item(ui.Button(label="Why these civs?", style=ButtonStyle.secondary,
+		custom_id=f"{DRAFT_BUTTON}:{match_id}:{number}"))
+	return view
+
+
+async def draft_button(interaction):
+	""" A click on "Why these civs?": the draft's details, shown only to whoever clicked. -> True when handled. """
+	from nextcord import InteractionType
+	cid = (interaction.data or {}).get('custom_id') or '' if interaction.type == InteractionType.component else ''
+	if not cid.startswith(DRAFT_BUTTON + ':'):
+		return False
+	try:
+		_, match_id, number = cid.split(':')
+		match_id, number = int(match_id), int(number)
+	except ValueError:
+		return False
+	match = find(lambda m: m.id == match_id, bot.active_matches)
+	details = (getattr(match, 'civ_draft_details', None) or {}).get(number) if match else None
+	if details:
+		await interaction.response.send_message(embed=details, ephemeral=True)
+	else:
+		await interaction.response.send_message("The details of this draft aren't available any more (the match "
+			"has ended, or the bot restarted since).", ephemeral=True)
+	return True
 
 
 async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = False):
@@ -262,23 +316,37 @@ async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = Fal
 	Civ draft for your started match: civs for each team to share out (mode team), or a civ and position for every
 	player (mode player). 35-40 random civs are left out first. One draft per match; moderators can redraw.
 	"""
-	import random
-	from bot.replays import draft, insights, summaries
 	match = find(lambda m: m.qc == ctx.qc and ctx.author in m.players, bot.active_matches)
 	if match is None:
 		raise bot.Exc.NotFoundError("You are not in a started match in this channel. /aoe draft works once your "
 			"queue has started.")
 	if len(match.teams[2]) or not len(match.teams[0]) or not len(match.teams[1]):
 		raise bot.Exc.MatchStateError("The teams are not set yet: run /aoe draft once both teams are picked.")
+	# Making a draft takes a few seconds: a second /aoe draft in that time would make a second draft, so it waits.
+	if getattr(match, 'civ_draft_busy', False):
+		raise bot.Exc.MatchStateError("A civ draft for this match is being made right now: it will be posted in a moment.")
 	saved = getattr(match, 'civ_draft', None)
 	if saved and not redraw:
-		await ctx.reply(content="This match already has a civ draft (moderators can redraw it):", embed=saved)
+		number = max(match.civ_draft_details)
+		await ctx.reply(content="This match already has a civ draft (moderators can redraw it):", embed=saved,
+			view=_draft_view(match.id, number))
 		return
 	if saved and redraw:
 		ctx.check_perms(ctx.Perms.MODERATOR)
 	map_name = map or (match.maps[0] if match.maps else None)
 	if not map_name:
 		raise bot.Exc.ValueError("This match has no map: give one with the map option.")
+	match.civ_draft_busy = True  # set before the first await, so no other draft can start
+	try:
+		await _make_draft(ctx, match, mode, map_name)
+	finally:
+		match.civ_draft_busy = False
+
+
+async def _make_draft(ctx, match, mode, map_name):
+	""" The draft itself (aoe_draft has checked it may be made). """
+	import random
+	from bot.replays import draft, insights, summaries
 	category = await insights.map_type(map_name)  # looked up online once for maps the bot doesn't know
 	rows, matchups, fights = await summaries.load_draft_data(ctx.qc.id)
 	records = summaries.seat_stats(rows)
@@ -290,9 +358,12 @@ async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = Fal
 		res = draft.civ_draft(model, teams, map_name, category, mode, random.Random(), records)
 		return model, res
 	model, res = await asyncio.to_thread(work)
-	embed = _draft_embed(match, res, model, len({r['game_key'] for r in rows}), get_nick(ctx.author))
-	match.civ_draft = embed
-	await ctx.reply(embed=embed)
+	short, details = _draft_embeds(match, res, model, len({r['game_key'] for r in rows}), get_nick(ctx.author))
+	match.civ_draft = short
+	match.civ_draft_details = getattr(match, 'civ_draft_details', None) or {}
+	number = max(match.civ_draft_details, default=0) + 1  # an earlier draft's button keeps showing its own details
+	match.civ_draft_details[number] = details
+	await ctx.reply(embed=short, view=_draft_view(match.id, number))
 
 
 async def aoe_map_type(ctx, map: str, type: str = None):

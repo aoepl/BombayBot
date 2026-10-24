@@ -41,7 +41,9 @@ nano config.cfg
 Reports over the games analysed in the queue channel (uploads and automatic breakdowns):
 * `/aoe stat [player]`: games and win rate; flank and pocket games with their win rates; average APM; how the player
   does against their BombayBot Elo (average difference and how often above or below); their best position, army style
-  (Cavalry, Archers, Cavalry archers, Infantry, Gunpowder, Monks, Naval, from their main unit line) and strategy
+  (Cavalry, Archers, Cavalry archers, Infantry, Gunpowder, Monks, Naval: the army they relied on over every age
+  they made one in, a Dark Age army of 3+ units, a Feudal army opening and the Castle Age army; a mixed early army
+  takes the style of the line they carried on with, and when the ages differ the longest age decides) and strategy
   (opening plus boom), each by average score over 2+ games; **individual luck**, the share of those bests they got
   per game; **team luck**, the share of their teammates' own bests the teammates got per game; most played civs.
 * `/aoe civs [map]`: win rate of every civ, overall or on one map (name or type, e.g. `Arena`, `Golden Lakes`,
@@ -54,8 +56,8 @@ Reports over the games analysed in the queue channel (uploads and automatic brea
   the result against Elo). The file starts with a short guide to the fields. `map` keeps one map or map type,
   `days` only recent games, `details` adds each player's full score breakdown. Bigger than 8 MB, it is gzipped.
 * **Explain analysis**: right-click (or long-press) a game analysis post → Apps → Explain analysis. It works on
-  the post or on any message in its thread, including in the replay forum. The bot replies with why each player
-  got each score:
+  the post or on any message in its thread, including in the replay forum. The bot replies, visible only to you,
+  with why each player got each score:
   * first, how the scores are calculated: what each of execution, pressure, survival and team play measures and
     from which parts, how parts become 1–10 scores, the bonuses and the overall weights;
   * then for each player, the calculation: every part of execution, pressure, survival and team play, with the player's value, its 1–10 score, the
@@ -64,7 +66,8 @@ Reports over the games analysed in the queue channel (uploads and automatic brea
   * the arithmetic, for example "(8.3×1 + 10×1 + 1.8×1 + 5.7×0.25 + 10×1) ÷ 4.25 = 7.4, + 0.91 bonus → 8.3", and how
     the overall score weighs the four for the player's position.
 
-  In a queue channel, replying `!explain` to the post does the same. Games analysed before this was added need
+  In a queue channel, replying `!explain` to the post does the same, sent to your DMs (in the channel if your DMs
+  are closed). Games analysed before this was added need
   uploading again (they are re-analysed with the newer version).
 
 ### Game breakdowns from recorded games
