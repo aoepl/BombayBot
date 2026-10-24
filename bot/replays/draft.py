@@ -1094,14 +1094,17 @@ def civ_draft(model: Model, teams, map_name, category=None, mode=TEAM_CIVS, rng=
 	rng = rng or random.Random()
 	picks = sum(len(t) if mode == PLAYER_CIVS else max(len(t), TEAM_CHOICES) for t in teams)
 	pool, excluded = civ_pool(rng, civs, keep=picks + 2)  # a couple spare, so the last picks still have a choice
+	seatless = bool(NOMAD_LEAN.get(category))  # nomad maps: random starts, no flanks and pockets
 	if mode == PLAYER_CIVS:
-		slots = [assign_seats(t, records or {}, rng) for t in teams]
+		slots = [[Slot(None, p.get('elo'), p.get('name'), user_id=p.get('user_id')) for p in t] if seatless
+			else assign_seats(t, records or {}, rng) for t in teams]
 	else:
 		slots = []
 		for t in teams:
 			elos = [p['elo'] for p in t if p.get('elo') is not None]
 			avg = round(sum(elos) / len(elos)) if elos else None
-			slots.append([Slot(seat, avg) for seat in seat_layout(len(t), max(len(t), TEAM_CHOICES))])
+			n = max(len(t), TEAM_CHOICES)
+			slots.append([Slot(seat, avg) for seat in ([None] * n if seatless else seat_layout(len(t), n))])
 	# Elo is not evened out by civs: the rating change already does that (a favourite gains little and loses more).
 	# So the snake draft only finds the strongest civs for the map and seats; they are then split between the teams
 	# (same seats each side) so that both sides' civs are as even as possible.

@@ -224,8 +224,12 @@ def _draft_embeds(match, res, model, games, author):
 	out = res['excluded']
 
 	short = Embed(title=f"Civ draft: {where}", colour=0x9a5b13)
-	short.description = ("A civ and position for each player." if per_player else
-		f"{draft.TEAM_CHOICES} civs per team: share them out and pick positions.") + " Positions are only suggestions."
+	seated = any(s.seat for t in res['teams'] for s in t)  # nomad maps have no flanks and pockets
+	if seated:
+		short.description = ("A civ and position for each player." if per_player else
+			f"{draft.TEAM_CHOICES} civs per team: share them out and pick positions.") + " Positions are only suggestions."
+	else:
+		short.description = "A civ for each player." if per_player else f"{draft.TEAM_CHOICES} civs per team: share them out."
 	for i, team in enumerate(res['teams']):
 		t = match.teams[i]
 		elo = round(sum(match.ratings.get(p.id) or 0 for p in t) / len(t)) if len(t) else 0
@@ -253,8 +257,8 @@ def _draft_embeds(match, res, model, games, author):
 		if chunk:
 			details.add_field(name=match.teams[i].name if not n else "\u200b", value="\n".join(chunk), inline=False)
 	details.add_field(name="Balance", inline=False,
-		value=f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it. "
-			"Flank and pocket are only suggestions: any civ can be played in any position.")
+		value=f"{civ_line} Elo is not evened out with civs: the rating change already accounts for it."
+			+ (" Flank and pocket are only suggestions: any civ can be played in any position." if seated else ""))
 	details.add_field(name=f"Left out at random: {len(out)} of {res['civ_count']} civs", inline=False,
 		value=(", ".join(out) or "none")[:1024])
 	map_rules = {
@@ -267,9 +271,10 @@ def _draft_embeds(match, res, model, games, author):
 	}.get(res.get('category'))
 	details.add_field(name="How the draft works", inline=False, value=(
 		"Random civs are left out first, so drafts differ from match to match. "
-		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map and these seats are then split "
-		"between the teams, the same number of flank and pocket civs each, so both sides' civs are as even as possible. "
-		"A civ's value is how it does against Elo in this seat and on this kind of map"
+		f"The {sum(len(t) for t in res['teams'])} strongest civs left for this map" + (" and these seats" if seated else "")
+		+ " are then split between the teams" + (", the same number of flank and pocket civs each," if seated else "")
+		+ " so both sides' civs are as even as possible. "
+		"A civ's value is how it does against Elo" + (" in this seat" if seated else "") + " on this kind of map"
 		+ (f" ({map_rules})" if map_rules else "") + " and its matchups against the other team's civs.")[:1024])
 	details.set_footer(text=f"From {games} analysed game{'s' if games != 1 else ''} in this channel plus the tech trees; "
 		"with few games picks lean on the tech trees.")
