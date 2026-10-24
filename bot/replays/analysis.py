@@ -480,8 +480,22 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	sent = _vs_best(sent_raw)  # against the game's best, not stretched between the top and the bottom
 	on_map = _minmax({p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
 		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids})
+	# First push: how soon the player's attack first did damage: the first enemy villager killed or enemy building
+	# razed (see first_damage). Earlier is better; never doing either counts as worst.
+	first_push, push_what = first_damage(A, players, vest, end)
+	# Early kills one by one (the villager estimate misses one or two at a time).
+	for t, k, v, _ in early_villager_kills(A, players, stats, villagers, end):
+		if first_push.get(k) is None or t < first_push[k]:
+			first_push[k], push_what[k] = t, f"a villager of {players[v]['name']}'s killed at {mmss(t)}"
+	for p in pids:
+		stats[p]['first_push'], stats[p]['first_push_what'] = first_push[p], push_what[p]
+	# Scored by the clock, not against the lobby (a late first push isn't as good as an early one just because
+	# nobody else pushed): 10 by PUSH_FAST, 1 at PUSH_SLOW or later, or never.
+	push = {p: 1.0 if t is None else 10 - 9 * min(1.0, max(0.0, (t - PUSH_FAST) / (PUSH_SLOW - PUSH_FAST)))
+		for p, t in first_push.items()}
 	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
-	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage)], p) for p in pids}
+	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage), (0.10, None, push)], p)
+		for p in pids}
 	# Forward castles, Donjons and towers only add: up to +1.5, by their cost and effect (see forward_value).
 	for p in pids:
 		bonus = round(FORWARD_BONUS_MAX * min(1.0, forward_raw[p] / FORWARD_BONUS_FULL), 2)
@@ -632,6 +646,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		("Army on the map", on_map_raw, lambda v: f"{v:,.0f} value", 0.35, on_map),
 		("Army sent at the enemy", sent_raw, lambda v: f"{v:,.0f} value", 0.40, sent),
 		("Damage done", dealt, lambda v: f"{v:,.0f} value", 0.15, damage),
+		("First push", first_push, lambda v: mmss(v) if v is not None else "never", 0.10, push),
 	]
 	team_info = [
 		("Tributes sent", team_raw[0], lambda v: f"{v:,.0f} resources", 0.5, team_parts[0]),
@@ -666,8 +681,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if i == 3:
 				part['note'] = "counts a quarter as much as the others"
 			ex_parts.append(part)
-		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w, range=lobby_range(raw, f, False))
-			for n, raw, f, w, sc_ in press_info]
+		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w,
+			range=lobby_range(raw, f, n == "First push")) for n, raw, f, w, sc_ in press_info]
+		pr_parts[3]['note'] = (f"first damage: {push_what[p]}; " if push_what[p] else "") + \
+			"how soon an attack first killed a villager or razed a building: 10 by 8:00, down to 1 at 30:00 or never"
 		notes = []
 		for x in st.get('buildings_destroyed_list', []):
 			notes.append(f"{x['value']:,} for {players[x['victim']]['name']}'s Town Center destroyed at {mmss(x['t'])}")
@@ -1208,6 +1225,51 @@ AGE_DELAY_BONUS = 1.0        # pressure bonus for destroying a Town Center with 
 AGE_DELAY_FULL = 4 * 60000   # ... in full when the age is delayed 4+ minutes (first click to the click again)
 RAZE_NEAR = 12               # tiles: enemy castles, Donjons and towers this close can have destroyed it
 RAZE_STRUCT_CLICKS = 5       # a nearby enemy castle counts like 5 attack clicks when sharing credit
+
+
+PUSH_FAST = 8 * 60000    # first damage by this time scores 10 ...
+PUSH_SLOW = 30 * 60000   # ... down to 1 by this time
+RAZE_USED_AFTER = 180000  # a building its owner kept using this long after the last enemy hit still stood
+RAZE_QUIET_END = 300000   # ... as did one still used in the game's last 5 minutes
+
+
+def first_damage(A, players, vest, end):
+	"""
+	({player: time of their first damage or None}, {player: what it was}): the first enemy villager they killed (the
+	villager estimate's kills, credited to the main killer) or the first enemy building they razed, whichever came
+	first. A building (something its owner trained, researched or set a gather point in) counts as razed when enemy
+	attack orders on it stopped a minute or more before the end and its owner stopped using it within 3 minutes of
+	the last hit, not in the game's last 5 minutes; credit goes to the player with the most hits on it.
+	"""
+	team = {p: players[p]['team_id'] for p in players}
+	first, what = {p: None for p in players}, {p: None for p in players}
+
+	def note(p, t, text):
+		if p in first and (first[p] is None or t < first[p]):
+			first[p], what[p] = t, text
+	for v in players:
+		for t, share, kind in vest[v].get('killed', []):
+			if kind == 'villager' and share:
+				note(max(share, key=share.get), t, f"a villager of {players[v]['name']}'s killed at {mmss(t)}")
+	owner, last_used, hits = {}, {}, defaultdict(list)
+	for a in A:
+		p = a.get('player_id')
+		if a['a'] in ('DE_QUEUE', 'RESEARCH', 'GATHER_POINT', 'DE_MULTI_GATHERPOINT') and p in players:
+			for i in a.get('object_ids') or []:
+				owner.setdefault(i, p)
+				last_used[i] = a['t']
+	for a in A:
+		p, tg = a.get('player_id'), a.get('target_id')
+		if a['a'] == 'ORDER' and tg in owner and p in players and team[p] != team[owner[tg]]:
+			hits[tg].append((a['t'], p))
+	for tg, hs in hits.items():
+		t_last = hs[-1][0]
+		used = last_used.get(tg)
+		if end - t_last < 60000 or (used is not None and (used > t_last + RAZE_USED_AFTER or end - used < RAZE_QUIET_END)):
+			continue
+		by = Counter(p for _, p in hs).most_common(1)[0][0]
+		note(by, t_last, f"a building of {players[owner[tg]]['name']}'s razed at {mmss(t_last)}")
+	return first, what
 
 
 def town_centers_destroyed(A, players, structs, pos, end):
