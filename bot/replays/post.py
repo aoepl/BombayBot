@@ -300,7 +300,8 @@ METHOD = [
 		"and in total, against the lobby's most: the better counts); **army sent at the enemy** 40% (each military unit "
 		"ordered at an enemy unit, building or base counts once a minute, at the player's average unit cost, scaled the "
 		"same way); **damage done** 15% (below); **first push** 10% (when the player's attack first killed an enemy "
-		"villager or razed a building: 10 by 8:00, 1 at 30:00 or never). Early army counts ×2 before 15:00 and ×1.5 "
+		"villager or razed a building, against their plan: Feudal aggression 10 by 9:06, 1 at 26:18; Fast Castle 10 "
+		"by 13:00, 1 at 34:06; otherwise 10 by 7:18, 1 at 29:12; never is 1). Early army counts ×2 before 15:00 and ×1.5 "
 		"before 20:00; gold counts 1.5×, stone 1.2×."),
 	("Pressure: damage done and bonuses", "**Damage done**: enemy army value killed in fights, 100 per villager killed, "
 		"enemy Town Centers destroyed (their cost; research and queued units refunded), enemy production that stalled while "
