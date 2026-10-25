@@ -605,7 +605,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			survival_note[p] = "base not seriously attacked"
 		lost_txt = ([f"lost {round(wl['early'] * 100)}% of workers to enemies before 40:00"] if wl['early'] >= WORKER_LOSS_STEP else []) \
 			+ [f"lost {round(sh * 100)}% of workers in a raid at {mmss(t)}" for t, sh in wl['raids']]
-		survival_note[p] += f"; {', '.join(lost_txt)}: -{wl['penalty']:g}"
+		survival_note[p] += f"; {', '.join(lost_txt)}: -{wl['penalty']:g}" + (" (the most it takes)" if wl['capped'] else "")
 		surv_detail.setdefault(p, {}).update(worker_penalty=wl['penalty'], workers_lost_early=wl['early'],
 			worker_raids=[[mmss(t), sh] for t, sh in wl['raids']])
 	# Who took each lost base: the enemy with the most army orders into it, a castle they built there counting
@@ -1054,7 +1054,10 @@ def worker_loss_penalty(vest_p, carts_lost, carts_queued):
 			raids.append(dict(start=t, last=t, share=x))
 	big = [(r['start'], r['share']) for r in raids if r['share'] >= WORKER_LOSS_LATE_MIN]
 	steps = int(early / WORKER_LOSS_STEP + 1e-9) + sum(int(sh / WORKER_LOSS_STEP + 1e-9) for _, sh in big)
-	return dict(early=round(early, 3), raids=[(t, round(sh, 3)) for t, sh in big], steps=steps, penalty=steps * WORKER_LOSS_PENALTY)
+	total = sum(1 / workers_at(t) for t in times)
+	return dict(early=round(early, 3), raids=[(t, round(sh, 3)) for t, sh in big], steps=steps,
+		penalty=min(WORKER_LOSS_CAP, steps * WORKER_LOSS_PENALTY), capped=steps * WORKER_LOSS_PENALTY > WORKER_LOSS_CAP,
+		count=len(times), share=round(total, 3))
 
 
 def villager_estimate(A, players, villagers, army_alive, end):
@@ -1221,6 +1224,7 @@ WORKER_LOSS_PENALTY = 0.5        # ... takes this much off
 WORKER_LOSS_LATE = 40 * 60000    # after 40:00 only raids count that ...
 WORKER_LOSS_LATE_MIN = 0.20      # ... take 20% of the workforce or more,
 WORKER_RAID_GAP = 3 * 60000      # a raid being losses within 3 minutes of each other
+WORKER_LOSS_CAP = 3.0            # the deduction stops here
 FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
 FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
 
