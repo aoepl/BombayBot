@@ -309,7 +309,9 @@ METHOD = [
 		"enemy castles. **Held** is the share of new economy buildings "
 		"kept at home after the attack began, less for Town Centers rebuilt elsewhere. **Difficulty** (0–1) is the "
 		"enemy army and castles sent into the base compared with the most-attacked base, plus 0.05 a minute "
-		"attacked by 2+ enemies at once (up to 0.3)."),
+		"attacked by 2+ enemies at once (up to 0.3). **Workers lost** to enemies (villagers, fishing ships, trade carts) "
+		"take 0.5 off for every 5% of the workforce lost before 40:00; after 40:00 only raids taking 20%+ of the "
+		"workforce within a few minutes count, 0.5 per 5% of them. Never below 1."),
 	("Team play: helping allies", "Weighted average of: **tributes sent** 50%; **army orders into allies' bases** 35% "
 		"(defending them); **flares** 15%."),
 	("Overall", "Flank: execution 27%, pressure 36%, holding position 27%, team play 10%. Pocket: 40%, 25%, 25%, 10%."),
@@ -373,7 +375,12 @@ def explain_text(name, civ, ex):
 	if sc['surv'] is None:
 		out.append(f"\n**Holding position —** not scored: {sv['note']}, so its weight goes to the other scores")
 	elif sv.get('untested'):
-		out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}, so the base scores the set 7 for a held position")
+		if sv.get('worker_penalty'):
+			out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}\n= 7 for a held position − {sv['worker_penalty']:g} "
+				f"for workers lost to enemies (0.5 per 5% of the workforce before 40:00; after it, per 5% of raids taking 20%+) "
+				f"→ **{_fmt_score(sc['surv'])}**")
+		else:
+			out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}, so the base scores the set 7 for a held position")
 	else:
 		level = 'heavy' if sv['difficulty'] >= 0.66 else 'moderate' if sv['difficulty'] >= 0.33 else 'light'
 		cleared = f", +{sv['cleared']:g} for clearing enemy castles" if sv.get('cleared') else ""
@@ -386,6 +393,8 @@ def explain_text(name, civ, ex):
 				+ f": +{sv['hold_credit']:g} (full credit from 10 minutes, for the part of the base that was lost).")
 		out.append(f"= 1 + {sv['held']:g} × (4 + 5 × {sv['difficulty']:g})" + (f" + {sv['cleared']:g}" if sv.get('cleared') else "")
 			+ (f" + {sv['hold_credit']:g}" if sv.get('hold_credit') else "")
+			+ (f" − {sv['worker_penalty']:g} for workers lost to enemies (0.5 per 5% of the workforce before 40:00; after it, per 5% of "
+				f"raids taking 20%+)" if sv.get('worker_penalty') else "")
 			+ f" → **{_fmt_score(sc['surv'])}**" + (" (capped at 10)" if sc['surv'] >= 10 else ""))
 
 	out.append(f"\n**Team play {_fmt_score(sc['team'])}**\n" + _parts_text(ex['team']))
