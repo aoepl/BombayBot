@@ -14,9 +14,9 @@ Everything is measured against Elo, so a civ is not rated well just because good
   the fight count, so one player holding two armies is judged 1 against 2) — analysis.fight_records().
 
 Pieces, on a 0..1 scale where 0.5 is average:
-- strength(civ, seat, map): how much better than Elo the civ does. Games on this exact map count most, then
-  the same map type, then the same seat anywhere, then other seats; with few games it stays near the tech
-  tree's guess (how complete the civ's best lines for the seat are).
+- strength(civ, seat, map): how much better than Elo the civ does. Only this channel's games on this exact map
+  count (the same seat fully, the other seat a little); games on other maps, even of the same type, don't. With few
+  games it stays near its starting strength (the voting sheet and the tech trees).
 - army(civ, seat, map): the unit lines the civ fields (from saved fights; the tech tree's best lines for the
   seat until there are some).
 - line_matchup(line, enemy line): a cost-for-cost estimate from unit stats with the civs' own upgrades
@@ -43,7 +43,9 @@ from . import techtree
 
 # Strength: a game counts more the closer it is to the pick (same seat, same map type, same map), and every
 # estimate starts with PRIOR_GAMES games' worth of the tech tree's guess.
-MAP_WEIGHT, CATEGORY_WEIGHT, SEAT_WEIGHT, OTHER_WEIGHT = 1.0, 0.5, 0.2, 0.1
+# Channel games count per map: only games on the same map move a civ's strength or matchups (the same seat 1, the
+# other seat OTHER_WEIGHT). Map types are covered by the voting sheet's votes instead.
+MAP_WEIGHT, CATEGORY_WEIGHT, SEAT_WEIGHT, OTHER_WEIGHT = 1.0, 0.0, 0.0, 0.1
 PRIOR_GAMES = 6
 MATCHUP_PRIOR = 4        # lost bases worth of "the armies' estimate" every matchup starts with
 LINE_FIGHT_PRIOR = 15    # fight weight (about 15 big fights) of the stat estimate a line matchup starts with
@@ -604,7 +606,8 @@ class Model:
 		each civ fields, per seat. A fight's weight grows with its size (square root of army value killed).
 		"""
 		self.line_fights = defaultdict(lambda: [0.0, 0.0])   # (line_a, line_b) -> [weighted result, weight]
-		self.civ_fights = defaultdict(lambda: [0.0, 0.0, 0])  # (civ_a, seat_a, civ_b, seat_b) -> [.., .., fights]
+		self.civ_fights = defaultdict(lambda: [0.0, 0.0, 0])  # (map, civ_a, seat_a, civ_b, seat_b) -> [.., .., fights]
+		game_map = {r.get('game_key'): _norm(r.get('map_name')) for r in self.rows}
 		self.fielded = defaultdict(lambda: defaultdict(float))  # (civ, seat) -> line -> army value
 		for f in self.fights:
 			la, lb = _lines(f.get('a_lines')), _lines(f.get('b_lines'))
@@ -621,7 +624,9 @@ class Model:
 					self.line_fights[(x, y)][1] += w * px * py
 					self.line_fights[(y, x)][0] -= w * px * py * res
 					self.line_fights[(y, x)][1] += w * px * py
-			key, rev = (f['a_civ'], f.get('a_seat'), f['b_civ'], f.get('b_seat')), (f['b_civ'], f.get('b_seat'), f['a_civ'], f.get('a_seat'))
+			mp = game_map.get(f.get('game_key'))  # civ pair fights count per map (unit line results stay general)
+			key = (mp, f['a_civ'], f.get('a_seat'), f['b_civ'], f.get('b_seat'))
+			rev = (mp, f['b_civ'], f.get('b_seat'), f['a_civ'], f.get('a_seat'))
 			for k, sign in ((key, 1), (rev, -1)):
 				self.civ_fights[k][0] += sign * w * res
 				self.civ_fights[k][1] += w
@@ -635,14 +640,13 @@ class Model:
 	# ----- strength
 	@staticmethod
 	def _closeness(r, seat, map_name, category):
-		""" How much a game says about this civ, seat and map: same map 1, same map type 0.5, same seat elsewhere 0.2, other seat 0.1. """
+		""" How much a game says about this civ, seat and map: only games on the same map count (same seat 1, other
+		seat 0.1); games on other maps, even of the same map type, count 0. """
+		if _norm(r.get('map_name')) != _norm(map_name):
+			return 0.0
 		if seat and r.get('seat') != seat:
 			return OTHER_WEIGHT
-		if _norm(r.get('map_name')) == _norm(map_name):
-			return MAP_WEIGHT
-		if category and r.get('map_category') == category:
-			return CATEGORY_WEIGHT
-		return SEAT_WEIGHT
+		return MAP_WEIGHT
 
 	def _seat_fit(self, civ, seat):
 		""" How well the civ's best lines suit the seat: line quality times how much the seat leans on that kind. """
@@ -880,18 +884,15 @@ class Model:
 		if key in self._cache:
 			return self._cache[key]
 		est, note = self.army_matchup(civ, seat, enemy_civ, enemy_seat)
-		total, weight, n_fights = self.civ_fights.get((civ, seat, enemy_civ, enemy_seat), (0.0, 0.0, 0))
+		total, weight, n_fights = self.civ_fights.get((_norm(map_name), civ, seat, enemy_civ, enemy_seat), (0.0, 0.0, 0))
 		if weight:
 			est += total / (weight + CIV_FIGHT_PRIOR)
 		score = w_sum = 0.0
 		bases = 0
 		for m in self.matchups:
-			if _norm(m.get('map_name')) == _norm(map_name):
-				w = 1.0
-			elif category and m.get('map_category') == category:
-				w = 0.5
-			else:
-				w = 0.2
+			if _norm(m.get('map_name')) != _norm(map_name):
+				continue  # lost bases count per map, like games
+			w = 1.0
 			won_it = (m['winner_civ'], m.get('winner_seat'), m['loser_civ'], m.get('loser_seat')) == (civ, seat, enemy_civ, enemy_seat)
 			lost_it = (m['winner_civ'], m.get('winner_seat'), m['loser_civ'], m.get('loser_seat')) == (enemy_civ, enemy_seat, civ, seat)
 			if not (won_it or lost_it):
@@ -967,8 +968,8 @@ class Model:
 		matchup_part = vs / vs_weight if vs_weight else 0.0
 		value = strength + MATCHUP_WEIGHT * matchup_part + ELO_FIT_WEIGHT * (fit - 0.5) + PLAYER_FIT_WEIGHT * (pfit - 0.5)
 		army = self.army(civ, slot.seat)
-		reasons = [f"{strength:.0%} vs Elo as {slot.seat or 'player'} ({n_map} game{'s' if n_map != 1 else ''} on this map, "
-			f"{n_all} in all)", "army " + ", ".join(f"{k} {v:.0%}" for k, v in sorted(army.items(), key=lambda kv: -kv[1]))]
+		reasons = [f"{strength:.0%} vs Elo as {slot.seat or 'player'} ({n_map} game{'s' if n_map != 1 else ''} on this map; "
+			"only games on this map count)", "army " + ", ".join(f"{k} {v:.0%}" for k, v in sorted(army.items(), key=lambda kv: -kv[1]))]
 		note = vote_note(self, civ, slot.seat, category)
 		if note:
 			reasons.insert(1, note)
@@ -1317,13 +1318,13 @@ def pick_reason(model: Model, res, team, slot, seat_as=None):
 	lines = main_lines(model, s.civ, s.seat)
 	units = " and ".join(lines[:2])
 	parts = []
-	if n_all >= GAMES_TO_TRUST:
+	if n_map >= GAMES_TO_TRUST:
 		diff = round(100 * (strength - 0.5))
-		parts.append(f"{units}; {'even' if diff == 0 else f'{diff:+d}%'} against Elo in {n_all} games here" +
-			(f" ({n_map} on this map)" if n_map else ""))
+		parts.append(f"{units}; {'even' if diff == 0 else f'{diff:+d}%'} against Elo in {n_map} games on this map here")
 	else:
 		parts.append(f"{units} {'suit a ' + seat if seat else 'are strong'} by its tech tree"
-			+ (f" (only {n_all} game{'s' if n_all != 1 else ''} with it here)" if n_all else " (no games with it here yet)"))
+			+ (f" (only {n_map} game{'s' if n_map != 1 else ''} with it on this map here)" if n_map
+			else " (no games with it on this map here yet)"))
 	note = vote_note(model, s.civ, s.seat, res.get('category'))
 	if note:
 		parts.append(note)

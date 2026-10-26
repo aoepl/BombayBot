@@ -283,10 +283,11 @@ def _draft_embeds(match, res, model, games, author):
 		f"{draft.PLAYERS_FULL} players have voted, the rest going to Claude's vote) and the bot's **tech-tree** guess "
 		f"{draft.TECH_SHARE:.0%}" + (f" ({map_rules})" if map_rules else "") + ". "
 		f"Each vote point is worth {draft.PER_VOTE:.0%} against Elo; players' votes count from their own average, as "
-		"players vote higher overall. Games analysed in this channel then move the rating: the more games, the more "
-		"they count.")[:1024])
-	details.set_footer(text=f"From {games} analysed game{'s' if games != 1 else ''} in this channel, the voting sheet "
-		"and the tech trees; with few games picks lean on the votes.")
+		"players vote higher overall. Games analysed in this channel on **this map** then move the rating (games on "
+		"other maps, even of the same type, don't count): the more games, the more they count. Matchups use this map's "
+		"games too.")[:1024])
+	details.set_footer(text=f"From the voting sheet, the tech trees and this channel's analysed games on this map "
+		f"({games} analysed game{'s' if games != 1 else ''} in all); with few games on the map picks lean on the votes.")
 	return short, details
 
 
