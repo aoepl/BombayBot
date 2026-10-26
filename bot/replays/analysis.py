@@ -386,6 +386,22 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['forward_effect'] = round(sum(x['effect'] * x['weight'] for x in mine) / sum(x['weight'] for x in mine), 2) if mine else None
 		stats[p]['forward_structures'] = [dict(kind=x['kind'], t=x['t0'], base=x['base'], built=x['known'], effect=x['effect'],
 			held=x['hold'], presence=x['presence'], gain=x['gain'], push=x['push'], pushes=x['pushes'], trade=x['trade']) for x in mine]
+	# Tower rushes click Castle Age later on purpose: their click is also scored against tower-rush timings, the
+	# better of the two counting. Forward towers and castles count as a first military unit when they came first.
+	for p in pids:
+		ct = castle_click[p] if castle_click[p] is not None else end
+		mine = [x for x in structs if x['player'] == p and x['forward']]
+		early_towers = [x for x in mine if 'Tower' in (x['kind'] or '') and x['t0'] < ct]
+		if len(early_towers) >= TOWER_RUSH_MIN and castle_click[p] is not None:
+			best, worst = TOWER_RUSH_CASTLE
+			score = 1 + 9 * max(0.0, min(1.0, (worst - castle_click[p]) / (worst - best)))
+			stats[p]['tower_rush'] = dict(towers=len(early_towers), castle_score=round(score, 1))
+			exec_parts[0][p] = max(exec_parts[0][p], score)
+		first_forward = min((x['t0'] for x in mine), default=None)
+		if first_forward is not None and (first_mil[p] is None or first_forward < first_mil[p]):
+			first_mil[p] = first_forward
+			stats[p]['first_military_forward'] = first_forward
+	exec_parts[3] = _minmax(first_mil, invert=True)
 	for p in pids:
 		stats[p]['army'] = army[p]
 	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end)
@@ -459,7 +475,11 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p in pids:
 		stats[p]['buildings_destroyed'] = round(razed[p])
 		stats[p]['buildings_destroyed_list'] = razings[p]
-	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] + disrupted[p] + razed[p] for p in pids}
+	# ... and the defence forward towers and castles forced on enemies: walls, gates, towers and repairs, with villager time.
+	forced, defended = defence_forced(A, players, structs, villagers, end)
+	for p in pids:
+		stats[p]['defence_forced'], stats[p]['defence_spent'] = forced[p], defended[p]
+	dealt = {p: army[p]['value_killed_in_fights'] + stats[p]['_vill_kill_value'] + disrupted[p] + razed[p] + forced[p]['value'] for p in pids}
 	damage = _minmax(dealt)
 	# Army on the map only matters if it does damage: scale it by damage done per army value, with full
 	# credit at the lobby median or better and nothing for an army that never hurt anyone.
@@ -593,6 +613,11 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			f"main base lost{held_txt} ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
 		stats[p]['base_lost'] = held < 0.4
+	for p in pids:  # what enemy forward towers and castles made this player spend on defence
+		dsp = stats[p].get('defence_spent') or {}
+		if dsp.get('resources') or dsp.get('villager_minutes'):
+			survival_note[p] += (f"; walled, built towers and repaired against enemy forward towers/castles: {dsp['resources']:,} "
+				f"resources, {dsp['villager_minutes']:g} villager-minutes")
 	# Workers lost to enemies take holding position too: a base the enemy "never got into" still lost those workers.
 	carts_lost, carts_queued = trade_cart_kills(A, players, end)
 	for p in pids:
@@ -693,8 +718,12 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 				age_notes = [n.split(': ', 1)[1] for n in st.get('timing_notes', []) if n.startswith(('Castle Age', 'Imperial Age')[i])]
 				if age_notes:
 					part['note'] = (part.get('note') + '; ' if part.get('note') else '') + age_notes[0]
+			if i == 0 and st.get('tower_rush') and exec_parts[0][p] == st['tower_rush']['castle_score'] > _minmax(castle_click, invert=True)[p]:
+				part['note'] = (f"scored against tower-rush timings instead ({st['tower_rush']['towers']} forward towers first; a tower "
+					f"rush clicks Castle Age later on purpose; full score by {mmss(TOWER_RUSH_CASTLE[0])})")
 			if i == 3:
-				part['note'] = "counts a quarter as much as the others"
+				part['note'] = "counts a quarter as much as the others" + (
+					f"; the forward tower or castle at {mmss(st['first_military_forward'])} counts as the first" if st.get('first_military_forward') else "")
 			ex_parts.append(part)
 		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w,
 			range=lobby_range(raw, f, n == "First push")) for n, raw, f, w, sc_ in press_info]
@@ -705,11 +734,17 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			notes.append(f"{x['value']:,} for {players[x['victim']]['name']}'s Town Center destroyed at {mmss(x['t'])}")
 		if notes:
 			pr_parts[2]['note'] = "includes " + "; ".join(notes)
+		fd = st.get('defence_forced') or {}
+		if fd.get('value'):
+			who = ' and '.join(players[v]['name'] for v in fd['victims'] if v in players)
+			text = (f"{fd['value']:,} value of defence forced on {who} by forward towers/castles ({fd['resources']:,} resources of "
+				f"walls, gates and towers, {fd['villager_minutes']:g} villager-minutes building and repairing)")
+			pr_parts[2]['note'] = (pr_parts[2]['note'] + "; " + text) if pr_parts[2].get('note') else "includes " + text
 		if st.get('macro_disrupted'):
 			raided = sorted({players[x['victim']]['name'] for x in st['macro_disruptions']})
 			text = (f"{st['macro_disrupted']:,} value of {' and '.join(raided)}'s production stalled while "
 				f"{players[p]['name']}'s army was in their base")
-			pr_parts[2]['note'] = (pr_parts[2]['note'] + "; " + text) if notes else "includes " + text
+			pr_parts[2]['note'] = (pr_parts[2]['note'] + "; " + text) if pr_parts[2].get('note') else "includes " + text
 		why = (f"its damage was {round(army[p]['damage_for_size'] * 100)}% of the lobby median for its size and "
 			f"{round(army[p]['damage_in_total'] * 100)}% of the lobby's most in total; the better counts")
 		if army[p]['damage_efficiency'] < 1:
@@ -1217,6 +1252,13 @@ FOCUS_FULL, FOCUS_BONUS_MAX = 0.2, 0.75
 MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that count as fighting them
 HOLD_TIME_FULL = 10.0     # minutes of holding under pressure that earn the full holding-time credit ...
 HOLD_TIME_MAX = 3.0       # ... worth up to this much, for the part of the base that was lost in the end
+TOWER_RUSH_MIN = 2                 # forward towers before the Castle Age click: a tower rush
+TOWER_RUSH_CASTLE = (17.9 * 60000, 28.1 * 60000)  # tower rushes' Castle Age clicks, earliest / latest tenth (1600+, 3 months)
+DEFENCE_RADIUS = 12                # tiles from an enemy forward tower or castle ...
+DEFENCE_WINDOW = 10 * 60000        # ... and minutes after it went up, for walls, gates, towers and repairs it forced
+DEFENCE_VILL_CAP = 90000           # one job's villager time counts until the villager's next order, at most 90 s
+VILLAGER_MINUTE = 25               # resources a villager-minute is worth
+DEFENCE_KINDS = ('Wall', 'Gate', 'Tower', 'Palisade')
 HOLD_UNTESTED = 7.0       # holding position for a base never seriously attacked: the enemy was kept out
 # Workers (villagers, fishing ships, trade carts) lost to enemies cost holding position:
 WORKER_LOSS_STEP = 0.05          # every 5% of the workforce lost ...
@@ -1238,6 +1280,50 @@ DISRUPT_MAX = 10 * 60000     # an attack counts its first 10 minutes at most
 def _mil_times(A, pid):
 	return [a['t'] for a in A if a['a'] == 'DE_QUEUE' and a.get('player_id') == pid
 		and _name('objects', a['unit_id']) not in NOT_ARMY and _name('objects', a['unit_id']) not in WORKER_TRAIN]
+
+
+def defence_forced(A, players, structs, villagers, end):
+	""" What an enemy's forward towers and castles made each player put up: walls, gates and towers within DEFENCE_RADIUS
+	tiles of one (repairs anywhere in a base with one) up to DEFENCE_WINDOW after it went up, by their cost, plus the
+	villager time (to each villager's next order, at most DEFENCE_VILL_CAP) at VILLAGER_MINUTE resources a minute.
+	-> ({attacker: dict(value, resources, villager_minutes, jobs, victims)}, {defender: dict(resources, villager_minutes)}) """
+	vill = set(villagers)
+	following, seen = {}, {}
+	for k, a in enumerate(A):
+		for o in a.get('object_ids') or []:
+			if o in seen:
+				following[(seen[o], o)] = a['t']
+			seen[o] = k
+	forward = [x for x in structs if x['forward'] and x.get('x') is not None]
+	out = {p: dict(value=0.0, resources=0.0, villager_minutes=0.0, jobs=0, victims=Counter()) for p in players}
+	spent = {p: dict(resources=0.0, villager_minutes=0.0) for p in players}
+	for k, a in enumerate(A):
+		d = a.get('player_id')
+		if d not in players or a['a'] not in ('WALL', 'BUILD', 'REPAIR') or a['t'] > end:
+			continue
+		if a['a'] != 'REPAIR' and not any(w in (_name('objects', a['building_id']) or '') for w in DEFENCE_KINDS):
+			continue
+		cands = [x for x in forward if x['base'] == d and x['player'] != d and x['t0'] <= a['t'] <= x['t0'] + DEFENCE_WINDOW
+			and (a['a'] == 'REPAIR' or math.dist((a['x'], a['y']), (x['x'], x['y'])) <= DEFENCE_RADIUS)]
+		if not cands:
+			continue
+		by = min(cands, key=lambda x: a['t'] - x['t0'])['player']
+		if a['a'] == 'WALL':
+			length = max(abs((a.get('x_end') or a['x']) - a['x']), abs((a.get('y_end') or a['y']) - a['y'])) + 1
+			cost = length * unit_value(a['building_id'])
+		else:
+			cost = unit_value(a['building_id']) if a['a'] == 'BUILD' else 0.0
+		minutes = sum(min(DEFENCE_VILL_CAP, following.get((k, o), a['t'] + DEFENCE_VILL_CAP) - a['t'])
+			for o in a.get('object_ids') or [] if o in vill) / 60000
+		o_ = out[by]
+		o_['resources'] += cost; o_['villager_minutes'] += minutes; o_['jobs'] += 1; o_['victims'][d] += 1
+		spent[d]['resources'] += cost; spent[d]['villager_minutes'] += minutes
+	for o_ in out.values():
+		o_['value'] = round(o_['resources'] + o_['villager_minutes'] * VILLAGER_MINUTE)
+		o_['resources'], o_['villager_minutes'], o_['victims'] = round(o_['resources']), round(o_['villager_minutes'], 1), dict(o_['victims'])
+	for x in spent.values():
+		x['resources'], x['villager_minutes'] = round(x['resources']), round(x['villager_minutes'], 1)
+	return out, spent
 
 
 def macro_disruption(A, players, vest, timeline_in, into_by, end):
