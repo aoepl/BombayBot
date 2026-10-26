@@ -1,0 +1,2010 @@
+{
+ "_about": "Snapshot of the players' average votes on the civ voting sheet (Claude not counted), used when the sheet can't be fetched. {map type: {civ: {seat: [average, votes]}}}; Nomad seat 'any'.",
+ "votes": {
+  "Open": {
+   "Armenians": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     5.33,
+     3
+    ]
+   },
+   "Aztecs": {
+    "Flank": [
+     8.0,
+     3
+    ],
+    "Pocket": [
+     2.67,
+     3
+    ]
+   },
+   "Bengalis": {
+    "Flank": [
+     6.67,
+     3
+    ],
+    "Pocket": [
+     5.33,
+     3
+    ]
+   },
+   "Berbers": {
+    "Flank": [
+     5.0,
+     2
+    ],
+    "Pocket": [
+     7.0,
+     2
+    ]
+   },
+   "Bohemians": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     3.0,
+     2
+    ]
+   },
+   "Britons": {
+    "Flank": [
+     10.0,
+     2
+    ],
+    "Pocket": [
+     4.5,
+     2
+    ]
+   },
+   "Bulgarians": {
+    "Flank": [
+     4.0,
+     2
+    ],
+    "Pocket": [
+     7.0,
+     2
+    ]
+   },
+   "Burgundians": {
+    "Flank": [
+     4.5,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   },
+   "Burmese": {
+    "Flank": [
+     5.0,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Byzantines": {
+    "Flank": [
+     7.0,
+     2
+    ],
+    "Pocket": [
+     6.5,
+     2
+    ]
+   },
+   "Celts": {
+    "Flank": [
+     5.5,
+     2
+    ],
+    "Pocket": [
+     5.5,
+     2
+    ]
+   },
+   "Chinese": {
+    "Flank": [
+     8.5,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Cumans": {
+    "Flank": [
+     6.0,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Danes": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     6.0,
+     1
+    ]
+   },
+   "Dravidians": {
+    "Flank": [
+     9.0,
+     1
+    ],
+    "Pocket": [
+     3.0,
+     1
+    ]
+   },
+   "Ethiopians": {
+    "Flank": [
+     10.0,
+     1
+    ],
+    "Pocket": [
+     5.0,
+     1
+    ]
+   },
+   "Franks": {
+    "Flank": [
+     4.0,
+     1
+    ],
+    "Pocket": [
+     9.0,
+     1
+    ]
+   },
+   "Georgians": {
+    "Flank": [
+     5.0,
+     1
+    ],
+    "Pocket": [
+     9.0,
+     1
+    ]
+   },
+   "Goths": {
+    "Flank": [
+     5.0,
+     1
+    ],
+    "Pocket": [
+     5.0,
+     1
+    ]
+   },
+   "Gurjaras": {
+    "Flank": [
+     5.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Hindustanis": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     9.0,
+     1
+    ]
+   },
+   "Huns": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     9.0,
+     1
+    ]
+   },
+   "Incas": {
+    "Flank": [
+     8.0,
+     1
+    ],
+    "Pocket": [
+     1.0,
+     1
+    ]
+   },
+   "Italians": {
+    "Flank": [
+     9.0,
+     1
+    ],
+    "Pocket": [
+     7.0,
+     1
+    ]
+   },
+   "Japanese": {
+    "Flank": [
+     8.0,
+     1
+    ],
+    "Pocket": [
+     5.0,
+     1
+    ]
+   },
+   "Jurchens": {
+    "Flank": [
+     5.0,
+     1
+    ],
+    "Pocket": [
+     9.0,
+     1
+    ]
+   },
+   "Khitans": {
+    "Flank": [
+     4.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Khmer": {
+    "Flank": [
+     7.0,
+     1
+    ],
+    "Pocket": [
+     10.0,
+     1
+    ]
+   },
+   "Koreans": {
+    "Flank": [
+     9.0,
+     1
+    ],
+    "Pocket": [
+     4.0,
+     1
+    ]
+   },
+   "Lithuanians": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     9.0,
+     1
+    ]
+   },
+   "Magyars": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     10.0,
+     1
+    ]
+   },
+   "Malay": {
+    "Flank": [
+     8.0,
+     1
+    ],
+    "Pocket": [
+     5.0,
+     1
+    ]
+   },
+   "Malians": {
+    "Flank": [
+     7.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Mapuche": {
+    "Flank": [
+     5.0,
+     1
+    ],
+    "Pocket": [
+     3.0,
+     1
+    ]
+   },
+   "Mayans": {
+    "Flank": [
+     10.0,
+     1
+    ],
+    "Pocket": [
+     2.0,
+     1
+    ]
+   },
+   "Mongols": {
+    "Flank": [
+     9.0,
+     1
+    ],
+    "Pocket": [
+     7.0,
+     1
+    ]
+   },
+   "Muisca": {
+    "Flank": [
+     7.0,
+     1
+    ],
+    "Pocket": [
+     1.0,
+     1
+    ]
+   },
+   "Persians": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     10.0,
+     1
+    ]
+   },
+   "Poles": {
+    "Flank": [
+     5.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Portuguese": {
+    "Flank": [
+     9.0,
+     1
+    ],
+    "Pocket": [
+     7.0,
+     1
+    ]
+   },
+   "Romans": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Saracens": {
+    "Flank": [
+     8.0,
+     1
+    ],
+    "Pocket": [
+     7.0,
+     1
+    ]
+   },
+   "Shu": {
+    "Flank": [
+     9.0,
+     1
+    ],
+    "Pocket": [
+     3.0,
+     1
+    ]
+   },
+   "Sicilians": {
+    "Flank": [
+     5.0,
+     1
+    ],
+    "Pocket": [
+     7.0,
+     1
+    ]
+   },
+   "Slavs": {
+    "Flank": [
+     4.0,
+     1
+    ],
+    "Pocket": [
+     9.0,
+     1
+    ]
+   },
+   "Spanish": {
+    "Flank": [
+     2.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Tatars": {
+    "Flank": [
+     7.0,
+     1
+    ],
+    "Pocket": [
+     7.0,
+     1
+    ]
+   },
+   "Teutons": {
+    "Flank": [
+     5.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Tupi": {
+    "Flank": [
+     9.0,
+     1
+    ],
+    "Pocket": [
+     1.0,
+     1
+    ]
+   },
+   "Turks": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Vietnamese": {
+    "Flank": [
+     9.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Vikings": {
+    "Flank": [
+     8.0,
+     1
+    ],
+    "Pocket": [
+     4.0,
+     1
+    ]
+   },
+   "Wei": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     8.0,
+     1
+    ]
+   },
+   "Wu": {
+    "Flank": [
+     8.0,
+     1
+    ],
+    "Pocket": [
+     6.0,
+     1
+    ]
+   }
+  },
+  "Closed": {
+   "Armenians": {
+    "Flank": [
+     7.67,
+     3
+    ],
+    "Pocket": [
+     5.0,
+     3
+    ]
+   },
+   "Aztecs": {
+    "Flank": [
+     8.33,
+     3
+    ],
+    "Pocket": [
+     5.0,
+     3
+    ]
+   },
+   "Bengalis": {
+    "Flank": [
+     8.67,
+     3
+    ],
+    "Pocket": [
+     9.67,
+     3
+    ]
+   },
+   "Berbers": {
+    "Flank": [
+     7.33,
+     3
+    ],
+    "Pocket": [
+     9.0,
+     3
+    ]
+   },
+   "Bohemians": {
+    "Flank": [
+     10.0,
+     3
+    ],
+    "Pocket": [
+     9.0,
+     3
+    ]
+   },
+   "Britons": {
+    "Flank": [
+     9.67,
+     3
+    ],
+    "Pocket": [
+     7.33,
+     3
+    ]
+   },
+   "Bulgarians": {
+    "Flank": [
+     6.33,
+     3
+    ],
+    "Pocket": [
+     8.0,
+     3
+    ]
+   },
+   "Burgundians": {
+    "Flank": [
+     8.0,
+     3
+    ],
+    "Pocket": [
+     8.33,
+     3
+    ]
+   },
+   "Burmese": {
+    "Flank": [
+     8.67,
+     3
+    ],
+    "Pocket": [
+     8.67,
+     3
+    ]
+   },
+   "Byzantines": {
+    "Flank": [
+     7.33,
+     3
+    ],
+    "Pocket": [
+     6.33,
+     3
+    ]
+   },
+   "Celts": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     10.0,
+     3
+    ]
+   },
+   "Chinese": {
+    "Flank": [
+     7.33,
+     3
+    ],
+    "Pocket": [
+     7.33,
+     3
+    ]
+   },
+   "Cumans": {
+    "Flank": [
+     5.0,
+     3
+    ],
+    "Pocket": [
+     9.0,
+     3
+    ]
+   },
+   "Danes": {
+    "Flank": [
+     5.0,
+     3
+    ],
+    "Pocket": [
+     9.33,
+     3
+    ]
+   },
+   "Dravidians": {
+    "Flank": [
+     8.33,
+     3
+    ],
+    "Pocket": [
+     9.0,
+     3
+    ]
+   },
+   "Ethiopians": {
+    "Flank": [
+     9.33,
+     3
+    ],
+    "Pocket": [
+     8.33,
+     3
+    ]
+   },
+   "Franks": {
+    "Flank": [
+     6.67,
+     3
+    ],
+    "Pocket": [
+     8.67,
+     3
+    ]
+   },
+   "Georgians": {
+    "Flank": [
+     7.67,
+     3
+    ],
+    "Pocket": [
+     10.0,
+     3
+    ]
+   },
+   "Goths": {
+    "Flank": [
+     5.67,
+     3
+    ],
+    "Pocket": [
+     7.33,
+     3
+    ]
+   },
+   "Gurjaras": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     8.0,
+     3
+    ]
+   },
+   "Hindustanis": {
+    "Flank": [
+     8.67,
+     3
+    ],
+    "Pocket": [
+     9.33,
+     3
+    ]
+   },
+   "Huns": {
+    "Flank": [
+     5.67,
+     3
+    ],
+    "Pocket": [
+     6.33,
+     3
+    ]
+   },
+   "Incas": {
+    "Flank": [
+     6.67,
+     3
+    ],
+    "Pocket": [
+     4.67,
+     3
+    ]
+   },
+   "Italians": {
+    "Flank": [
+     9.0,
+     3
+    ],
+    "Pocket": [
+     7.67,
+     3
+    ]
+   },
+   "Japanese": {
+    "Flank": [
+     8.0,
+     3
+    ],
+    "Pocket": [
+     9.33,
+     3
+    ]
+   },
+   "Jurchens": {
+    "Flank": [
+     7.67,
+     3
+    ],
+    "Pocket": [
+     9.67,
+     3
+    ]
+   },
+   "Khitans": {
+    "Flank": [
+     5.67,
+     3
+    ],
+    "Pocket": [
+     6.0,
+     3
+    ]
+   },
+   "Khmer": {
+    "Flank": [
+     7.67,
+     3
+    ],
+    "Pocket": [
+     9.33,
+     3
+    ]
+   },
+   "Koreans": {
+    "Flank": [
+     9.33,
+     3
+    ],
+    "Pocket": [
+     8.67,
+     3
+    ]
+   },
+   "Lithuanians": {
+    "Flank": [
+     8.0,
+     3
+    ],
+    "Pocket": [
+     9.0,
+     3
+    ]
+   },
+   "Magyars": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     9.0,
+     3
+    ]
+   },
+   "Malay": {
+    "Flank": [
+     9.33,
+     3
+    ],
+    "Pocket": [
+     7.0,
+     3
+    ]
+   },
+   "Malians": {
+    "Flank": [
+     7.33,
+     3
+    ],
+    "Pocket": [
+     7.33,
+     3
+    ]
+   },
+   "Mapuche": {
+    "Flank": [
+     5.33,
+     3
+    ],
+    "Pocket": [
+     3.33,
+     3
+    ]
+   },
+   "Mayans": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     4.33,
+     3
+    ]
+   },
+   "Mongols": {
+    "Flank": [
+     7.33,
+     3
+    ],
+    "Pocket": [
+     10.0,
+     3
+    ]
+   },
+   "Muisca": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     3.67,
+     3
+    ]
+   },
+   "Persians": {
+    "Flank": [
+     6.67,
+     3
+    ],
+    "Pocket": [
+     9.33,
+     3
+    ]
+   },
+   "Poles": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     6.67,
+     3
+    ]
+   },
+   "Portuguese": {
+    "Flank": [
+     7.67,
+     3
+    ],
+    "Pocket": [
+     7.0,
+     3
+    ]
+   },
+   "Romans": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     7.0,
+     3
+    ]
+   },
+   "Saracens": {
+    "Flank": [
+     7.67,
+     3
+    ],
+    "Pocket": [
+     10.0,
+     3
+    ]
+   },
+   "Saxons": {
+    "Flank": [
+     7.0,
+     2
+    ],
+    "Pocket": [
+     6.0,
+     2
+    ]
+   },
+   "Shu": {
+    "Flank": [
+     8.33,
+     3
+    ],
+    "Pocket": [
+     5.33,
+     3
+    ]
+   },
+   "Sicilians": {
+    "Flank": [
+     5.33,
+     3
+    ],
+    "Pocket": [
+     8.33,
+     3
+    ]
+   },
+   "Slavs": {
+    "Flank": [
+     5.33,
+     3
+    ],
+    "Pocket": [
+     9.0,
+     3
+    ]
+   },
+   "Spanish": {
+    "Flank": [
+     9.33,
+     3
+    ],
+    "Pocket": [
+     9.33,
+     3
+    ]
+   },
+   "Tatars": {
+    "Flank": [
+     5.33,
+     3
+    ],
+    "Pocket": [
+     6.0,
+     3
+    ]
+   },
+   "Teutons": {
+    "Flank": [
+     8.33,
+     3
+    ],
+    "Pocket": [
+     10.0,
+     3
+    ]
+   },
+   "Tupi": {
+    "Flank": [
+     8.0,
+     3
+    ],
+    "Pocket": [
+     5.67,
+     3
+    ]
+   },
+   "Turks": {
+    "Flank": [
+     9.33,
+     3
+    ],
+    "Pocket": [
+     8.0,
+     3
+    ]
+   },
+   "Varangians": {
+    "Flank": [
+     5.5,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Vietnamese": {
+    "Flank": [
+     9.0,
+     3
+    ],
+    "Pocket": [
+     8.67,
+     3
+    ]
+   },
+   "Vikings": {
+    "Flank": [
+     6.67,
+     3
+    ],
+    "Pocket": [
+     5.0,
+     3
+    ]
+   },
+   "Wei": {
+    "Flank": [
+     5.33,
+     3
+    ],
+    "Pocket": [
+     6.0,
+     3
+    ]
+   },
+   "Wu": {
+    "Flank": [
+     7.0,
+     3
+    ],
+    "Pocket": [
+     6.0,
+     3
+    ]
+   }
+  },
+  "Hybrid": {
+   "Armenians": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     5.5,
+     2
+    ]
+   },
+   "Aztecs": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     3.0,
+     2
+    ]
+   },
+   "Bengalis": {
+    "Flank": [
+     9.0,
+     2
+    ],
+    "Pocket": [
+     5.5,
+     2
+    ]
+   },
+   "Berbers": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     8.5,
+     2
+    ]
+   },
+   "Bohemians": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     3.5,
+     2
+    ]
+   },
+   "Britons": {
+    "Flank": [
+     9.5,
+     2
+    ],
+    "Pocket": [
+     5.0,
+     2
+    ]
+   },
+   "Bulgarians": {
+    "Flank": [
+     4.5,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Burgundians": {
+    "Flank": [
+     5.5,
+     2
+    ],
+    "Pocket": [
+     9.0,
+     2
+    ]
+   },
+   "Burmese": {
+    "Flank": [
+     6.0,
+     2
+    ],
+    "Pocket": [
+     8.5,
+     2
+    ]
+   },
+   "Byzantines": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     7.0,
+     2
+    ]
+   },
+   "Celts": {
+    "Flank": [
+     7.0,
+     2
+    ],
+    "Pocket": [
+     6.0,
+     2
+    ]
+   },
+   "Chinese": {
+    "Flank": [
+     8.0,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   },
+   "Cumans": {
+    "Flank": [
+     6.5,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Danes": {
+    "Flank": [
+     6.0,
+     1
+    ],
+    "Pocket": [
+     7.0,
+     1
+    ]
+   },
+   "Dravidians": {
+    "Flank": [
+     9.5,
+     2
+    ],
+    "Pocket": [
+     4.0,
+     2
+    ]
+   },
+   "Ethiopians": {
+    "Flank": [
+     9.0,
+     2
+    ],
+    "Pocket": [
+     4.5,
+     2
+    ]
+   },
+   "Franks": {
+    "Flank": [
+     4.5,
+     2
+    ],
+    "Pocket": [
+     8.5,
+     2
+    ]
+   },
+   "Georgians": {
+    "Flank": [
+     7.0,
+     2
+    ],
+    "Pocket": [
+     9.5,
+     2
+    ]
+   },
+   "Goths": {
+    "Flank": [
+     5.5,
+     2
+    ],
+    "Pocket": [
+     5.5,
+     2
+    ]
+   },
+   "Gurjaras": {
+    "Flank": [
+     5.5,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   },
+   "Hindustanis": {
+    "Flank": [
+     6.5,
+     2
+    ],
+    "Pocket": [
+     9.5,
+     2
+    ]
+   },
+   "Huns": {
+    "Flank": [
+     6.5,
+     2
+    ],
+    "Pocket": [
+     9.5,
+     2
+    ]
+   },
+   "Incas": {
+    "Flank": [
+     8.0,
+     2
+    ],
+    "Pocket": [
+     2.5,
+     2
+    ]
+   },
+   "Italians": {
+    "Flank": [
+     10.0,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Japanese": {
+    "Flank": [
+     10.0,
+     2
+    ],
+    "Pocket": [
+     6.5,
+     2
+    ]
+   },
+   "Jurchens": {
+    "Flank": [
+     6.5,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   },
+   "Khitans": {
+    "Flank": [
+     6.5,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Khmer": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     9.0,
+     2
+    ]
+   },
+   "Koreans": {
+    "Flank": [
+     9.0,
+     2
+    ],
+    "Pocket": [
+     4.5,
+     2
+    ]
+   },
+   "Lithuanians": {
+    "Flank": [
+     8.5,
+     2
+    ],
+    "Pocket": [
+     10.0,
+     2
+    ]
+   },
+   "Magyars": {
+    "Flank": [
+     6.5,
+     2
+    ],
+    "Pocket": [
+     9.0,
+     2
+    ]
+   },
+   "Malay": {
+    "Flank": [
+     9.5,
+     2
+    ],
+    "Pocket": [
+     7.0,
+     2
+    ]
+   },
+   "Malians": {
+    "Flank": [
+     8.0,
+     2
+    ],
+    "Pocket": [
+     9.0,
+     2
+    ]
+   },
+   "Mapuche": {
+    "Flank": [
+     6.5,
+     2
+    ],
+    "Pocket": [
+     5.5,
+     2
+    ]
+   },
+   "Mayans": {
+    "Flank": [
+     9.5,
+     2
+    ],
+    "Pocket": [
+     4.5,
+     2
+    ]
+   },
+   "Mongols": {
+    "Flank": [
+     8.0,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   },
+   "Muisca": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     2.5,
+     2
+    ]
+   },
+   "Persians": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     10.0,
+     2
+    ]
+   },
+   "Poles": {
+    "Flank": [
+     6.0,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Portuguese": {
+    "Flank": [
+     9.5,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Romans": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     9.0,
+     2
+    ]
+   },
+   "Saracens": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   },
+   "Saxons": {
+    "Flank": [
+     10.0,
+     1
+    ],
+    "Pocket": [
+     6.0,
+     1
+    ]
+   },
+   "Shu": {
+    "Flank": [
+     9.5,
+     2
+    ],
+    "Pocket": [
+     4.0,
+     2
+    ]
+   },
+   "Sicilians": {
+    "Flank": [
+     5.5,
+     2
+    ],
+    "Pocket": [
+     7.0,
+     2
+    ]
+   },
+   "Slavs": {
+    "Flank": [
+     5.0,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   },
+   "Spanish": {
+    "Flank": [
+     3.5,
+     2
+    ],
+    "Pocket": [
+     8.5,
+     2
+    ]
+   },
+   "Tatars": {
+    "Flank": [
+     7.5,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   },
+   "Teutons": {
+    "Flank": [
+     4.0,
+     2
+    ],
+    "Pocket": [
+     7.0,
+     2
+    ]
+   },
+   "Tupi": {
+    "Flank": [
+     9.0,
+     2
+    ],
+    "Pocket": [
+     3.0,
+     2
+    ]
+   },
+   "Turks": {
+    "Flank": [
+     6.5,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Varangians": {
+    "Flank": [
+     8.0,
+     1
+    ],
+    "Pocket": [
+     10.0,
+     1
+    ]
+   },
+   "Vietnamese": {
+    "Flank": [
+     9.0,
+     2
+    ],
+    "Pocket": [
+     7.5,
+     2
+    ]
+   },
+   "Vikings": {
+    "Flank": [
+     9.0,
+     2
+    ],
+    "Pocket": [
+     5.5,
+     2
+    ]
+   },
+   "Wei": {
+    "Flank": [
+     6.0,
+     2
+    ],
+    "Pocket": [
+     8.5,
+     2
+    ]
+   },
+   "Wu": {
+    "Flank": [
+     9.0,
+     2
+    ],
+    "Pocket": [
+     8.0,
+     2
+    ]
+   }
+  },
+  "Nomad": {
+   "Armenians": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Aztecs": {
+    "any": [
+     6.0,
+     1
+    ]
+   },
+   "Bengalis": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Berbers": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Bohemians": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Britons": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Bulgarians": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Burgundians": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Burmese": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Byzantines": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Celts": {
+    "any": [
+     6.0,
+     1
+    ]
+   },
+   "Chinese": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Cumans": {
+    "any": [
+     4.0,
+     1
+    ]
+   },
+   "Danes": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Dravidians": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Ethiopians": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Franks": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Georgians": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Goths": {
+    "any": [
+     6.0,
+     1
+    ]
+   },
+   "Gurjaras": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Hindustanis": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Huns": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Incas": {
+    "any": [
+     6.0,
+     1
+    ]
+   },
+   "Italians": {
+    "any": [
+     10.0,
+     1
+    ]
+   },
+   "Japanese": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Jurchens": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Khitans": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Khmer": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Koreans": {
+    "any": [
+     10.0,
+     1
+    ]
+   },
+   "Lithuanians": {
+    "any": [
+     10.0,
+     1
+    ]
+   },
+   "Magyars": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Malay": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Malians": {
+    "any": [
+     10.0,
+     1
+    ]
+   },
+   "Mapuche": {
+    "any": [
+     6.0,
+     1
+    ]
+   },
+   "Mayans": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Mongols": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Muisca": {
+    "any": [
+     6.0,
+     1
+    ]
+   },
+   "Persians": {
+    "any": [
+     10.0,
+     1
+    ]
+   },
+   "Poles": {
+    "any": [
+     3.0,
+     1
+    ]
+   },
+   "Portuguese": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Romans": {
+    "any": [
+     6.0,
+     1
+    ]
+   },
+   "Saracens": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Saxons": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Shu": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Sicilians": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Slavs": {
+    "any": [
+     5.0,
+     1
+    ]
+   },
+   "Spanish": {
+    "any": [
+     10.0,
+     1
+    ]
+   },
+   "Tatars": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Teutons": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Tupi": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Turks": {
+    "any": [
+     8.0,
+     1
+    ]
+   },
+   "Varangians": {
+    "any": [
+     9.0,
+     1
+    ]
+   },
+   "Vietnamese": {
+    "any": [
+     10.0,
+     1
+    ]
+   },
+   "Vikings": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Wei": {
+    "any": [
+     7.0,
+     1
+    ]
+   },
+   "Wu": {
+    "any": [
+     9.0,
+     1
+    ]
+   }
+  },
+  "Semi Closed": {}
+ }
+}
