@@ -19,7 +19,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 64  # 64: first push (first villager killed or building razed) is part of pressure; 63: survival counts how long a lost base held; 62: a Drush leads the strategy name, units upgraded in a later age count for it; 61: Dark Age army saved (army style counts every age); 60: Champis and Serjeants that build aren't villagers; army sent with villagers stays army
+ANALYSIS_VERSION = 65  # 65: workers lost to enemies cost holding points; tower rushes (Castle timing, forward towers as first military, forced defence); first push judged against the plan; eAPM and accepted eAPM; 64: first push (first villager killed or building razed) is part of pressure; 63: survival counts how long a lost base held; 62: a Drush leads the strategy name, units upgraded in a later age count for it; 61: Dark Age army saved (army style counts every age); 60: Champis and Serjeants that build aren't villagers; army sent with villagers stays army
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
