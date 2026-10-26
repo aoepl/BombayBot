@@ -1,0 +1,1079 @@
+{
+ "_about": "Claude's civ votes (0-10) from the civ voting sheet's 'Claude (not counted)' columns, Oct 25, 2026: 70% data from ~19,000 re-analysed 1600+ team games (last 3 months) + 30% Claude's tech-tree opinion. Per map type: {civ: [flank, pocket]}; Nomad: {civ: [any seat]}.",
+ "votes": {
+  "Open": {
+   "Armenians": [
+    5,
+    2
+   ],
+   "Aztecs": [
+    4,
+    0
+   ],
+   "Bengalis": [
+    4,
+    5
+   ],
+   "Berbers": [
+    6,
+    5
+   ],
+   "Bohemians": [
+    7,
+    3
+   ],
+   "Britons": [
+    10,
+    4
+   ],
+   "Bulgarians": [
+    2,
+    4
+   ],
+   "Burgundians": [
+    3,
+    8
+   ],
+   "Burmese": [
+    4,
+    7
+   ],
+   "Byzantines": [
+    3,
+    2
+   ],
+   "Celts": [
+    4,
+    6
+   ],
+   "Chinese": [
+    10,
+    5
+   ],
+   "Cumans": [
+    2,
+    10
+   ],
+   "Danes": [
+    8,
+    4
+   ],
+   "Dravidians": [
+    7,
+    2
+   ],
+   "Ethiopians": [
+    10,
+    4
+   ],
+   "Franks": [
+    2,
+    8
+   ],
+   "Georgians": [
+    3,
+    7
+   ],
+   "Goths": [
+    2,
+    2
+   ],
+   "Gurjaras": [
+    4,
+    8
+   ],
+   "Hindustanis": [
+    4,
+    3
+   ],
+   "Huns": [
+    4,
+    4
+   ],
+   "Incas": [
+    6,
+    1
+   ],
+   "Italians": [
+    8,
+    3
+   ],
+   "Japanese": [
+    8,
+    5
+   ],
+   "Jurchens": [
+    3,
+    6
+   ],
+   "Khitans": [
+    4,
+    6
+   ],
+   "Khmer": [
+    7,
+    10
+   ],
+   "Koreans": [
+    9,
+    5
+   ],
+   "Lithuanians": [
+    6,
+    7
+   ],
+   "Magyars": [
+    3,
+    10
+   ],
+   "Malay": [
+    5,
+    4
+   ],
+   "Malians": [
+    4,
+    4
+   ],
+   "Mapuche": [
+    3,
+    3
+   ],
+   "Mayans": [
+    10,
+    2
+   ],
+   "Mongols": [
+    7,
+    7
+   ],
+   "Muisca": [
+    7,
+    0
+   ],
+   "Persians": [
+    0,
+    8
+   ],
+   "Poles": [
+    4,
+    5
+   ],
+   "Portuguese": [
+    6,
+    2
+   ],
+   "Romans": [
+    6,
+    10
+   ],
+   "Saracens": [
+    3,
+    7
+   ],
+   "Saxons": [
+    4,
+    3
+   ],
+   "Shu": [
+    10,
+    4
+   ],
+   "Sicilians": [
+    2,
+    5
+   ],
+   "Slavs": [
+    3,
+    10
+   ],
+   "Spanish": [
+    4,
+    4
+   ],
+   "Tatars": [
+    4,
+    5
+   ],
+   "Teutons": [
+    0,
+    4
+   ],
+   "Tupi": [
+    6,
+    1
+   ],
+   "Turks": [
+    3,
+    4
+   ],
+   "Varangians": [
+    1,
+    6
+   ],
+   "Vietnamese": [
+    8,
+    5
+   ],
+   "Vikings": [
+    5,
+    2
+   ],
+   "Wei": [
+    6,
+    6
+   ],
+   "Wu": [
+    4,
+    4
+   ]
+  },
+  "Closed": {
+   "Armenians": [
+    6,
+    4
+   ],
+   "Aztecs": [
+    4,
+    0
+   ],
+   "Bengalis": [
+    8,
+    7
+   ],
+   "Berbers": [
+    3,
+    6
+   ],
+   "Bohemians": [
+    8,
+    8
+   ],
+   "Britons": [
+    10,
+    3
+   ],
+   "Bulgarians": [
+    2,
+    3
+   ],
+   "Burgundians": [
+    2,
+    8
+   ],
+   "Burmese": [
+    6,
+    6
+   ],
+   "Byzantines": [
+    0,
+    5
+   ],
+   "Celts": [
+    7,
+    6
+   ],
+   "Chinese": [
+    4,
+    2
+   ],
+   "Cumans": [
+    8,
+    10
+   ],
+   "Danes": [
+    5,
+    4
+   ],
+   "Dravidians": [
+    10,
+    6
+   ],
+   "Ethiopians": [
+    9,
+    3
+   ],
+   "Franks": [
+    2,
+    9
+   ],
+   "Georgians": [
+    3,
+    5
+   ],
+   "Goths": [
+    4,
+    3
+   ],
+   "Gurjaras": [
+    8,
+    8
+   ],
+   "Hindustanis": [
+    4,
+    4
+   ],
+   "Huns": [
+    2,
+    5
+   ],
+   "Incas": [
+    6,
+    1
+   ],
+   "Italians": [
+    10,
+    4
+   ],
+   "Japanese": [
+    3,
+    2
+   ],
+   "Jurchens": [
+    6,
+    5
+   ],
+   "Khitans": [
+    4,
+    3
+   ],
+   "Khmer": [
+    7,
+    10
+   ],
+   "Koreans": [
+    5,
+    6
+   ],
+   "Lithuanians": [
+    1,
+    6
+   ],
+   "Magyars": [
+    4,
+    8
+   ],
+   "Malay": [
+    3,
+    7
+   ],
+   "Malians": [
+    2,
+    5
+   ],
+   "Mapuche": [
+    3,
+    2
+   ],
+   "Mayans": [
+    8,
+    0
+   ],
+   "Mongols": [
+    9,
+    10
+   ],
+   "Muisca": [
+    4,
+    1
+   ],
+   "Persians": [
+    4,
+    10
+   ],
+   "Poles": [
+    3,
+    6
+   ],
+   "Portuguese": [
+    5,
+    4
+   ],
+   "Romans": [
+    10,
+    7
+   ],
+   "Saracens": [
+    8,
+    8
+   ],
+   "Saxons": [
+    3,
+    1
+   ],
+   "Shu": [
+    3,
+    3
+   ],
+   "Sicilians": [
+    2,
+    3
+   ],
+   "Slavs": [
+    2,
+    7
+   ],
+   "Spanish": [
+    5,
+    7
+   ],
+   "Tatars": [
+    6,
+    6
+   ],
+   "Teutons": [
+    3,
+    7
+   ],
+   "Tupi": [
+    5,
+    0
+   ],
+   "Turks": [
+    8,
+    4
+   ],
+   "Varangians": [
+    3,
+    6
+   ],
+   "Vietnamese": [
+    7,
+    5
+   ],
+   "Vikings": [
+    5,
+    0
+   ],
+   "Wei": [
+    1,
+    5
+   ],
+   "Wu": [
+    3,
+    4
+   ]
+  },
+  "Hybrid": {
+   "Armenians": [
+    4,
+    2
+   ],
+   "Aztecs": [
+    2,
+    0
+   ],
+   "Bengalis": [
+    7,
+    7
+   ],
+   "Berbers": [
+    5,
+    7
+   ],
+   "Bohemians": [
+    6,
+    0
+   ],
+   "Britons": [
+    10,
+    4
+   ],
+   "Bulgarians": [
+    1,
+    3
+   ],
+   "Burgundians": [
+    4,
+    5
+   ],
+   "Burmese": [
+    6,
+    7
+   ],
+   "Byzantines": [
+    6,
+    5
+   ],
+   "Celts": [
+    5,
+    5
+   ],
+   "Chinese": [
+    4,
+    5
+   ],
+   "Cumans": [
+    5,
+    10
+   ],
+   "Danes": [
+    0,
+    0
+   ],
+   "Dravidians": [
+    8,
+    7
+   ],
+   "Ethiopians": [
+    10,
+    3
+   ],
+   "Franks": [
+    2,
+    8
+   ],
+   "Georgians": [
+    2,
+    6
+   ],
+   "Goths": [
+    3,
+    2
+   ],
+   "Gurjaras": [
+    2,
+    6
+   ],
+   "Hindustanis": [
+    2,
+    6
+   ],
+   "Huns": [
+    8,
+    8
+   ],
+   "Incas": [
+    3,
+    0
+   ],
+   "Italians": [
+    9,
+    7
+   ],
+   "Japanese": [
+    8,
+    7
+   ],
+   "Jurchens": [
+    2,
+    5
+   ],
+   "Khitans": [
+    3,
+    5
+   ],
+   "Khmer": [
+    7,
+    10
+   ],
+   "Koreans": [
+    10,
+    5
+   ],
+   "Lithuanians": [
+    6,
+    10
+   ],
+   "Magyars": [
+    5,
+    9
+   ],
+   "Malay": [
+    10,
+    8
+   ],
+   "Malians": [
+    3,
+    2
+   ],
+   "Mapuche": [
+    4,
+    3
+   ],
+   "Mayans": [
+    10,
+    1
+   ],
+   "Mongols": [
+    4,
+    6
+   ],
+   "Muisca": [
+    6,
+    0
+   ],
+   "Persians": [
+    4,
+    10
+   ],
+   "Poles": [
+    1,
+    3
+   ],
+   "Portuguese": [
+    7,
+    5
+   ],
+   "Romans": [
+    3,
+    5
+   ],
+   "Saracens": [
+    7,
+    6
+   ],
+   "Saxons": [
+    6,
+    3
+   ],
+   "Shu": [
+    7,
+    2
+   ],
+   "Sicilians": [
+    4,
+    5
+   ],
+   "Slavs": [
+    4,
+    7
+   ],
+   "Spanish": [
+    5,
+    5
+   ],
+   "Tatars": [
+    2,
+    6
+   ],
+   "Teutons": [
+    0,
+    5
+   ],
+   "Tupi": [
+    6,
+    1
+   ],
+   "Turks": [
+    7,
+    7
+   ],
+   "Varangians": [
+    2,
+    4
+   ],
+   "Vietnamese": [
+    7,
+    5
+   ],
+   "Vikings": [
+    6,
+    3
+   ],
+   "Wei": [
+    3,
+    5
+   ],
+   "Wu": [
+    7,
+    6
+   ]
+  },
+  "Nomad": {
+   "Armenians": [
+    4
+   ],
+   "Aztecs": [
+    1
+   ],
+   "Bengalis": [
+    5
+   ],
+   "Berbers": [
+    5
+   ],
+   "Bohemians": [
+    5
+   ],
+   "Britons": [
+    9
+   ],
+   "Bulgarians": [
+    4
+   ],
+   "Burgundians": [
+    2
+   ],
+   "Burmese": [
+    7
+   ],
+   "Byzantines": [
+    4
+   ],
+   "Celts": [
+    1
+   ],
+   "Chinese": [
+    10
+   ],
+   "Cumans": [
+    8
+   ],
+   "Danes": [
+    2
+   ],
+   "Dravidians": [
+    6
+   ],
+   "Ethiopians": [
+    8
+   ],
+   "Franks": [
+    4
+   ],
+   "Georgians": [
+    4
+   ],
+   "Goths": [
+    1
+   ],
+   "Gurjaras": [
+    6
+   ],
+   "Hindustanis": [
+    4
+   ],
+   "Huns": [
+    9
+   ],
+   "Incas": [
+    1
+   ],
+   "Italians": [
+    6
+   ],
+   "Japanese": [
+    9
+   ],
+   "Jurchens": [
+    5
+   ],
+   "Khitans": [
+    1
+   ],
+   "Khmer": [
+    5
+   ],
+   "Koreans": [
+    10
+   ],
+   "Lithuanians": [
+    7
+   ],
+   "Magyars": [
+    7
+   ],
+   "Malay": [
+    6
+   ],
+   "Malians": [
+    6
+   ],
+   "Mapuche": [
+    5
+   ],
+   "Mayans": [
+    8
+   ],
+   "Mongols": [
+    10
+   ],
+   "Muisca": [
+    3
+   ],
+   "Persians": [
+    10
+   ],
+   "Poles": [
+    1
+   ],
+   "Portuguese": [
+    5
+   ],
+   "Romans": [
+    2
+   ],
+   "Saracens": [
+    8
+   ],
+   "Saxons": [
+    6
+   ],
+   "Shu": [
+    3
+   ],
+   "Sicilians": [
+    2
+   ],
+   "Slavs": [
+    2
+   ],
+   "Spanish": [
+    3
+   ],
+   "Tatars": [
+    5
+   ],
+   "Teutons": [
+    1
+   ],
+   "Tupi": [
+    2
+   ],
+   "Turks": [
+    6
+   ],
+   "Varangians": [
+    3
+   ],
+   "Vietnamese": [
+    5
+   ],
+   "Vikings": [
+    4
+   ],
+   "Wei": [
+    8
+   ],
+   "Wu": [
+    5
+   ]
+  },
+  "Semi Closed": {
+   "Armenians": [
+    6,
+    2
+   ],
+   "Aztecs": [
+    4,
+    0
+   ],
+   "Bengalis": [
+    7,
+    8
+   ],
+   "Berbers": [
+    4,
+    7
+   ],
+   "Bohemians": [
+    8,
+    4
+   ],
+   "Britons": [
+    10,
+    4
+   ],
+   "Bulgarians": [
+    3,
+    5
+   ],
+   "Burgundians": [
+    4,
+    8
+   ],
+   "Burmese": [
+    4,
+    6
+   ],
+   "Byzantines": [
+    1,
+    4
+   ],
+   "Celts": [
+    3,
+    2
+   ],
+   "Chinese": [
+    6,
+    3
+   ],
+   "Cumans": [
+    4,
+    10
+   ],
+   "Danes": [
+    4,
+    4
+   ],
+   "Dravidians": [
+    9,
+    1
+   ],
+   "Ethiopians": [
+    10,
+    4
+   ],
+   "Franks": [
+    3,
+    10
+   ],
+   "Georgians": [
+    4,
+    6
+   ],
+   "Goths": [
+    4,
+    3
+   ],
+   "Gurjaras": [
+    1,
+    9
+   ],
+   "Hindustanis": [
+    3,
+    8
+   ],
+   "Huns": [
+    3,
+    2
+   ],
+   "Incas": [
+    4,
+    2
+   ],
+   "Italians": [
+    9,
+    5
+   ],
+   "Japanese": [
+    6,
+    1
+   ],
+   "Jurchens": [
+    3,
+    5
+   ],
+   "Khitans": [
+    5,
+    5
+   ],
+   "Khmer": [
+    6,
+    9
+   ],
+   "Koreans": [
+    7,
+    5
+   ],
+   "Lithuanians": [
+    5,
+    6
+   ],
+   "Magyars": [
+    4,
+    9
+   ],
+   "Malay": [
+    6,
+    5
+   ],
+   "Malians": [
+    5,
+    4
+   ],
+   "Mapuche": [
+    1,
+    3
+   ],
+   "Mayans": [
+    9,
+    3
+   ],
+   "Mongols": [
+    8,
+    8
+   ],
+   "Muisca": [
+    5,
+    0
+   ],
+   "Persians": [
+    0,
+    9
+   ],
+   "Poles": [
+    0,
+    6
+   ],
+   "Portuguese": [
+    6,
+    4
+   ],
+   "Romans": [
+    10,
+    8
+   ],
+   "Saracens": [
+    8,
+    7
+   ],
+   "Saxons": [
+    6,
+    0
+   ],
+   "Shu": [
+    8,
+    1
+   ],
+   "Sicilians": [
+    2,
+    6
+   ],
+   "Slavs": [
+    3,
+    7
+   ],
+   "Spanish": [
+    6,
+    9
+   ],
+   "Tatars": [
+    6,
+    6
+   ],
+   "Teutons": [
+    3,
+    6
+   ],
+   "Tupi": [
+    3,
+    0
+   ],
+   "Turks": [
+    5,
+    3
+   ],
+   "Varangians": [
+    4,
+    5
+   ],
+   "Vietnamese": [
+    7,
+    5
+   ],
+   "Vikings": [
+    5,
+    4
+   ],
+   "Wei": [
+    3,
+    6
+   ],
+   "Wu": [
+    6,
+    2
+   ]
+  }
+ }
+}
