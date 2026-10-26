@@ -275,9 +275,18 @@ def _draft_embeds(match, res, model, games, author):
 		+ " are then split between the teams" + (", the same number of flank and pocket civs each," if seated else "")
 		+ " so both sides' civs are as even as possible. "
 		"A civ's value is how it does against Elo" + (" in this seat" if seated else "") + " on this kind of map"
-		+ (f" ({map_rules})" if map_rules else "") + " and its matchups against the other team's civs.")[:1024])
-	details.set_footer(text=f"From {games} analysed game{'s' if games != 1 else ''} in this channel plus the tech trees; "
-		"with few games picks lean on the tech trees.")
+		+ " and its matchups against the other team's civs.")[:1024])
+	details.add_field(name="Where a civ's rating starts", inline=False, value=(
+		"From the civ voting sheet for this map type" + (" and seat" if seated else "") + ": "
+		f"**Claude's vote** {draft.CLAUDE_WEIGHT:.0%} (built from about 19,000 analysed 1600+ team games plus Claude's "
+		f"read of the tech trees), the **players' average vote** {draft.PLAYERS_WEIGHT:.0%} (less when fewer than "
+		f"{draft.PLAYERS_FULL} players have voted, the rest going to Claude's vote) and the bot's **tech-tree** guess "
+		f"{draft.TECH_SHARE:.0%}" + (f" ({map_rules})" if map_rules else "") + ". "
+		f"Each vote point is worth {draft.PER_VOTE:.0%} against Elo; players' votes count from their own average, as "
+		"players vote higher overall. Games analysed in this channel then move the rating: the more games, the more "
+		"they count.")[:1024])
+	details.set_footer(text=f"From {games} analysed game{'s' if games != 1 else ''} in this channel, the voting sheet "
+		"and the tech trees; with few games picks lean on the votes.")
 	return short, details
 
 
@@ -348,15 +357,16 @@ async def aoe_draft(ctx, mode: str = 'team', map: str = None, redraw: bool = Fal
 async def _make_draft(ctx, match, mode, map_name):
 	""" The draft itself (aoe_draft has checked it may be made). """
 	import random
-	from bot.replays import draft, insights, summaries
+	from bot.replays import draft, insights, sheet_votes, summaries
 	category = await insights.map_type(map_name)  # looked up online once for maps the bot doesn't know
 	rows, matchups, fights = await summaries.load_draft_data(ctx.qc.id)
+	votes = await sheet_votes.player_votes()  # the voting sheet's player averages (cached; a snapshot if unreachable)
 	records = summaries.seat_stats(rows)
 	teams = [[dict(name=get_nick(p), elo=match.ratings.get(p.id), user_id=p.id) for p in match.teams[i]] for i in (0, 1)]
 	mode = draft.PLAYER_CIVS if mode == draft.PLAYER_CIVS else draft.TEAM_CIVS
 
 	def work():  # a few seconds of number crunching: kept off the bot's event loop
-		model = draft.Model(rows, matchups, fights)
+		model = draft.Model(rows, matchups, fights, player_votes=votes)
 		res = draft.civ_draft(model, teams, map_name, category, mode, random.Random(), records)
 		return model, res
 	model, res = await asyncio.to_thread(work)

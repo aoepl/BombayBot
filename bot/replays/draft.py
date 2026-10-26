@@ -3,8 +3,9 @@
 Draft logic: which civ to pick next for a map, from the games the bot has analysed and the civs' tech trees.
 
 /aoe draft (civ_draft) uses it once a match has started. With few games saved most ratings stay close to "average" on purpose:
-every estimate is pulled towards a broader one by how few games back it up. Community votes (the civ voting
-sheet) can be plugged in later through `Prior`.
+every estimate is pulled towards a broader one by how few games back it up. Every civ's starting strength comes
+from the civ voting sheet as well as the tech trees: Claude's votes (claude_votes.json) and the players' average
+votes (sheet_votes, fetched from the sheet), see start_parts().
 
 Everything is measured against Elo, so a civ is not rated well just because good players picked it:
 - a game result is compared with the win chance the two teams' Elos gave (insights' Elo scale: the spread of
@@ -58,6 +59,15 @@ MATCHUP_WEIGHT = 0.5     # matchups' share of a pick's value next to strength
 ELO_FIT_WEIGHT = 0.3
 PLAYER_FIT_WEIGHT = 0.3
 TECH_WEIGHT = 0.25       # how much the tech tree's seat fit sets a civ's starting strength
+# A civ's starting strength (before this channel's games move it) is a blend of the voting sheet and the tech trees:
+# Claude's vote (0-10, the sheet's "Claude (not counted)" columns: ~19,000 analysed 1600+ team games plus Claude's
+# tech-tree opinion), the players' average vote, and the bot's own tech-tree head start. The players' share is full
+# from PLAYERS_FULL voters and smaller below that, the rest going to Claude's vote. A vote point is worth
+# PER_VOTE (+-10% for 10 or 0 against 5, about the head starts' own spread); the players' averages are measured
+# from their own average for the map type and seat, since players vote higher overall.
+CLAUDE_WEIGHT, PLAYERS_WEIGHT, TECH_SHARE = 0.4, 0.4, 0.2
+PLAYERS_FULL = 3
+PER_VOTE = 0.02
 FIELD_SIZE = 6           # an open enemy slot is judged as its 6 likeliest picks ...
 OPEN_SLOT_FACE = 0.5     # ... at half the weight of a civ already picked
 DENIAL_WEIGHT = 0.5      # how much taking a civ away from the enemy is worth next to its value for us
@@ -480,6 +490,40 @@ def _top_quarter_semi(key, seat):
 	return vals[len(vals) // 4]
 
 
+def _load_claude_votes():
+	import os
+	try:
+		with open(os.path.join(os.path.dirname(__file__), 'claude_votes.json'), encoding='utf-8') as f:
+			return json.load(f).get('votes', {})
+	except (OSError, ValueError):
+		return {}
+
+
+CLAUDE_VOTES = _load_claude_votes()
+
+
+def claude_vote(civ, seat, category):
+	""" Claude's 0-10 vote for the civ in this seat on this map type, or None. Nomad has one vote for any seat; a
+	seatless slot elsewhere gets the average of flank and pocket. """
+	v = (CLAUDE_VOTES.get(category) or {}).get(civ)
+	if not v:
+		return None
+	if len(v) == 1:
+		return v[0]
+	if seat in ('Flank', 'Pocket'):
+		return v[0 if seat == 'Flank' else 1]
+	return (v[0] + v[1]) / 2
+
+
+def vote_note(model, civ, seat, category):
+	""" 'Claude 8/10, players 6.3/10 (3 votes)' for the civ in this seat, or the empty string. """
+	claude = claude_vote(civ, seat, category)
+	avg, voters = model.player_vote(civ, seat, category)
+	parts = ([f"Claude {claude:g}/10"] if claude is not None else []) + \
+		([f"players {avg:.1f}/10 ({voters} vote{'s' if voters != 1 else ''})"] if avg is not None else [])
+	return "votes: " + ", ".join(parts) if parts else ""
+
+
 class Prior:
 	""" Starting rating for a civ in a seat on a map type, 0..1. Neutral now; the voting sheet can feed this later. """
 
@@ -517,8 +561,10 @@ class Model:
 	fights: aoe_fights rows.
 	"""
 
-	def __init__(self, rows, matchups=(), fights=(), prior: Callable = None):
+	def __init__(self, rows, matchups=(), fights=(), prior: Callable = None, player_votes: Optional[Dict] = None):
 		self.prior = prior or Prior()
+		self.player_votes = player_votes or {}  # sheet_votes.player_votes()
+		self._player_mean = {}
 		self.rows = [dict(r) for r in rows if r.get('civ')]
 		self.matchups = list(matchups)
 		self.fights = list(fights)
@@ -678,6 +724,42 @@ class Model:
 			self._cache[key] = scores[len(scores) // 2]
 		return lean * NOMAD_WEIGHT * (nomad(civ, water)['score'] - self._cache[key])
 
+	def player_vote(self, civ, seat, category):
+		""" (players' average vote, voters) for the civ in this seat on this map type, or (None, 0). """
+		seats = (self.player_votes.get(category) or {}).get(civ) or {}
+		if 'any' in seats:
+			return seats['any']
+		if seat in seats:
+			return seats[seat]
+		both = [seats[s] for s in ('Flank', 'Pocket') if s in seats]
+		if both and seat not in ('Flank', 'Pocket'):
+			return sum(a for a, _ in both) / len(both), min(n for _, n in both)
+		return None, 0
+
+	def _players_mean(self, seat, category):
+		key = (seat, category)
+		if key not in self._player_mean:
+			vals = [self.player_vote(c, seat, category)[0] for c in ranked_civs()]
+			vals = [v for v in vals if v is not None]
+			self._player_mean[key] = sum(vals) / len(vals) if vals else 5.0
+		return self._player_mean[key]
+
+	def start_parts(self, civ, seat, category, tech):
+		""" The starting strength (-> 'start', 0 = average) from Claude's vote, the players' average vote and the
+		tech-tree head start `tech`, with each part's weight. """
+		claude = claude_vote(civ, seat, category)
+		avg, voters = self.player_vote(civ, seat, category)
+		w_players = PLAYERS_WEIGHT * min(1.0, voters / PLAYERS_FULL) if avg is not None else 0.0
+		w_claude = CLAUDE_WEIGHT + (PLAYERS_WEIGHT - w_players) if claude is not None else 0.0
+		w_tech = 1.0 - w_players - w_claude
+		start = w_tech * tech
+		if claude is not None:
+			start += w_claude * PER_VOTE * (claude - 5)
+		if w_players:
+			start += w_players * PER_VOTE * (avg - self._players_mean(seat, category))
+		return dict(start=start, claude=claude, players=avg, voters=voters, w_claude=w_claude, w_players=w_players,
+			w_tech=w_tech)
+
 	def strength(self, civ, seat, map_name, category=None):
 		""" (rating 0..1, games on this map, games in all) for the civ in this seat on this map. """
 		key = ('strength', civ, seat, _norm(map_name), category)
@@ -689,6 +771,7 @@ class Model:
 		base = (0.0 if seat_rules else self.tech_strength(civ, seat)) + self.closed_strength(civ, category) + \
 			self.hybrid_strength(civ, seat, category) + self.semi_strength(civ, seat, category) + \
 			self.open_strength(civ, seat, category) + self.nomad_strength(civ, map_name, category)
+		base = self.start_parts(civ, seat, category, base)['start']
 		prior = self.prior(civ, seat, category)
 		if prior is not None:
 			base = prior - 0.5
@@ -886,6 +969,9 @@ class Model:
 		army = self.army(civ, slot.seat)
 		reasons = [f"{strength:.0%} vs Elo as {slot.seat or 'player'} ({n_map} game{'s' if n_map != 1 else ''} on this map, "
 			f"{n_all} in all)", "army " + ", ".join(f"{k} {v:.0%}" for k, v in sorted(army.items(), key=lambda kv: -kv[1]))]
+		note = vote_note(self, civ, slot.seat, category)
+		if note:
+			reasons.insert(1, note)
 		if fit_games:
 			reasons.append(f"Elo range fit {fit - 0.5:+.0%} ({fit_games} game{'s' if fit_games != 1 else ''})")
 		if p_games:
@@ -1238,6 +1324,9 @@ def pick_reason(model: Model, res, team, slot, seat_as=None):
 	else:
 		parts.append(f"{units} {'suit a ' + seat if seat else 'are strong'} by its tech tree"
 			+ (f" (only {n_all} game{'s' if n_all != 1 else ''} with it here)" if n_all else " (no games with it here yet)"))
+	note = vote_note(model, s.civ, s.seat, res.get('category'))
+	if note:
+		parts.append(note)
 	if CLOSED_LEAN.get(res.get('category')):
 		f = fortress(s.civ)
 		strong = [name for name, key in (('gunpowder', 'gunpowder'), ('siege', 'siege'), ('towers', 'towers'),
