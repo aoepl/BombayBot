@@ -34,7 +34,7 @@ PLAYER_FIELDS = (
 	'name', 'user_id', 'profile_id', 'civ', 'seat', 'won', 'elo', 'elo_delta', 'elo_verdict', 'tg_rating',
 	'strategy', 'opening', 'boom', 'fish_boom', 'feudal_boom', 'feudal_units', 'castle_units', 'imperial_units',
 	'feudal_attack', 'fast_imp', 'forward_castles', 'forward_towers', 'tower_creep',
-	'feudal_s', 'castle_s', 'imperial_s', 'apm', 'villagers_made', 'villagers_lost', 'villagers_peak',
+	'feudal_s', 'castle_s', 'imperial_s', 'apm', 'eapm', 'villagers_made', 'villagers_lost', 'villagers_peak',
 	'villagers_killed', 'fishing_ships_made', 'trade_carts', 'avg_pop', 'spend_per_min', 'float_minutes',
 	'score_overall', 'score_exec', 'score_pressure', 'score_survival', 'score_team', 'score_rank',
 	'playstyle', 'macro_score', 'micro_score',

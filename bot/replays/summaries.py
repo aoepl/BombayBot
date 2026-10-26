@@ -204,7 +204,7 @@ def strats_lines(s):
 		("Games", f"{s['games']} analysed · won {s['wins']} of {s['decided']} ({_rate(s['wins'], s['decided'])})"),
 		("Positions", f"Flank {s['seats']['Flank'][0]} games (won {s['seats']['Flank'][1]}) · "
 			f"Pocket {s['seats']['Pocket'][0]} games (won {s['seats']['Pocket'][1]})"),
-		("Average APM", str(s['apm'] or "—")),
+		("Average eAPM", str(s['apm'] or "—")),
 		("Against their BombayBot Elo", verdict),
 		("Best", f"Position: {b['seat'] or '—'} · Army style: {b['style'] or '—'} · Strategy: {b['strategy'] or '—'}"
 			f"\n(by average score, {MIN_GAMES}+ games each)"),
