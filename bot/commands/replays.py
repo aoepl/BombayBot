@@ -284,8 +284,9 @@ def _draft_embeds(match, res, model, games, author):
 		f"{draft.TECH_SHARE:.0%}" + (f" ({map_rules})" if map_rules else "") + ". "
 		f"Each vote point is worth {draft.PER_VOTE:.0%} against Elo; players' votes count from their own average, as "
 		"players vote higher overall. Games analysed in this channel on **this map** then move the rating (games on "
-		"other maps, even of the same type, don't count): the more games, the more they count. Matchups use this map's "
-		"games too.")[:1024])
+		"other maps, even of the same type, don't count): the more games, the more they count, but never more than "
+		f"{draft.SERVER_MAX:.0%}; the votes and tech trees always keep the rest. Matchups use this map's games too, "
+		"with the same cap.")[:1024])
 	details.set_footer(text=f"From the voting sheet, the tech trees and this channel's analysed games on this map "
 		f"({games} analysed game{'s' if games != 1 else ''} in all); with few games on the map picks lean on the votes.")
 	return short, details
