@@ -20,7 +20,7 @@ STYLE_WORDS = (
 		'Turtle', 'Thirisadai')),
 	('Gunpowder', ('Hand Cannon', 'Janissar', 'Conquistador')),
 	('Cavalry archers', ('Cavalry Archer', 'Mangudai', 'Kipchak', 'Keshik', 'Camel Archer', 'Elephant Archer')),
-	('Archers', ('Archer', 'Skirmisher', 'Longbow', 'Chu Ko Nu', 'Plumed', 'Genoese', 'Rattan', 'Composite', 'archers',
+	('Foot ranged', ('Archer', 'Skirmisher', 'Longbow', 'Chu Ko Nu', 'Plumed', 'Genoese', 'Rattan', 'Composite', 'archers',
 		'skirms')),
 	('Cavalry', ('Knight', 'Scout', 'Hussar', 'Camel', 'Elephant', 'Lancer', 'Cataphract', 'Boyar', 'Konnik', 'Leitis',
 		'Coustillier', 'Monaspa', 'scouts', 'camels', 'elephants', 'lancers')),
@@ -90,7 +90,7 @@ def army_style(row):
 
 
 def game_plan(row):
-	""" Strategy plus army style, e.g. "Fast Castle, farm boom → Archers": the opening and the army it led to. """
+	""" Strategy plus army style, e.g. "Fast Castle, farm boom → Foot ranged": the opening and the army it led to. """
 	return f"{strategy_key(row)} → {army_style(row)}"
 
 
