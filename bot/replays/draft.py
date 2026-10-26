@@ -15,8 +15,9 @@ Everything is measured against Elo, so a civ is not rated well just because good
 
 Pieces, on a 0..1 scale where 0.5 is average:
 - strength(civ, seat, map): how much better than Elo the civ does. Only this channel's games on this exact map
-  count (the same seat fully, the other seat a little); games on other maps, even of the same type, don't. With few
-  games it stays near its starting strength (the voting sheet and the tech trees).
+  count (the same seat fully, the other seat a little); games on other maps, even of the same type, don't. They
+  never count for more than SERVER_MAX (half) of it: the rest is its starting strength (the voting sheet and the
+  tech trees).
 - army(civ, seat, map): the unit lines the civ fields (from saved fights; the tech tree's best lines for the
   seat until there are some).
 - line_matchup(line, enemy line): a cost-for-cost estimate from unit stats with the civs' own upgrades
@@ -47,6 +48,14 @@ from . import techtree
 # other seat OTHER_WEIGHT). Map types are covered by the voting sheet's votes instead.
 MAP_WEIGHT, CATEGORY_WEIGHT, SEAT_WEIGHT, OTHER_WEIGHT = 1.0, 0.0, 0.0, 0.1
 PRIOR_GAMES = 6
+# The server's own games never take over: in every part learned from them (strength, matchups, armies fielded,
+# Elo range and player fits) their share is at most SERVER_MAX, the rest staying with the starting estimate.
+SERVER_MAX = 0.5
+
+
+def server_share(weight, prior):
+	""" Share of an estimate given to the server's games: weight / (weight + prior), at most SERVER_MAX. """
+	return min(SERVER_MAX, weight / (weight + prior)) if weight > 0 else 0.0
 MATCHUP_PRIOR = 4        # lost bases worth of "the armies' estimate" every matchup starts with
 LINE_FIGHT_PRIOR = 15    # fight weight (about 15 big fights) of the stat estimate a line matchup starts with
 CIV_FIGHT_PRIOR = 8      # ... and a civ pair matchup
@@ -784,7 +793,8 @@ class Model:
 			w = self._closeness(r, seat, map_name, category)
 			total += w * r['resid']
 			weight += w
-		est = (total + base * PRIOR_GAMES) / (weight + PRIOR_GAMES)
+		share = server_share(weight, PRIOR_GAMES)
+		est = (1 - share) * base + share * (total / weight if weight else 0.0)
 		n_map = sum(1 for r in mine if _norm(r.get('map_name')) == _norm(map_name))
 		n_all = len(mine)
 		out = (0.5 + est, n_map, n_all)
@@ -822,7 +832,7 @@ class Model:
 		default = self.default_army(civ, seat)
 		seen = dict(self.fielded.get((civ, seat), {}))
 		total = sum(seen.values())
-		weight = min(1.0, total / 20000)  # ~20k army value fielded = trust what they built over the tech tree
+		weight = min(SERVER_MAX, total / 20000)  # army value fielded vs the tech tree's guess, at most SERVER_MAX
 		mix = defaultdict(float)
 		for line, share in default.items():
 			mix[line] += (1 - weight) * share
@@ -838,7 +848,7 @@ class Model:
 		""" 0..1 for a cost-for-cost army of line_a against line_b: unit stats, corrected by real fights. """
 		prior = techtree.counter(line_a, line_b, civ_a, civ_b)
 		total, weight = self.line_fights.get((line_a, line_b), (0.0, 0.0))
-		adj = total / (weight + LINE_FIGHT_PRIOR) if weight else 0.0
+		adj = server_share(weight, LINE_FIGHT_PRIOR) * total / weight if weight else 0.0
 		return max(0.02, min(0.98, prior + adj))
 
 	def _best_answer(self, civ, enemy_line, enemy_civ):
@@ -883,10 +893,8 @@ class Model:
 		key = ('matchup', civ, seat, enemy_civ, enemy_seat, _norm(map_name), category)
 		if key in self._cache:
 			return self._cache[key]
-		est, note = self.army_matchup(civ, seat, enemy_civ, enemy_seat)
+		start, note = self.army_matchup(civ, seat, enemy_civ, enemy_seat)
 		total, weight, n_fights = self.civ_fights.get((_norm(map_name), civ, seat, enemy_civ, enemy_seat), (0.0, 0.0, 0))
-		if weight:
-			est += total / (weight + CIV_FIGHT_PRIOR)
 		score = w_sum = 0.0
 		bases = 0
 		for m in self.matchups:
@@ -902,8 +910,15 @@ class Model:
 			score += w * (1.0 if won_it else 0.0)
 			w_sum += w
 			bases += 1
-		if w_sum:
-			est = (score + est * MATCHUP_PRIOR) / (w_sum + MATCHUP_PRIOR)
+		# The server's fights (as a correction to the armies' estimate) and lost bases (a win rate) together get at
+		# most SERVER_MAX of the matchup.
+		s_f = weight / (weight + CIV_FIGHT_PRIOR) if weight else 0.0
+		s_b = w_sum / (w_sum + MATCHUP_PRIOR) if w_sum else 0.0
+		est = start
+		if s_f or s_b:
+			seen = ((s_f * (start + total / weight) if s_f else 0.0) + (s_b * score / w_sum if s_b else 0.0)) / (s_f + s_b)
+			share = min(SERVER_MAX, 1 - (1 - s_f) * (1 - s_b))
+			est = (1 - share) * start + share * seen
 		out = (max(0.02, min(0.98, est)), n_fights + bases, note)
 		self._cache[key] = out
 		return out
@@ -919,7 +934,7 @@ class Model:
 		if not in_band:
 			return 0.5, 0
 		overall = sum(r['resid'] for r in mine) / len(mine)
-		return 0.5 + sum(v - overall for v in in_band) / (len(in_band) + ELO_FIT_PRIOR), len(in_band)
+		return 0.5 + server_share(len(in_band), ELO_FIT_PRIOR) * sum(v - overall for v in in_band) / len(in_band), len(in_band)
 
 	def player_fit(self, slot: Slot, civ):
 		""" How this player does with this civ compared with their own other games (0.5 = same). """
@@ -930,7 +945,7 @@ class Model:
 		if not with_civ:
 			return 0.5, 0
 		overall = sum(r['resid'] for r in theirs) / len(theirs)
-		return 0.5 + sum(v - overall for v in with_civ) / (len(with_civ) + PLAYER_PRIOR), len(with_civ)
+		return 0.5 + server_share(len(with_civ), PLAYER_PRIOR) * sum(v - overall for v in with_civ) / len(with_civ), len(with_civ)
 
 	# ----- value of one pick
 	def likely(self, slot: Slot, left, map_name, category=None):
