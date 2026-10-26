@@ -214,7 +214,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		minutes = max(end / 60000, 1)
 		stats[pid] = dict(
 			ages=ages, units=units, villagers_queued=vills, _vill_times=vill_times, first_military=first_military, builds=bcount,
-			apm=round(len(mine) / minutes),
+			apm=round(len(mine) / minutes), eapm=round(effective_actions(mine) / minutes),
 			tc_built=bcount.get('Town Center', 0), tc_after_castle=tc_after_castle, tc_moves=tc_moves,
 			towers=sum(bcount.get(t, 0) for t in TOWERS),
 			flares=sum(1 for a in mine if a['a'] == 'FLARE'),
@@ -1463,6 +1463,39 @@ def first_damage(A, players, vest, end):
 		by = Counter(p for _, p in hs).most_common(1)[0][0]
 		note(by, t_last, f"a building of {players[owner[tg]]['name']}'s razed at {mmss(t_last)}")
 	return first, what
+
+
+EAPM_GAP = 1500      # ms: the same technology clicked again this soon was already being researched
+EAPM_SETTING_GAP = 5000  # ms: setting units' stance or formation to what they already have this soon changes nothing
+
+
+def effective_actions(mine):
+	"""
+	Commands for accepted eAPM: every recorded command except the ones that changed nothing:
+	- the same technology clicked again while it was already being researched (within EAPM_GAP);
+	- a stance or formation set again on the same units to what they already had, within EAPM_SETTING_GAP
+	  (switching between settings, e.g. spread, line, spread, counts every time).
+	Spam clicks count. Clicks the game turned down for lack of resources count too: the recording keeps the click
+	either way and only saves the total of all resources banked, so they can't be told apart. Recordings hold commands,
+	never plain selections, so a unit selected and given no command counts for neither eAPM nor accepted eAPM.
+	"""
+	n, researching, settings = 0, {}, {}
+	for a in sorted(mine, key=lambda a: a['t']):
+		if a['a'] in ('STANCE', 'FORMATION'):
+			key = (a['a'], tuple(sorted(a.get('object_ids') or ())))
+			value = a.get('stance_id') if a['a'] == 'STANCE' else a.get('formation_id')
+			prev = settings.get(key)
+			settings[key] = (value, a['t'])
+			if prev is not None and prev[0] == value and a['t'] - prev[1] <= EAPM_SETTING_GAP:
+				continue
+		if a['a'] == 'RESEARCH':
+			key = (a.get('technology_id'), tuple(sorted(a.get('object_ids') or ())))
+			prev = researching.get(key)
+			researching[key] = a['t']
+			if prev is not None and a['t'] - prev <= EAPM_GAP:
+				continue
+		n += 1
+	return n
 
 
 def town_centers_destroyed(A, players, structs, pos, end):

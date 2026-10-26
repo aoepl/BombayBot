@@ -69,7 +69,8 @@ def player_line(result, pid):
 		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{elo} · **{sc['overall']}**/10{verdict}"
 		f" · {s['playstyle']}\n"
 		f"> {s['strategy']}\n"
-		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} APM"
+		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} eAPM"
+		+ (f" · {s['eapm']} accepted eAPM" if s.get('eapm') is not None else "") +
 		f" · Army {s['army']['avg_units']} avg / {s['army']['peak_units']} peak units"
 		+ (f" · {wl['count']} workers lost to enemies ({round(100 * wl['share'])}%)" if (wl := s.get('worker_losses')) and wl.get('count') else "")
 	)
@@ -244,7 +245,7 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"attacked units of 2+ enemies at once in {s.get('multi_enemy_minutes', 0)} minutes; "
 				f"own units attacked by 2+ enemies at once in {s.get('focused_minutes', 0)} minutes"
 				f"{' (traded ' + str(s['outnumbered_trade']) + ' of even in those minutes, 1 = even)' if s.get('outnumbered_trade') is not None else ''}"
-				f" (execution bonus +{s.get('several_bonus', 0)} for fighting several enemies); tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "
+				f" (execution bonus +{s.get('several_bonus', 0)} for fighting several enemies); tributes sent {s['trib_out']}, received {s['trib_in']}; eAPM {s['apm']}, accepted eAPM {s.get('eapm', '—')}; "
 				f"score {s['scores']['overall']}/10 (exec {s['scores']['exec']}, pressure {s['scores']['press']}, "
 				f"holding position {s['scores']['surv'] if s['scores']['surv'] is not None else 'not scored'}, team {s['scores']['team']}); "
 				f"base: {s['survival_note']}."
@@ -321,6 +322,13 @@ METHOD = [
 	("Team play: helping allies", "Weighted average of: **tributes sent** 50%; **army orders into allies' bases** 35% "
 		"(defending them); **flares** 15%."),
 	("Overall", "Flank: execution 27%, pressure 36%, holding position 27%, team play 10%. Pocket: 40%, 25%, 25%, 10%."),
+	("eAPM and accepted eAPM (not scored)", "**eAPM** (effective actions per minute): every command the player gave (unit orders, "
+		"building, queueing, research...), spam clicks included. Selecting units without giving a command never counts: "
+		"recordings hold commands, not selections. Clicks the game turned down for lack of resources do count, since the "
+		"recording keeps the click either way and only saves the total of all resources banked. **Accepted eAPM** also "
+		"leaves out commands that changed nothing: a stance or formation set again on the same units to what they already "
+		"had within 5 s (switching, e.g. spread, line, spread, counts every time) and the same tech clicked again while "
+		"already being researched."),
 ]
 
 
