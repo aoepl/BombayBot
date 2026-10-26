@@ -593,6 +593,21 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			f"main base lost{held_txt} ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
 		stats[p]['base_lost'] = held < 0.4
+	# Workers lost to enemies take holding position too: a base the enemy "never got into" still lost those workers.
+	carts_lost, carts_queued = trade_cart_kills(A, players, end)
+	for p in pids:
+		wl = worker_loss_penalty(vest[p], carts_lost[p], carts_queued[p])
+		stats[p]['worker_losses'] = wl
+		if not wl['steps'] or survival[p] is None:
+			continue
+		survival[p] = max(1.0, survival[p] - wl['penalty'])
+		if surv_detail.get(p, {}).get('untested'):
+			survival_note[p] = "base not seriously attacked"
+		lost_txt = ([f"lost {round(wl['early'] * 100)}% of workers to enemies before 40:00"] if wl['early'] >= WORKER_LOSS_STEP else []) \
+			+ [f"lost {round(sh * 100)}% of workers in a raid at {mmss(t)}" for t, sh in wl['raids']]
+		survival_note[p] += f"; {', '.join(lost_txt)}: -{wl['penalty']:g}" + (" (the most it takes)" if wl['capped'] else "")
+		surv_detail.setdefault(p, {}).update(worker_penalty=wl['penalty'], workers_lost_early=wl['early'],
+			worker_raids=[[mmss(t), sh] for t, sh in wl['raids']])
 	# Who took each lost base: the enemy with the most army orders into it, a castle they built there counting
 	# for BASE_CASTLE_ORDERS orders. Saved as a matchup: winner civ and position beat loser civ and position.
 	base_kills = []
@@ -987,6 +1002,64 @@ def builder_army(A, players):
 	return built_it - other_work
 
 
+def trade_cart_kills(A, players, end):
+	""" Trade carts and cogs killed by enemies, by the villager rule: an enemy attack order aimed at the cart and its owner
+	never ordered it again. Carts are the units their owner ordered to a Market that trains carts.
+	-> ({player: [times lost]}, {player: [times queued]}) """
+	team = {p: players[p]['team_id'] for p in players}
+	markets, queued = set(), defaultdict(list)
+	for a in A:
+		if a['a'] == 'DE_QUEUE' and a.get('player_id') in players and _name('objects', a['unit_id']) in ('Trade Cart', 'Trade Cog'):
+			markets.update(a.get('object_ids') or [])
+			queued[a['player_id']].extend([a['t']] * (a.get('amount', 1) or 1))
+	cart_owner = {}
+	for a in A:
+		if a['a'] == 'ORDER' and a.get('player_id') in players and (a.get('target_id') or 0) in markets:
+			for i in a.get('object_ids') or []:
+				cart_owner.setdefault(i, a['player_id'])
+	last_own, hit = {}, {}
+	for a in A:
+		pl = a.get('player_id')
+		for i in a.get('object_ids') or []:
+			if cart_owner.get(i) == pl:
+				last_own[i] = a['t']
+		tg = a.get('target_id') or 0
+		if a['a'] == 'ORDER' and tg in cart_owner and pl in players and team[pl] != team[cart_owner[tg]]:
+			hit[tg] = a['t']
+	lost = defaultdict(list)
+	for i, t in hit.items():
+		if last_own.get(i, 0) <= t + VILLAGER_HIT_GRACE and t <= end - VILLAGER_CONFIRM:
+			lost[cart_owner[i]].append(t)
+	return {p: sorted(lost[p]) for p in players}, queued
+
+
+def worker_loss_penalty(vest_p, carts_lost, carts_queued):
+	""" Holding-position penalty for workers lost to enemies, each loss as a share of the workforce then.
+	-> dict(early: share lost before 40:00, raids: [(start, share)] after it of 20%+, steps, penalty) """
+	alive = vest_p['alive'] or [0]
+	times = sorted([k[0] for k in vest_p['killed']] + list(carts_lost))
+
+	def workers_at(t):
+		carts = sum(1 for x in carts_queued if x <= t) - sum(1 for x in carts_lost if x < t)
+		return max(1, alive[min(len(alive) - 1, int(t // 60000))] + max(0, carts))
+	early, raids = 0.0, []
+	for t in times:
+		x = 1 / workers_at(t)
+		if t < WORKER_LOSS_LATE:
+			early += x
+		elif raids and t - raids[-1]['last'] <= WORKER_RAID_GAP:
+			raids[-1]['share'] += x
+			raids[-1]['last'] = t
+		else:
+			raids.append(dict(start=t, last=t, share=x))
+	big = [(r['start'], r['share']) for r in raids if r['share'] >= WORKER_LOSS_LATE_MIN]
+	steps = int(early / WORKER_LOSS_STEP + 1e-9) + sum(int(sh / WORKER_LOSS_STEP + 1e-9) for _, sh in big)
+	total = sum(1 / workers_at(t) for t in times)
+	return dict(early=round(early, 3), raids=[(t, round(sh, 3)) for t, sh in big], steps=steps,
+		penalty=min(WORKER_LOSS_CAP, steps * WORKER_LOSS_PENALTY), capped=steps * WORKER_LOSS_PENALTY > WORKER_LOSS_CAP,
+		count=len(times), share=round(total, 3))
+
+
 def villager_estimate(A, players, villagers, army_alive, end):
 	"""
 	Estimated economy workers alive per minute: villagers plus fishing ships. The replay has no unit counts, so:
@@ -1145,6 +1218,13 @@ MULTI_CLICKS = 2          # attack clicks on one enemy's units in a minute that 
 HOLD_TIME_FULL = 10.0     # minutes of holding under pressure that earn the full holding-time credit ...
 HOLD_TIME_MAX = 3.0       # ... worth up to this much, for the part of the base that was lost in the end
 HOLD_UNTESTED = 7.0       # holding position for a base never seriously attacked: the enemy was kept out
+# Workers (villagers, fishing ships, trade carts) lost to enemies cost holding position:
+WORKER_LOSS_STEP = 0.05          # every 5% of the workforce lost ...
+WORKER_LOSS_PENALTY = 0.5        # ... takes this much off
+WORKER_LOSS_LATE = 40 * 60000    # after 40:00 only raids count that ...
+WORKER_LOSS_LATE_MIN = 0.20      # ... take 20% of the workforce or more,
+WORKER_RAID_GAP = 3 * 60000      # a raid being losses within 3 minutes of each other
+WORKER_LOSS_CAP = 3.0            # the deduction stops here
 FOCUS_DIFFICULTY = 0.05   # survival difficulty added per minute attacked by 2+ enemies at once ...
 FOCUS_DIFFICULTY_MAX = 0.3  # ... up to this much
 
