@@ -69,8 +69,10 @@ def player_line(result, pid):
 		f"{COLOR_EMOJI.get(p['color_id'], '▪️')} **{p['name']}** · {p['civ']}{seat}{elo} · **{sc['overall']}**/10{verdict}"
 		f" · {s['playstyle']}\n"
 		f"> {s['strategy']}\n"
-		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} APM"
+		f"> Castle {mmss(ages.get('Castle Age'))} · Imp {mmss(ages.get('Imperial Age'))} · {s['apm']} eAPM"
+		+ (f" · {s['eapm']} accepted eAPM" if s.get('eapm') is not None else "") +
 		f" · Army {s['army']['avg_units']} avg / {s['army']['peak_units']} peak units"
+		+ (f" · {wl['count']} workers lost to enemies ({round(100 * wl['share'])}%)" if (wl := s.get('worker_losses')) and wl.get('count') else "")
 	)
 
 
@@ -243,7 +245,7 @@ def text_for_ai(result, map_name=None, lobby=None):
 				f"attacked units of 2+ enemies at once in {s.get('multi_enemy_minutes', 0)} minutes; "
 				f"own units attacked by 2+ enemies at once in {s.get('focused_minutes', 0)} minutes"
 				f"{' (traded ' + str(s['outnumbered_trade']) + ' of even in those minutes, 1 = even)' if s.get('outnumbered_trade') is not None else ''}"
-				f" (execution bonus +{s.get('several_bonus', 0)} for fighting several enemies); tributes sent {s['trib_out']}, received {s['trib_in']}; APM {s['apm']}; "
+				f" (execution bonus +{s.get('several_bonus', 0)} for fighting several enemies); tributes sent {s['trib_out']}, received {s['trib_in']}; eAPM {s['apm']}, accepted eAPM {s.get('eapm', '—')}; "
 				f"score {s['scores']['overall']}/10 (exec {s['scores']['exec']}, pressure {s['scores']['press']}, "
 				f"holding position {s['scores']['surv'] if s['scores']['surv'] is not None else 'not scored'}, team {s['scores']['team']}); "
 				f"base: {s['survival_note']}."
@@ -287,32 +289,46 @@ METHOD = [
 		"share of it (half the best ≈ 5.5). Lower is better for age-up times, the first military unit and floating. A part nobody in "
 		"the game did is left out and its weight spread over the rest."),
 	("Execution: how well the player ran their game", "Weighted average of: **Castle Age click** (or, after an 8+ unit "
-		"Feudal army, Feudal production uptime: Town Centers, Docks and military buildings kept busy); **Imperial Age "
+		"Feudal army, Feudal production uptime: Town Centers, Docks and military buildings kept busy; after a tower rush, "
+		"the click against tower rushes' timings, full by 17:54; the better counts); **Imperial Age "
 		"click**; **villager value** (villagers and fishing ships made and kept alive, replacements after attacks "
-		"counting extra); **first military unit** (a quarter weight); **unplanned floating** (minutes of the player's "
+		"counting extra); **first military unit** (a quarter weight; a forward tower or castle counts); **unplanned floating** (minutes of the player's "
 		"own spending sitting in the bank; saving for a 550+ purchase and being near 200 population don't count). "
 		"Plus a bonus up to +1.5 for fighting several enemies at once: up to +0.75 for minutes attacking 2+ enemies' "
 		"units, up to +0.75 for minutes attacked by 2+ enemies (by how well they traded), as a share of the game from 8:00."),
 	("Pressure: how hard the player pushed the enemy", "Weighted average of: **army on the map** 35% (average army "
-		"value from 8:00; units are scaled down when their damage was low both for their size, against the lobby "
-		"median, and in total, against the lobby's most: the better of the two counts); **army "
-		"sent at the enemy** 40% (each military unit ordered at an enemy unit, building or base counts once a minute, "
-		"at the player's average unit cost, scaled the same way); **damage done** 15% (enemy army value killed in fights, 100 per "
-		"villager killed, enemy Town Centers destroyed (their cost: research and queued units are refunded), and "
-		"enemy macro disrupted: production that stalled while the army was in their base, "
-		"against the 5 minutes before). Early army counts ×2 before 15:00 and ×1.5 before 20:00; gold counts 1.5×, stone 1.2×. Plus "
-		"a bonus up to +1.5 for forward castles, Donjons and towers, by cost and effect (stood, held position, gained "
-		"ground, covered siege pushes, denied trade), and up to +1 for each enemy age-up delayed by destroying its "
-		"Town Center mid-research (verified by the age being clicked again; full at 4+ minutes lost)."),
+		"value from 8:00; units are scaled down when their damage was low both for their size, against the lobby median, "
+		"and in total, against the lobby's most: the better counts); **army sent at the enemy** 40% (each military unit "
+		"ordered at an enemy unit, building or base counts once a minute, at the player's average unit cost, scaled the "
+		"same way); **damage done** 15% (below); **first push** 10% (when the player's attack first killed an enemy "
+		"villager or razed a building, against their plan: Feudal aggression 10 by 9:06, 1 at 26:18; Fast Castle 10 "
+		"by 13:00, 1 at 34:06; otherwise 10 by 7:18, 1 at 29:12; never is 1). Early army counts ×2 before 15:00 and ×1.5 "
+		"before 20:00; gold counts 1.5×, stone 1.2×."),
+	("Pressure: damage done and bonuses", "**Damage done**: enemy army value killed in fights, 100 per villager killed, "
+		"enemy Town Centers destroyed (their cost; research and queued units refunded), enemy production that stalled while "
+		"the army was in their base (against the 5 minutes before), and **defence forced** by forward towers and castles "
+		"(walls, gates, towers and repairs near them in the next 10 minutes: their cost plus 25 per villager-minute). "
+		"Plus a bonus up to +1.5 for forward castles, Donjons and towers, by cost and effect (stood, held position, gained "
+		"ground, covered siege pushes, denied trade), and up to +1 for each enemy age-up delayed by destroying its Town "
+		"Center mid-research (verified by the age being clicked again; full at 4+ minutes lost)."),
 	("Holding position: keeping the base", "A base the enemy never seriously attacked scores 7: the position was held "
 		"and the fighting stayed elsewhere. An attacked base scores 1 + held × (4 + 5 × difficulty) + up to 1 for clearing "
 		"enemy castles. **Held** is the share of new economy buildings "
 		"kept at home after the attack began, less for Town Centers rebuilt elsewhere. **Difficulty** (0–1) is the "
 		"enemy army and castles sent into the base compared with the most-attacked base, plus 0.05 a minute "
-		"attacked by 2+ enemies at once (up to 0.3)."),
+		"attacked by 2+ enemies at once (up to 0.3). **Workers lost** to enemies (villagers, fishing ships, trade carts) "
+		"take 0.5 off for every 5% of the workforce lost before 40:00; after 40:00 only raids taking 20%+ of the "
+		"workforce within a few minutes count, 0.5 per 5% of them. At most 3 off, never below 1."),
 	("Team play: helping allies", "Weighted average of: **tributes sent** 50%; **army orders into allies' bases** 35% "
 		"(defending them); **flares** 15%."),
 	("Overall", "Flank: execution 27%, pressure 36%, holding position 27%, team play 10%. Pocket: 40%, 25%, 25%, 10%."),
+	("eAPM and accepted eAPM (not scored)", "**eAPM** (effective actions per minute): every command the player gave (unit orders, "
+		"building, queueing, research...), spam clicks included. Selecting units without giving a command never counts: "
+		"recordings hold commands, not selections. Clicks the game turned down for lack of resources do count, since the "
+		"recording keeps the click either way and only saves the total of all resources banked. **Accepted eAPM** also "
+		"leaves out commands that changed nothing: a stance or formation set again on the same units to what they already "
+		"had within 5 s (switching, e.g. spread, line, spread, counts every time) and the same tech clicked again while "
+		"already being researched."),
 ]
 
 
@@ -373,7 +389,12 @@ def explain_text(name, civ, ex):
 	if sc['surv'] is None:
 		out.append(f"\n**Holding position —** not scored: {sv['note']}, so its weight goes to the other scores")
 	elif sv.get('untested'):
-		out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}, so the base scores the set 7 for a held position")
+		if sv.get('worker_penalty'):
+			out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}\n= 7 for a held position − {sv['worker_penalty']:g} "
+				f"for workers lost to enemies (0.5 per 5% of the workforce before 40:00; after it, per 5% of raids taking 20%+; at most 3) "
+				f"→ **{_fmt_score(sc['surv'])}**")
+		else:
+			out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}, so the base scores the set 7 for a held position")
 	else:
 		level = 'heavy' if sv['difficulty'] >= 0.66 else 'moderate' if sv['difficulty'] >= 0.33 else 'light'
 		cleared = f", +{sv['cleared']:g} for clearing enemy castles" if sv.get('cleared') else ""
@@ -384,9 +405,14 @@ def explain_text(name, civ, ex):
 			out.append(f"• Held for {sv['hold_minutes']:g} minutes under pressure"
 				+ (f" before the economy moved out at {sv['lost_at']}" if sv.get('lost_at') else "")
 				+ f": +{sv['hold_credit']:g} (full credit from 10 minutes, for the part of the base that was lost).")
+		raw = 1 + sv['held'] * (4 + 5 * sv['difficulty']) + (sv.get('cleared') or 0) + (sv.get('hold_credit') or 0)
+		pen = sv.get('worker_penalty') or 0
 		out.append(f"= 1 + {sv['held']:g} × (4 + 5 × {sv['difficulty']:g})" + (f" + {sv['cleared']:g}" if sv.get('cleared') else "")
 			+ (f" + {sv['hold_credit']:g}" if sv.get('hold_credit') else "")
-			+ f" → **{_fmt_score(sc['surv'])}**" + (" (capped at 10)" if sc['surv'] >= 10 else ""))
+			+ (" (10 at most)" if pen and raw > 10 else "")
+			+ (f" − {pen:g} for workers lost to enemies (0.5 per 5% of the workforce before 40:00; after it, per 5% of "
+				f"raids taking 20%+; at most 3)" if pen else "")
+			+ f" → **{_fmt_score(sc['surv'])}**" + (" (capped at 10)" if not pen and raw > 10 else ""))
 
 	out.append(f"\n**Team play {_fmt_score(sc['team'])}**\n" + _parts_text(ex['team']))
 	calc, _ = _sum_text(ex['team'])

@@ -19,7 +19,7 @@ import time
 from core.console import log
 from core.database import db
 
-ANALYSIS_VERSION = 64  # 64: first push (first villager killed or building razed) is part of pressure; 63: survival counts how long a lost base held; 62: a Drush leads the strategy name, units upgraded in a later age count for it; 61: Dark Age army saved (army style counts every age); 60: Champis and Serjeants that build aren't villagers; army sent with villagers stays army
+ANALYSIS_VERSION = 65  # 65: workers lost to enemies cost holding points; tower rushes (Castle timing, forward towers as first military, forced defence); first push judged against the plan; eAPM and accepted eAPM; 64: first push (first villager killed or building razed) is part of pressure; 63: survival counts how long a lost base held; 62: a Drush leads the strategy name, units upgraded in a later age count for it; 61: Dark Age army saved (army style counts every age); 60: Champis and Serjeants that build aren't villagers; army sent with villagers stays army
 
 # Map categories used by the group's civ voting sheet; anything unknown stays "Other".
 MAP_CATEGORIES = [
@@ -185,7 +185,8 @@ db.ensure_table(dict(
 		dict(cname="feudal_s", ctype=db.types.int),
 		dict(cname="castle_s", ctype=db.types.int),
 		dict(cname="imperial_s", ctype=db.types.int),
-		dict(cname="apm", ctype=db.types.int),
+		dict(cname="apm", ctype=db.types.int),  # shown as eAPM
+		dict(cname="eapm", ctype=db.types.int),  # accepted eAPM
 		dict(cname="villagers", ctype=db.types.int),  # unused since version 9, see villagers_queued
 		dict(cname="villagers_queued", ctype=db.types.int),
 		dict(cname="villagers_made", ctype=db.types.int),
@@ -421,7 +422,7 @@ async def save(result, key, map_name=None, lobby=None, match_id=None, channel_id
 				imperial_units=", ".join(parts.get('imperial_units', [])),
 				forward_castles=parts.get('forward_castles'), tower_creep=parts.get('tower_creep'),
 				feudal_s=_secs(s['ages'].get('Feudal Age')), castle_s=_secs(s['ages'].get('Castle Age')),
-				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], villagers_queued=s['villagers_queued'], villagers_made=s.get('villagers_made'), villagers_killed=s.get('villagers_killed'), feudal_uptime=s.get('feudal_uptime'), spend_per_min=s.get('spend_per_min'), float_minutes=s.get('float_minutes'), fishing_ships_made=s.get('fishing_ships_made'), villagers_lost=s.get('villagers_lost'), villagers_peak=s.get('villagers_peak'), villager_value=s.get('villager_value'),
+				imperial_s=_secs(s['ages'].get('Imperial Age')), apm=s['apm'], eapm=s.get('eapm'), villagers_queued=s['villagers_queued'], villagers_made=s.get('villagers_made'), villagers_killed=s.get('villagers_killed'), feudal_uptime=s.get('feudal_uptime'), spend_per_min=s.get('spend_per_min'), float_minutes=s.get('float_minutes'), fishing_ships_made=s.get('fishing_ships_made'), villagers_lost=s.get('villagers_lost'), villagers_peak=s.get('villagers_peak'), villager_value=s.get('villager_value'),
 				unplanned_floating=s.get('floating'), trade_carts=s.get('trade_carts'),
 				macro_bonus=s.get('macro_bonus'), no_trade_penalty=s.get('no_trade_penalty'), avg_pop=s.get('avg_pop'), gold_starved=int(bool(s.get('gold_starved'))),
 				late_gold_share=s.get('late_gold_share'),

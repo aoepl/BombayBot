@@ -110,8 +110,9 @@ async def aoe_strats(ctx, player: Member = None):
 	embed = Embed(title=f"Stats: {get_nick(target)}")
 	for name, value in summaries.strats_lines(s):
 		embed.add_field(name=name, value=value[:1024], inline=False)
-	embed.set_footer(text="From the games analysed in this channel. Luck: share of a player's best position, army style "
-		"and strategy (by average score) they got in each game.")
+	embed.set_footer(text="From the games analysed in this channel. Game plan: the opening (strategy) and the army "
+		"style it led to, judged together. Luck: share of a player's best position and game plan (by average score) "
+		"they got in each game.")
 	await ctx.reply(embed=embed)
 
 
@@ -238,15 +239,15 @@ def _draft_embeds(match, res, model, games, author):
 			if per_player:
 				lines.append((f"{s.seat} · " if s.seat else "") + f"**{s.name}** → **{s.civ}**")
 			else:
-				# The team decides who plays where: show the seat the civ suits better, not the slot it filled.
-				seat = draft.better_seat(model, s.civ, res['map'], res.get('category')) if s.seat else None
-				lines.append(f"**{s.civ}**" + (f" · {seat.lower()}" if seat else ""))
+				# The seat the draft gave this civ: the team's civs are placed together, so the arrangement with the best
+				# total (Ethiopians flank + Berbers pocket vs the other way round), not each civ's own better seat.
+				lines.append(f"**{s.civ}**" + (f" · {s.seat.lower()}" if s.seat else ""))
 		short.add_field(name=f"{t.emoji} {t.name} `〈{elo}〉`", value="\n".join(lines)[:1024], inline=True)
 	short.set_footer(text=f"{civ_line} {len(out)} of {res['civ_count']} civs left out at random. Drawn by {author}.")
 
 	details = Embed(title=f"Why these civs: {where}", colour=0x9a5b13)
 	for i, team in enumerate(res['teams']):
-		why = [f"**{s.civ}**: {draft.pick_reason(model, res, i, j, None if per_player or not s.seat else draft.better_seat(model, s.civ, res['map'], res.get('category')))}"
+		why = [f"**{s.civ}**: {draft.pick_reason(model, res, i, j)}"
 			for j, s in enumerate(team)]
 		chunk, n = [], 0
 		for line in why:  # an embed field holds 1024 characters: carry on in another field rather than cut a line
@@ -295,7 +296,9 @@ def _draft_embeds(match, res, model, games, author):
 def _draft_view(match_id, number):
 	""" The "Why these civs?" button under a draft (answered by draft_button, also after the bot restarts). """
 	from nextcord import ButtonStyle, ui
-	view = ui.View(timeout=None)
+	# auto_defer off: otherwise nextcord acknowledges the click itself while the view is alive, often before
+	# draft_button answers, and Discord then refuses the answer (one response per click) so nothing shows.
+	view = ui.View(timeout=None, auto_defer=False)
 	view.add_item(ui.Button(label="Why these civs?", style=ButtonStyle.secondary,
 		custom_id=f"{DRAFT_BUTTON}:{match_id}:{number}"))
 	return view
