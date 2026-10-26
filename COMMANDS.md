@@ -49,7 +49,7 @@
 | /aoe link             | Link an in-game name to your account (moderators: to anyone) |
 | /aoe unlink           | Remove a linked in-game name                            |
 | /aoe names            | Show the in-game names linked to a member               |
-| /aoe stat             | A player's record from analysed games: flank/pocket, APM, results against Elo, best position/army style/strategy, individual and team luck |
+| /aoe stat             | A player's record from analysed games: flank/pocket, APM, results against Elo, best position and game plan (strategy + army style), individual and team luck |
 | /aoe civs             | Civ win rates from analysed games, overall or for one map, best civs by Elo range, position and map |
 | /aoe seats            | How many times each player was flank and pocket (win rate), optionally on one map or map type; with a player: their flank and pocket record by map and civ |
 | /aoe draft            | Civ draft for your started match. mode team: 6 civs for each team to choose from, players decide who plays what and where; mode player: a civ and flank/pocket position for every player. 35-40 random civs are left out first. One draft per match (asking again shows it); moderators can redraw. Uses the map the queue drew (optional map when the match has none) |

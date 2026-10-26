@@ -110,8 +110,9 @@ async def aoe_strats(ctx, player: Member = None):
 	embed = Embed(title=f"Stats: {get_nick(target)}")
 	for name, value in summaries.strats_lines(s):
 		embed.add_field(name=name, value=value[:1024], inline=False)
-	embed.set_footer(text="From the games analysed in this channel. Luck: share of a player's best position, army style "
-		"and strategy (by average score) they got in each game.")
+	embed.set_footer(text="From the games analysed in this channel. Game plan: the opening (strategy) and the army "
+		"style it led to, judged together. Luck: share of a player's best position and game plan (by average score) "
+		"they got in each game.")
 	await ctx.reply(embed=embed)
 
 

@@ -9,7 +9,7 @@ from collections import Counter, defaultdict
 
 from core.database import db
 
-MIN_GAMES = 2        # games in a seat/style/strategy before it can be someone's "best"
+MIN_GAMES = 2        # games in a seat/game plan before it can be someone's "best"
 MIN_CIV_GAMES = 2    # games with a civ before it can be listed among the best civs
 ELO_RANGES = ((0, 1400, "under 1400"), (1400, 1600, "1400–1599"), (1600, 1800, "1600–1799"), (1800, 99999, "1800+"))
 
@@ -89,6 +89,11 @@ def army_style(row):
 	return _style_of([row.get('feudal_units')]) or 'Other'  # a few Feudal units, nothing else
 
 
+def game_plan(row):
+	""" Strategy plus army style, e.g. "Fast Castle, farm boom → Archers": the opening and the army it led to. """
+	return f"{strategy_key(row)} → {army_style(row)}"
+
+
 def strategy_key(row):
 	""" The opening plus the boom, e.g. "Fast Castle, farm boom" (comparable across games). """
 	parts = [row.get('opening') or 'Standard']
@@ -136,13 +141,16 @@ def _best(rows, key):
 
 
 def bests(rows):
-	""" A player's best seat, army style and strategy, by average overall score. """
-	return dict(seat=_best(rows, lambda r: r.get('seat')), style=_best(rows, army_style), strategy=_best(rows, strategy_key))
+	"""
+	A player's best seat and game plan (strategy + army style together), by average overall score. The plan is
+	judged as one pair, so the best strategy and the best army come from the same games.
+	"""
+	return dict(seat=_best(rows, lambda r: r.get('seat')), plan=_best(rows, game_plan))
 
 
 def _got_best(row, best):
 	""" Share (0..1) of the player's known bests they got in this game, or None when no best is known yet. """
-	checks = [(best['seat'], row.get('seat')), (best['style'], army_style(row)), (best['strategy'], strategy_key(row))]
+	checks = [(best['seat'], row.get('seat')), (best['plan'], game_plan(row))]
 	checks = [(b, v) for b, v in checks if b]
 	return sum(1 for b, v in checks if b == v) / len(checks) if checks else None
 
@@ -163,7 +171,7 @@ def player_summary(all_rows, user_id):
 	deltas = [r['elo_delta'] for r in mine if r.get('elo_delta') is not None]
 	best = bests(mine)
 
-	# Individual luck: how often the player got their best seat, army style and strategy.
+	# Individual luck: how often the player got their best seat and game plan.
 	got = [g for g in (_got_best(r, best) for r in mine) if g is not None]
 	# Team luck: how often their teammates got their own bests (teammates with enough games to have bests).
 	by_user = defaultdict(list)
@@ -206,9 +214,9 @@ def strats_lines(s):
 			f"Pocket {s['seats']['Pocket'][0]} games (won {s['seats']['Pocket'][1]})"),
 		("Average eAPM", str(s['apm'] or "—")),
 		("Against their BombayBot Elo", verdict),
-		("Best", f"Position: {b['seat'] or '—'} · Army style: {b['style'] or '—'} · Strategy: {b['strategy'] or '—'}"
+		("Best", f"Position: {b['seat'] or '—'} · Game plan: {b['plan'] or '—'}"
 			f"\n(by average score, {MIN_GAMES}+ games each)"),
-		("Individual luck", f"{s['luck']}% of their bests (position, army style, strategy) per game"
+		("Individual luck", f"{s['luck']}% of their bests (position, game plan) per game"
 			if s['luck'] is not None else "Not enough games yet"),
 		("Team luck", f"{s['team_luck']}% of their teammates' bests per game"
 			if s['team_luck'] is not None else "Not enough games yet"),
