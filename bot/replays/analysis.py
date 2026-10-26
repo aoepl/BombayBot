@@ -509,10 +509,11 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			first_push[k], push_what[k] = t, f"a villager of {players[v]['name']}'s killed at {mmss(t)}"
 	for p in pids:
 		stats[p]['first_push'], stats[p]['first_push_what'] = first_push[p], push_what[p]
-	# Scored by the clock, not against the lobby (a late first push isn't as good as an early one just because
-	# nobody else pushed): 10 by PUSH_FAST, 1 at PUSH_SLOW or later, or never.
-	push = {p: 1.0 if t is None else 10 - 9 * min(1.0, max(0.0, (t - PUSH_FAST) / (PUSH_SLOW - PUSH_FAST)))
-		for p, t in first_push.items()}
+	# Judged against the player's plan (see PUSH_PLANS): a Fast Castle's first push comes later on purpose.
+	plan = {p: push_plan(stats[p]) for p in pids}
+	push = {p: push_score(first_push[p], plan[p]) for p in pids}
+	for p in pids:
+		stats[p]['push_plan'] = plan[p]
 	# Parts nobody did (no forward castles or towers in the game) are left out and their weight spread over the rest.
 	press = {p: _combine([(0.35, None, on_map), (0.40, None, sent), (0.15, None, damage), (0.10, None, push)], p)
 		for p in pids}
@@ -728,7 +729,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		pr_parts = [dict(name=n, value=f(raw[p]), score=round(sc_[p], 1), weight=w,
 			range=lobby_range(raw, f, n == "First push")) for n, raw, f, w, sc_ in press_info]
 		pr_parts[3]['note'] = (f"first damage: {push_what[p]}; " if push_what[p] else "") + \
-			"how soon an attack first killed a villager or razed a building: 10 by 8:00, down to 1 at 30:00 or never"
+			f"judged against a {plan[p]} plan: 10 by {mmss(PUSH_PLANS[plan[p]][0])}, down to 1 at {mmss(PUSH_PLANS[plan[p]][1])} or never"
 		notes = []
 		for x in st.get('buildings_destroyed_list', []):
 			notes.append(f"{x['value']:,} for {players[x['victim']]['name']}'s Town Center destroyed at {mmss(x['t'])}")
@@ -1393,10 +1394,36 @@ RAZE_NEAR = 12               # tiles: enemy castles, Donjons and towers this clo
 RAZE_STRUCT_CLICKS = 5       # a nearby enemy castle counts like 5 attack clicks when sharing credit
 
 
-PUSH_FAST = 8 * 60000    # first damage by this time scores 10 ...
-PUSH_SLOW = 30 * 60000   # ... down to 1 by this time
+# First push is judged against the player's plan, not the clock alone: a Fast Castle hits later than a Feudal rush
+# on purpose. Each plan's range is the early and late tenth of its first-damage times (500 random team games of
+# 1600+ players, last 90 days): 10 by the first, down to 1 at the second or never.
+PUSH_PLANS = {
+	'Feudal aggression': (int(9.1 * 60000), int(26.3 * 60000)),   # Feudal army, tower rush or military before Feudal
+	'Fast Castle': (int(13.0 * 60000), int(34.1 * 60000)),        # Castle Age clicked within 5:00 of reaching Feudal
+	'standard': (int(7.3 * 60000), int(29.2 * 60000)),            # anything else
+}
+FAST_CASTLE_GAP = 5 * 60000
 RAZE_USED_AFTER = 180000  # a building its owner kept using this long after the last enemy hit still stood
 RAZE_QUIET_END = 300000   # ... as did one still used in the game's last 5 minutes
+
+
+def push_plan(st):
+	"""The plan a player's first push is judged against (see PUSH_PLANS)."""
+	ages = st.get('ages', {})
+	feudal, castle, fm = ages.get('Feudal Age'), ages.get('Castle Age'), st.get('first_military')
+	if st.get('feudal_units', 0) >= FEUDAL_ARMY_MIN or st.get('tower_rush') or (fm is not None and feudal and fm < feudal):
+		return 'Feudal aggression'
+	if feudal and castle and castle - feudal <= FAST_CASTLE_GAP:
+		return 'Fast Castle'
+	return 'standard'
+
+
+def push_score(t, plan):
+	"""10 by the plan's early first push, down to 1 at its late one or never."""
+	if t is None:
+		return 1.0
+	fast, slow = PUSH_PLANS[plan]
+	return 10 - 9 * min(1.0, max(0.0, (t - fast) / (slow - fast)))
 
 
 def first_damage(A, players, vest, end):
