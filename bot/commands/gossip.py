@@ -25,6 +25,9 @@ READ_LIMIT = 20000           # messages read per channel at most, to find them
 QUEUE_COMMAND = re.compile(r'^(?:(?:\+\+|--)\s*\S*|[+-][A-Za-z0-9]\S*)$')
 MAX_CHARS = 150_000          # chat sent to the AI (the most recent part, when there is more)
 MESSAGE_CHARS = 400          # one message is cut to this
+REACTION_REQUESTS = 50       # Discord requests for who reacted, only on messages in or just after the quarrels
+REACTORS_SHOWN = 10          # names per emoji (the rest as +n)
+AFTER_QUARREL = 15           # messages after a quarrel whose reactions still count as watching it
 COOLDOWN_S = 10 * 60         # per queue channel, so the channel isn't flooded
 _last_run = {}
 
@@ -58,8 +61,21 @@ def _readable(channel, member):
 	return perms.view_channel and perms.read_message_history
 
 
-def _line(msg, num, ids, names):
-	""" One message as a line for the AI: #12 [Mon 21:04] Name (replying to #9 Other): text [😂×3] """
+def _reactions(msg, reactors):
+	""" [😂 Morty, Orca +1 · 🍿×2]: who reacted where it was looked up (reactors: {message id: {emoji: names}}). """
+	parts = []
+	for r in msg.reactions:
+		who = (reactors.get(msg.id) or {}).get(str(r.emoji))
+		if who:
+			more = r.count - len(who)
+			parts.append(f"{r.emoji} {', '.join(who)}" + (f" +{more}" if more > 0 else ''))
+		else:
+			parts.append(f"{r.emoji}×{r.count}")
+	return f" [{' · '.join(parts)}]" if parts else ''
+
+
+def _line(msg, num, ids, names, reactors):
+	""" One message as a line for the AI: #12 [Mon 21:04] Name (replying to #9 Other): text [😂 Morty, Orca · 🍿×2] """
 	text = msg.clean_content.replace('\n', ' ').strip()
 	if len(text) > MESSAGE_CHARS:
 		text = text[:MESSAGE_CHARS] + '…'
@@ -73,13 +89,34 @@ def _line(msg, num, ids, names):
 	ref = msg.reference.message_id if msg.reference else None
 	if ref in ids:
 		reply = f" (replying to #{ids[ref][0]} {ids[ref][1]})"
-	reactions = ' '.join(f"{r.emoji}×{r.count}" for r in msg.reactions)
-	return (f"#{num} [{msg.created_at.strftime('%a %H:%M')}] {names[msg.author.id]}{reply}: {text}"
-		+ (f" [{reactions}]" if reactions else ''))
+	return f"#{num} [{msg.created_at.strftime('%a %H:%M')}] {names[msg.author.id]}{reply}: {text}" + _reactions(msg, reactors)
+
+
+async def _who_reacted(kept, ids, spans, out):
+	"""
+	Who reacted to the messages in or just after the quarrels (spans: [(first #, last #)]), most-reacted first, at
+	most REACTION_REQUESTS requests. Reactions are read now, so they can differ a little from the time of the quarrel.
+	"""
+	wanted = [m for _, m in kept if m.reactions and any(a <= ids[m.id][0] <= b + AFTER_QUARREL for a, b in spans)]
+	wanted.sort(key=lambda m: -sum(r.count for r in m.reactions))
+	reactors, requests = {}, 0
+	for m in wanted:
+		for r in m.reactions:
+			if requests >= REACTION_REQUESTS:
+				return reactors
+			requests += 1
+			try:
+				users = [u async for u in r.users(limit=REACTORS_SHOWN + 5)]
+			except Exception:  # noqa: BLE001 - deleted message or missing permission: keep the count only
+				continue
+			who = [getattr(u, 'display_name', None) or u.name for u in users if not u.bot and u.id not in out]
+			if who:
+				reactors.setdefault(m.id, {})[str(r.emoji)] = who[:REACTORS_SHOWN]
+	return reactors
 
 
 async def gossip(ctx, period: str = '1d', channel_2: TextChannel = None, channel_3: TextChannel = None):
-	from bot.bombay.ai import generate_gossip
+	from bot.bombay.ai import generate_gossip, find_quarrels
 
 	days = PERIODS.get(period)
 	if days is None:
@@ -142,17 +179,17 @@ async def gossip(ctx, period: str = '1d', channel_2: TextChannel = None, channel
 		ids[m.id] = (len(kept) + 1, names[m.author.id])
 		kept.append((ch, m))
 
-	per_channel, lines = {}, []
-	for ch, m in kept:
-		line = _line(m, ids[m.id][0], ids, names)
-		if line:
-			per_channel.setdefault(ch.name, []).append(line)
-	for name, ls in per_channel.items():
-		lines.append(f"=== #{name} ===")
-		lines += ls
-	text = '\n'.join(lines)
-	if len(text) > MAX_CHARS:
-		text = text[-MAX_CHARS:].split('\n', 1)[-1]
+	def chat(reactors):
+		per_channel, lines = {}, []
+		for ch, m in kept:
+			line = _line(m, ids[m.id][0], ids, names, reactors)
+			if line:
+				per_channel.setdefault(ch.name, []).append(line)
+		for name, ls in per_channel.items():
+			lines.append(f"=== #{name} ===")
+			lines += ls
+		text = '\n'.join(lines)
+		return text[-MAX_CHARS:].split('\n', 1)[-1] if len(text) > MAX_CHARS else text
 
 	where = ', '.join(f"#{c.name}" for c in channels)
 	when = 'the last day' if days == 1 else f'the last {days} days'
@@ -162,6 +199,14 @@ async def gossip(ctx, period: str = '1d', channel_2: TextChannel = None, channel
 		return
 
 	try:
+		# First find the quarrels, then look up who reacted only around them, then write the recap.
+		text = chat({})
+		try:
+			spans = await find_quarrels(text)
+		except Exception:  # noqa: BLE001 - the recap still works with reaction counts only
+			spans = []
+		if spans:
+			text = chat(await _who_reacted(kept, ids, spans, out))
 		recap = await generate_gossip(text, where, when)
 	except Exception:
 		_last_run.pop(ctx.qc.id, None)  # the AI failed: let them try again straight away

@@ -101,16 +101,39 @@ async def generate_replay_summary(game_text: str) -> str | None:
 	)
 
 
+async def find_quarrels(chat: str) -> list[tuple[int, int]]:
+	""" The quarrels in a chat log (/gossip) as (first message #, last message #) pairs, at most 6. """
+	import json
+	import re
+	answer = await _generate(
+		(
+			"Below is a Discord chat log; each line starts with '#number'. Find the quarrels: arguments, beefs, heated "
+			"disagreements or trash talk between people (friendly banter with no real disagreement is not a quarrel). "
+			"Answer with JSON only: a list of at most 6 [first message number, last message number] pairs, e.g. "
+			"[[12, 30], [101, 110]], or [] when there are none.\n\n"
+			f"{chat}"
+		)
+	)
+	found = re.search(r'\[.*\]', answer or '', re.S)
+	spans = []
+	for pair in (json.loads(found.group(0)) if found else []):
+		if isinstance(pair, (list, tuple)) and len(pair) == 2 and all(isinstance(x, int) for x in pair):
+			spans.append((min(pair), max(pair)))
+	return spans[:6]
+
+
 async def generate_gossip(chat: str, where: str, when: str) -> str | None:
 	""" A light, fun recap of the quarrels in a channel's chat log (/gossip). """
 	return await _generate(
 		(
 			"You are the friendly gossip columnist of a gaming community's Discord (Age of Empires II pickup games). "
 			f"Below is the chat from {where} over {when}. Each line is '#number [time] Name (replying to #n Other): "
-			"message [reactions]'. Find the quarrels: arguments, beefs, heated disagreements and trash talk between people.\n"
+			"message [reactions]'; reactions show the emoji and who reacted (e.g. [😂 Morty, Orca +2]) or just a count "
+			"(e.g. [😂×3]) when it wasn't looked up. Find the quarrels: arguments, beefs, heated disagreements and trash talk between people.\n"
 			"For each quarrel (most entertaining first, at most 6) write:\n"
 			"**Name vs Name** — a short, playful headline of what it was about\n"
-			"🍿 Enjoying the show: who was clearly entertained or egging it on (laughing, reacting, cheering, piling in), "
+			"🍿 Enjoying the show: who was clearly entertained or egging it on (laughing, cheering, piling in, and the people who "
+			"reacted with laughing or popcorn-style emojis to the quarrel's messages), "
 			"or 'nobody, tough crowd' if no one\n"
 			"🧾 Receipts: who had the better case, judged only on evidence in the chat (facts, results, screenshots, "
 			"what people actually said), in one or two sentences; say it's a draw when it isn't clear.\n"
