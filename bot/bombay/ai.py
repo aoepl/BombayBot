@@ -123,7 +123,8 @@ async def find_quarrels(chat: str) -> list[tuple[int, int]]:
 
 
 async def generate_gossip(chat: str, where: str, when: str) -> str | None:
-	""" A short, neutral summary of the disagreements in a channel's chat log (/gossip), for people who missed them. """
+	""" A short, neutral summary of the disagreements in a channel's chat log (/gossip), for people who missed them,
+	then a little friendly banter about the spectators and the light moments. """
 	return await _generate(
 		(
 			"You summarise a gaming community's Discord (Age of Empires II pickup games) for members who missed the chat. "
@@ -143,7 +144,13 @@ async def generate_gossip(chat: str, where: str, when: str) -> str | None:
 			"invent anything. Never quote insults, slurs or crude remarks in any language (including Hindi and Hinglish): "
 			"say that someone made a personal remark or an insult instead. Leave out personal details (health, mental "
 			"health, family, money). Friendly banter with no real disagreement is not a disagreement. If there were none, "
-			"say so in one sentence. Discord markdown, under 3500 characters.\n\n"
+			"say so in one sentence.\n"
+			"After the summaries, add a short section headed **🍿 From the stands** (3 to 5 lines): light, friendly banter "
+			"about the spectators (who grabbed popcorn, piled on with reactions, chimed in from the side) and the light "
+			"moments in the chat (jokes, odd tangents, funny one-liners). Tease gently, like friends would. Here, and only "
+			"here, humour is welcome, but never about the disagreements themselves or anyone who seemed upset, never "
+			"taking a side, and the same rules on insults and personal details apply. Leave the section out if there is "
+			"nothing light to say. Discord markdown, under 3500 characters in all.\n\n"
 			f"{chat}"
 		)
 	)
