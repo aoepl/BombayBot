@@ -101,6 +101,29 @@ async def generate_replay_summary(game_text: str) -> str | None:
 	)
 
 
+async def generate_gossip(chat: str, where: str, when: str) -> str | None:
+	""" A light, fun recap of the quarrels in a channel's chat log (/gossip). """
+	return await _generate(
+		(
+			"You are the friendly gossip columnist of a gaming community's Discord (Age of Empires II pickup games). "
+			f"Below is the chat from {where} over {when}. Each line is '#number [time] Name (replying to #n Other): "
+			"message [reactions]'. Find the quarrels: arguments, beefs, heated disagreements and trash talk between people.\n"
+			"For each quarrel (most entertaining first, at most 6) write:\n"
+			"**Name vs Name** — a short, playful headline of what it was about\n"
+			"🍿 Enjoying the show: who was clearly entertained or egging it on (laughing, reacting, cheering, piling in), "
+			"or 'nobody, tough crowd' if no one\n"
+			"🧾 Receipts: who had the better case, judged only on evidence in the chat (facts, results, screenshots, "
+			"what people actually said), in one or two sentences; say it's a draw when it isn't clear.\n"
+			"Rules: keep it light and teasing, like friendly banter, never mean or humiliating. Use only names and events "
+			"that appear in the chat and do not invent anything. Do not quote slurs or insults word for word. Leave out "
+			"anything serious or personal (health, family, money, real-life threats, someone who seems genuinely upset): "
+			"those are not gossip. Friendly game banter with no real disagreement is not a quarrel. If there were no "
+			"quarrels, say so in one or two fun sentences. Discord markdown, under 3500 characters.\n\n"
+			f"{chat}"
+		)
+	)
+
+
 MAP_TYPES = ('Open', 'Closed', 'Semi Closed', 'Hybrid', 'Nomad', 'Water')
 
 

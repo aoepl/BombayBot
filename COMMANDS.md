@@ -42,6 +42,8 @@
 | /lastgame             | Show last played match                                  |
 | /top                  | Show top active players on the channel                  |
 | /stats show           | Show overall channel stats                              |
+| /gossip               | AI recap of the quarrels in this channel over the last 1d/2d/3d/7d (optionally 2 more channels): who argued about what, who enjoyed watching, who had the receipts. Light and teasing; once per 10 min per channel; only channels you can read |
+| /gossip_optout        | Leave yourself out of /gossip completely (your messages, replies to you and messages mentioning you); run again to opt back in |
 
 #### Game breakdowns (AoE2 replays)
 | command               | description                                             |
