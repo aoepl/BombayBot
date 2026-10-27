@@ -18,7 +18,11 @@ from core.utils import get_nick
 import bot
 
 PERIODS = {'1d': 1, '2d': 2, '3d': 3, '7d': 7}
-MAX_MESSAGES = 4000          # most recent messages read per run, over all channels
+MAX_MESSAGES = 4000          # most recent people's messages (not bots, not queue commands) used per run
+READ_LIMIT = 20000           # messages read per channel at most, to find them
+# Queue commands carry no conversation: ++, --, +domestic, -1v1, ++ domestic ... (and anything starting with the
+# channel's command prefix, e.g. !add).
+QUEUE_COMMAND = re.compile(r'^(?:(?:\+\+|--)\s*\S*|[+-][A-Za-z0-9]\S*)$')
 MAX_CHARS = 150_000          # chat sent to the AI (the most recent part, when there is more)
 MESSAGE_CHARS = 400          # one message is cut to this
 COOLDOWN_S = 10 * 60         # per queue channel, so the channel isn't flooded
@@ -106,19 +110,31 @@ async def gossip(ctx, period: str = '1d', channel_2: TextChannel = None, channel
 		if out_names else None
 
 	since = datetime.now(timezone.utc) - timedelta(days=days)
-	msgs = []
+	prefix = getattr(getattr(ctx.qc, 'cfg', None), 'prefix', None) or '!'
+
+	def is_command(m):
+		text = m.content.strip()
+		return bool(QUEUE_COMMAND.match(text)) or (len(text) > 1 and text.startswith(prefix) and text[1].isalpha())
+
+	msgs, author_of = [], {}
 	for ch in channels:
-		async for m in ch.history(after=since, limit=MAX_MESSAGES, oldest_first=False):
+		n = 0
+		async for m in ch.history(after=since, limit=READ_LIMIT, oldest_first=False):
+			author_of[m.id] = m.author.id
+			if m.author.bot or is_command(m):
+				continue
 			msgs.append((ch, m))
+			n += 1
+			if n >= MAX_MESSAGES:
+				break
 	msgs.sort(key=lambda x: x[1].created_at)
 	msgs = msgs[-MAX_MESSAGES:]
 
-	ids, names, by_id, kept = {}, {}, {m.id: m for _, m in msgs}, []
+	ids, names, kept = {}, {}, []
 	for ch, m in msgs:
-		if m.author.bot or m.author.id in out:
+		if m.author.id in out:
 			continue
-		ref = by_id.get(m.reference.message_id) if m.reference else None
-		if ref is not None and ref.author.id in out:
+		if m.reference and author_of.get(m.reference.message_id) in out:
 			continue
 		if any(u.id in out for u in m.mentions) or (name_re and name_re.search(m.clean_content)):
 			continue
