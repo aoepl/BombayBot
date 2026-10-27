@@ -2,7 +2,8 @@
 """
 /gossip: an AI recap of the quarrels in this channel (and any other channels given) over the last day or week, in a
 neutral summary for people who missed it: who disagreed with whom and about what, each side's position, who else
-weighed in or reacted, and where it stands. It doesn't say who was right.
+weighed in or reacted, and where it stands. It doesn't say who was right. Then a little friendly banter ("From the
+stands") about the spectators and the light moments.
 
 People who ran /gossip_optout are left out completely: their messages, replies to them and messages that mention them
 are never sent to the AI. Only channels both the bot and the person asking can read are used.

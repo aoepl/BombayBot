@@ -42,7 +42,7 @@
 | /lastgame             | Show last played match                                  |
 | /top                  | Show top active players on the channel                  |
 | /stats show           | Show overall channel stats                              |
-| /gossip               | Neutral AI summary of the disagreements in this channel over the last 1d/2d/3d/7d (optionally 2 more channels; bot messages and queue commands like ++ and -- are skipped; who reacted is looked up around the quarrels it finds, up to 50 requests): a neutral summary for people who missed it: who disagreed about what, each side's position, who weighed in or reacted, where it stands (no verdicts, insults never quoted); once per 10 min per channel; only channels you can read |
+| /gossip               | Neutral AI summary of the disagreements in this channel over the last 1d/2d/3d/7d (optionally 2 more channels; bot messages and queue commands like ++ and -- are skipped; who reacted is looked up around the quarrels it finds, up to 50 requests): a neutral summary for people who missed it: who disagreed about what, each side's position, who weighed in or reacted, where it stands (no verdicts, insults never quoted), then light banter about the spectators and the fun moments; once per 10 min per channel; only channels you can read |
 | /gossip_optout        | Leave yourself out of /gossip completely (your messages, replies to you and messages mentioning you); run again to opt back in |
 
 #### Game breakdowns (AoE2 replays)
