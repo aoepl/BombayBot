@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 /gossip: an AI recap of the quarrels in this channel (and any other channels given) over the last day or week, in a
-light, fun tone: who argued with whom and about what, who enjoyed watching, and who had the receipts.
+neutral summary for people who missed it: who disagreed with whom and about what, each side's position, who else
+weighed in or reacted, and where it stands. It doesn't say who was right.
 
 People who ran /gossip_optout are left out completely: their messages, replies to them and messages that mention them
 are never sent to the AI. Only channels both the bot and the person asking can read are used.
@@ -123,7 +124,7 @@ async def gossip(ctx, period: str = '1d', channel_2: TextChannel = None, channel
 		raise bot.Exc.ValueError(f"Period must be one of {', '.join(PERIODS)}.")
 	wait = _last_run.get(ctx.qc.id, 0) + COOLDOWN_S - time.time()
 	if wait > 0:
-		raise bot.Exc.PermissionError(f"The tea is still brewing: /gossip can run again here in {int(wait // 60) + 1} min.")
+		raise bot.Exc.PermissionError(f"/gossip can run again here in {int(wait // 60) + 1} min.")
 
 	channels = []
 	for ch in (ctx.channel, channel_2, channel_3):
@@ -195,7 +196,7 @@ async def gossip(ctx, period: str = '1d', channel_2: TextChannel = None, channel
 	when = 'the last day' if days == 1 else f'the last {days} days'
 	if len(kept) < 5:
 		_last_run.pop(ctx.qc.id, None)
-		await ctx.reply(f"🍵 Barely anything said in {where} over {when}. No tea to spill.")
+		await ctx.reply(f"Barely anything was said in {where} over {when}: nothing to summarise.")
 		return
 
 	try:
@@ -211,8 +212,8 @@ async def gossip(ctx, period: str = '1d', channel_2: TextChannel = None, channel
 	except Exception:
 		_last_run.pop(ctx.qc.id, None)  # the AI failed: let them try again straight away
 		raise
-	embed = Embed(title=f"🍵 Gossip: {where}, {when}", description=(recap or "The AI had nothing to say.")[:4000],
+	embed = Embed(title=f"What happened in {where}, {when}", description=(recap or "The AI had nothing to say.")[:4000],
 		colour=0xc9a227)
-	embed.set_footer(text=f"Read {len(kept)} messages from {len(names)} people. All in good fun: verdicts come only "
-		"from what was said in chat. Don't want to be in it? /gossip_optout")
+	embed.set_footer(text=f"AI summary of {len(kept)} messages from {len(names)} people. It may miss context; it doesn't "
+		"say who was right. Don't want to be in it? /gossip_optout")
 	await ctx.reply(embed=embed)

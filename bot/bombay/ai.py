@@ -123,25 +123,27 @@ async def find_quarrels(chat: str) -> list[tuple[int, int]]:
 
 
 async def generate_gossip(chat: str, where: str, when: str) -> str | None:
-	""" A light, fun recap of the quarrels in a channel's chat log (/gossip). """
+	""" A short, neutral summary of the disagreements in a channel's chat log (/gossip), for people who missed them. """
 	return await _generate(
 		(
-			"You are the friendly gossip columnist of a gaming community's Discord (Age of Empires II pickup games). "
+			"You summarise a gaming community's Discord (Age of Empires II pickup games) for members who missed the chat. "
 			f"Below is the chat from {where} over {when}. Each line is '#number [time] Name (replying to #n Other): "
 			"message [reactions]'; reactions show the emoji and who reacted (e.g. [😂 Morty, Orca +2]) or just a count "
-			"(e.g. [😂×3]) when it wasn't looked up. Find the quarrels: arguments, beefs, heated disagreements and trash talk between people.\n"
-			"For each quarrel (most entertaining first, at most 6) write:\n"
-			"**Name vs Name** — a short, playful headline of what it was about\n"
-			"🍿 Enjoying the show: who was clearly entertained or egging it on (laughing, cheering, piling in, and the people who "
-			"reacted with laughing or popcorn-style emojis to the quarrel's messages), "
-			"or 'nobody, tough crowd' if no one\n"
-			"🧾 Receipts: who had the better case, judged only on evidence in the chat (facts, results, screenshots, "
-			"what people actually said), in one or two sentences; say it's a draw when it isn't clear.\n"
-			"Rules: keep it light and teasing, like friendly banter, never mean or humiliating. Use only names and events "
-			"that appear in the chat and do not invent anything. Do not quote slurs or insults word for word. Leave out "
-			"anything serious or personal (health, family, money, real-life threats, someone who seems genuinely upset): "
-			"those are not gossip. Friendly game banter with no real disagreement is not a quarrel. If there were no "
-			"quarrels, say so in one or two fun sentences. Discord markdown, under 3500 characters.\n\n"
+			"(e.g. [😂×3]) when it wasn't looked up. Find the disagreements: arguments, disputes and heated exchanges "
+			"between people.\n"
+			"For each one (most significant first, at most 6) write:\n"
+			"**Name vs Name — topic in a few words**\n"
+			"What happened: two or three plain sentences, in order, of what was said and how it developed.\n"
+			"Positions: each main person's point in one short sentence, in their own terms, as fairly as the other side's.\n"
+			"Others: who else weighed in and on which side, and who reacted (from the reactions), in one sentence; "
+			"leave this line out if nobody did.\n"
+			"Where it stands: resolved, agreed to disagree, or still open (and what is pending, e.g. a decision by the admins).\n"
+			"Rules: be neutral and factual, like a news summary. Do not say who was right or wrong, do not take sides, do not "
+			"joke or tease, and do not judge anyone's character. Use only names and events that appear in the chat and do not "
+			"invent anything. Never quote insults, slurs or crude remarks in any language (including Hindi and Hinglish): "
+			"say that someone made a personal remark or an insult instead. Leave out personal details (health, mental "
+			"health, family, money). Friendly banter with no real disagreement is not a disagreement. If there were none, "
+			"say so in one sentence. Discord markdown, under 3500 characters.\n\n"
 			f"{chat}"
 		)
 	)

@@ -666,7 +666,7 @@ async def _bombayai(
 ): await run_slash(bot.commands.bombayai, interaction=interaction, player=player)
 
 
-@dc.slash_command(name='gossip', description='AI recap of the quarrels in this channel: who argued, who enjoyed it, who had the receipts.', **guild_kwargs)
+@dc.slash_command(name='gossip', description='Neutral AI summary of the disagreements in this channel: who, about what, where it stands.', **guild_kwargs)
 async def _gossip(
 		interaction: Interaction,
 		period: str = SlashOption(choices=['1d', '2d', '3d', '7d'], required=False, default='1d', description='How much chat to read'),
