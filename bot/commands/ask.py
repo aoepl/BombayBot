@@ -25,14 +25,16 @@ def _instructions(ctx) -> str:
 		"You answer questions from members of an Age of Empires II pickup games Discord community about their games "
 		"and their server. Look the answer up with your tools; never guess numbers or invent names, messages or games.\n"
 		"Tools: list_tables and query read the bot's MySQL or MariaDB database (read-only; list_tables says which). list_channels, read_messages, "
-		"search_messages, find_members and member_names read the Discord server.\n"
+		"search_messages, find_players and member_names read the Discord server.\n"
 		"Database notes: call list_tables first to see the columns. Times ('at', 'last_ranked_match_at' ...) are unix "
 		"seconds (UTC). Most tables have a channel_id: the queue channel the question is asked in is "
 		f"{ctx.qc.id} and its ratings (qc_players, qc_rating_history) are kept under channel_id {ctx.qc.rating.channel_id}; "
 		"keep to those unless the question says otherwise. qc_players holds each player's rating, wins and losses; "
 		"qc_matches and qc_player_matches the pickup matches and who played in them (team 0 is alpha, 1 is beta); "
 		"aoe_games and aoe_game_players the analysed recorded games (civ, seat, won, elo, strategy ...). "
-		"user_id values are Discord user ids: use member_names to show names, and find_members to find a person's id. "
+		"user_id values are Discord user ids. To find a person, call find_players with their name first: it matches Discord "
+		"names, queue nicks and in-game names and gives their user id; use that id in your queries, never a name. Use "
+		"member_names to turn user ids from your query results into names. "
 		"Aggregate in SQL instead of reading many rows.\n"
 		f"The person asking is {ctx.author.display_name} (id {ctx.author.id}); 'me' and 'I' mean them. "
 		f"Now is {now:%Y-%m-%d %H:%M} UTC (unix {int(now.timestamp())}); the community is mostly in India (IST, UTC+5:30).\n"
@@ -60,7 +62,7 @@ async def ask(ctx, question: str):
 		async with AsyncExitStack() as stack:
 			clients = [
 				await stack.enter_async_context(Client(build_sql_server())),
-				await stack.enter_async_context(Client(build_discord_server(guild, ctx.author))),
+				await stack.enter_async_context(Client(build_discord_server(guild, ctx.author, ctx.qc.rating.channel_id))),
 			]
 			answer, used = await run_agent(question, _instructions(ctx), clients)
 	except Exception:
