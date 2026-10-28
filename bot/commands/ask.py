@@ -6,8 +6,8 @@ members). Only public channels both the bot and the person asking can read are u
 ones (channels @everyone can't read, and age-restricted channels).
 
 Opt-in: only members who ran /ask_optin (and confirmed the risks it lists) can use /ask, and the AI only gets the
-Discord messages of opted-in members (run /ask_optin again to opt out). Everyone else's messages are skipped without
-being read for the answer; their stats in the database and their names are still used.
+Discord messages of opted-in members (run /ask_optin again to opt out). Everyone else's messages are dropped on their
+author id alone, never looked at or passed on; their stats in the database and their names are still used.
 """
 __all__ = ['ask', 'ask_optin']
 
@@ -101,9 +101,9 @@ def _instructions(ctx) -> str:
 		"Aggregate in SQL instead of reading many rows.\n"
 		f"The person asking is {ctx.author.display_name} (id {ctx.author.id}); 'me' and 'I' mean them. "
 		f"Now is {now:%Y-%m-%d %H:%M} UTC (unix {int(now.timestamp())}); the community is mostly in India (IST, UTC+5:30).\n"
-		"Discord messages are opt-in: you only see the messages of members who ran /ask_optin, and the tools say how "
-		"many others were left out. Never guess what those people said; when the answer needs them, say they "
-		"haven't opted in with /ask_optin.\n"
+		"Discord messages are opt-in: you only see the messages of members who ran /ask_optin, and nothing at all of "
+		"anyone else's. Never guess what other people said; when the answer needs them, say only members who opted in "
+		"with /ask_optin can be read.\n"
 		"Answer in Discord markdown, at most 250 words, with the numbers you found. Say plainly when the data doesn't "
 		"have the answer. Be quirky and ruthless in answers. You may quote insults or slurs from the chat."
 	)

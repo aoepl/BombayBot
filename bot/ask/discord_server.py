@@ -107,7 +107,6 @@ async def _players(guild, user_ids, rating_channel_id, brief=False) -> list:
 def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, opted_in: set) -> MCPServer:
 	server = MCPServer("bombaybot-discord", instructions=f"Read-only access to the Discord server {guild.name}.")
 	budget = [READ_BUDGET]
-	left_out = [0]  # messages read but not given to the AI: their authors haven't run /ask_optin
 
 	def channels():
 		return [c for c in guild.text_channels
@@ -138,19 +137,12 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 		return f"[{m.created_at.strftime('%Y-%m-%d %H:%M')}] {m.author.display_name} (id {m.author.id}): {text}" + \
 			(f" [{reacts}]" if reacts else '')
 
-	def note(lines, empty):
-		""" The tool's answer, saying how many messages were left out because their authors didn't opt in. """
-		text = '\n'.join(lines) or empty
-		if left_out[0]:
-			text += (f"\n({left_out[0]} messages from members who haven't opted in with /ask_optin were left out; "
-				"you can't see what they said)")
-			left_out[0] = 0
-		return text
-
 	async def history(c, days, match=None, limit=MAX_MESSAGES):
 		"""
 		The latest messages (oldest first) of a channel over the last days from members who opted in, optionally only
-		the matching ones. The content of anyone else's message isn't looked at.
+		the matching ones. Discord sends a channel's history in bulk (a bot can't ask for some authors only), so every
+		message arrives here, but a message whose author hasn't opted in is dropped on its author id alone: its
+		content, attachments and reactions aren't looked at, and nothing about it (not even a count) reaches the AI.
 		"""
 		if budget[0] <= 0:
 			return []
@@ -158,10 +150,7 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 		found = []
 		async for m in c.history(after=since, limit=budget[0], oldest_first=False):
 			budget[0] -= 1
-			if m.author.bot:
-				continue
-			if m.author.id not in opted_in:
-				left_out[0] += 1
+			if m.author.bot or m.author.id not in opted_in:
 				continue
 			if match is None or match(m):
 				found.append(m)
@@ -186,7 +175,7 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 		if budget[0] <= 0:
 			raise ToolError("Read budget for this question is used up; answer with what you have.")
 		lines = await history(channel(channel_name), days, limit=max(1, min(limit, MAX_MESSAGES)))
-		return note(lines, "No messages in that period.")
+		return '\n'.join(lines) or "No messages in that period from members who opted in."
 
 	@server.tool()
 	async def search_messages(text: str, channel_name: str = '', days: int = 7, user_id: int = 0) -> str:
@@ -207,7 +196,7 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 			out += [f"#{c.name} {ln}" for ln in lines]
 			if len(out) >= MAX_MESSAGES:
 				break
-		return note(out, "Nothing found.")
+		return '\n'.join(out) or "Nothing found from members who opted in."
 
 	@server.tool()
 	async def find_players(name: str) -> str:
