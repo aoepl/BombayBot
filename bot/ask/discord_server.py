@@ -3,7 +3,8 @@
 MCP server for /ask: the Discord server's channels, messages and members, through the bot's own connection.
 
 One is built per /ask, for the server and the member asking: only text channels both the bot and that member can
-read are used, and only the messages of members who opted in with /ask_optin are given to the AI. find_players and member_names tie Discord user ids to the people in the database (queue nicks, saved
+read are used, never private or restricted ones (channels @everyone can't read, and age-restricted channels), and
+only the messages of members who opted in with /ask_optin are given to the AI. find_players and member_names tie Discord user ids to the people in the database (queue nicks, saved
 names, in-game names and linked names), read-only through the SQL server's connection.
 """
 from datetime import datetime, timedelta, timezone
@@ -31,6 +32,11 @@ def _key(name: str) -> str:
 def _readable(channel, member):
 	perms = channel.permissions_for(member)
 	return perms.view_channel and perms.read_message_history
+
+
+def _public(channel, guild):
+	""" Not private or restricted: @everyone can see the channel and read its history, and it isn't age-restricted. """
+	return _readable(channel, guild.default_role) and not channel.is_nsfw()
 
 
 def _user_id(text: str):
@@ -104,7 +110,8 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 	left_out = [0]  # messages read but not given to the AI: their authors haven't run /ask_optin
 
 	def channels():
-		return [c for c in guild.text_channels if _readable(c, member) and _readable(c, guild.me)]
+		return [c for c in guild.text_channels
+			if _public(c, guild) and _readable(c, member) and _readable(c, guild.me)]
 
 	def channel(name: str):
 		""" A readable channel by id or name; names match without emoji and separators (💬・qc-general = qc general). """
@@ -117,7 +124,8 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 				return found[0]
 			if found:
 				raise ToolError(f"#{name} matches several channels: {', '.join('#' + c.name for c in found[:10])}.")
-		raise ToolError(f"No channel #{name} that you and I can both read. Channels: "
+		raise ToolError(f"No public channel #{name} that you and I can both read (private and restricted channels are "
+			"never read). Channels: "
 			+ ', '.join('#' + c.name for c in readable[:60]))
 
 	def line(m):
@@ -163,7 +171,7 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 
 	@server.tool()
 	async def list_channels() -> str:
-		""" The text channels you can read, with their category and topic. """
+		""" The public text channels you can read, with their category and topic. """
 		return '\n'.join(
 			f"#{c.name}" + (f" (in {c.category.name})" if c.category else '') + (f": {c.topic[:150]}" if c.topic else '')
 			for c in channels()

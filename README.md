@@ -80,8 +80,10 @@ answer up itself through two MCP servers, which run inside the bot (`bot/ask/`) 
   rows; locking, files, `SLEEP` and the system schemas are refused. For a second guard set `ASK_DB_URI` to a MySQL
   user that can only `SELECT` on the bot's database (otherwise `DB_URI` is used).
 * **Discord** (`discord_server.py`): `list_channels`, `read_messages`, `search_messages` (last 30 days at most, 5,000
-  messages read per question), `find_players` and `member_names`. Only text channels both the bot and the person
-  asking can read are used, and bots' messages are left out.
+  messages read per question), `find_players` and `member_names`. Only public text channels both the bot and the
+  person asking can read are used, and bots' messages are left out. Private and restricted channels are never
+  read: a channel @everyone can't see or read the history of, or an age-restricted (NSFW) channel, is skipped even
+  when the person asking can read it.
 * **Messages are opt-in**: the AI only gets the Discord messages of members who ran `/ask_optin` (run it again to
   opt out; saved in the `ask_optin` table). Everyone else's messages are skipped without their content being looked
   at, and the tools only tell the AI how many were left out. Opting in or not doesn't change the database side:

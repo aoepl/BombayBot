@@ -2,7 +2,8 @@
 """
 /ask: a question in plain words, answered by an AI agent that looks things up itself through two MCP servers:
 the bot's database (read-only SQL: ratings, matches, analysed games ...) and this Discord server (channels, messages,
-members). Only channels both the bot and the person asking can read are used.
+members). Only public channels both the bot and the person asking can read are used: never private or restricted
+ones (channels @everyone can't read, and age-restricted channels).
 
 Discord messages are opt-in: the AI only gets the messages of members who ran /ask_optin (run again to opt out).
 Everyone else's messages are skipped without being read for the answer; their stats in the database and their names
