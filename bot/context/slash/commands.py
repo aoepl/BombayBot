@@ -666,6 +666,19 @@ async def _bombayai(
 ): await run_slash(bot.commands.bombayai, interaction=interaction, player=player)
 
 
+@dc.slash_command(name='gossip', description='Neutral AI summary of the disagreements in this channel: who, about what, where it stands.', **guild_kwargs)
+async def _gossip(
+		interaction: Interaction,
+		period: str = SlashOption(choices=['1d', '2d', '3d', '7d'], required=False, default='1d', description='How much chat to read'),
+		channel_2: TextChannel = SlashOption(required=False, description='Another channel to include'),
+		channel_3: TextChannel = SlashOption(required=False, description='Another channel to include'),
+): await run_slash(bot.commands.gossip, interaction=interaction, period=period, channel_2=channel_2, channel_3=channel_3)
+
+
+@dc.slash_command(name='gossip_optout', description='Leave yourself out of /gossip (run again to opt back in).', **guild_kwargs)
+async def _gossip_optout(interaction: Interaction): await run_slash(bot.commands.gossip_optout, interaction=interaction)
+
+
 @groups.admin_rating.subcommand(name='unhide_player', description='Unhide player from the leaderboard.')
 async def _rating_unhide(
 		interaction: Interaction,
