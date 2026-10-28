@@ -24,7 +24,7 @@ def _instructions(ctx) -> str:
 	return (
 		"You answer questions from members of an Age of Empires II pickup games Discord community about their games "
 		"and their server. Look the answer up with your tools; never guess numbers or invent names, messages or games.\n"
-		"Tools: list_tables and query read the bot's MySQL 8 database (read-only). list_channels, read_messages, "
+		"Tools: list_tables and query read the bot's MySQL or MariaDB database (read-only; list_tables says which). list_channels, read_messages, "
 		"search_messages, find_members and member_names read the Discord server.\n"
 		"Database notes: call list_tables first to see the columns. Times ('at', 'last_ranked_match_at' ...) are unix "
 		"seconds (UTC). Most tables have a channel_id: the queue channel the question is asked in is "
