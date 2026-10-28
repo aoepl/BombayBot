@@ -96,7 +96,7 @@ answer up itself through two MCP servers, which run inside the bot (`bot/ask/`) 
 
   Everyone else's messages are skipped without their content being looked at, and the tools only tell the AI how
   many were left out. Opting in or not doesn't change the database side: stats, ratings and names are used for
-  everyone. `/gossip_optout` only applies to /gossip.
+  everyone.
 * **Matching people to the database**: the database knows people by their Discord user id. `find_players` takes a
   name (or a user id or `<@id>`) and matches it against Discord user names, display names and nicks, and the
   database's queue nicks (`qc_players`), saved names (`players`), in-game names from analysed games
