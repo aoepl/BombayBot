@@ -27,8 +27,10 @@ class _Config:
     WS_SSL_CERT_FILE = ""
     WS_SSL_KEY_FILE = ""
     GOOGLE_AI_API_KEY = ""
-    GOOGLE_AI_MODEL = "gemma-4-31b-it"
-    GOOGLE_AI_FALLBACK_MODELS = "gemini-3.6-flash,gemini-3.5-flash-lite"
+    GOOGLE_AI_MODEL = "gemini-3.5-flash-lite"
+    GOOGLE_AI_FALLBACK_MODELS = "gemini-3.6-flash"
+    GOOGLE_AI_AGENT_MODELS = "gemini-3.5-flash-lite,gemini-3.6-flash"  # /ask: models that can call tools
+    ASK_DB_URI = ""  # /ask: optional mysql://user:password@host/db of a SELECT-only user (else DB_URI)
 
 
 cfg = _Config()
