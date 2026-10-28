@@ -80,9 +80,15 @@ answer up itself through two MCP servers, which run inside the bot (`bot/ask/`) 
   rows; locking, files, `SLEEP` and the system schemas are refused. For a second guard set `ASK_DB_URI` to a MySQL
   user that can only `SELECT` on the bot's database (otherwise `DB_URI` is used).
 * **Discord** (`discord_server.py`): `list_channels`, `read_messages`, `search_messages` (last 30 days at most, 5,000
-  messages read per question), `find_members` and `member_names` (names for the user ids in the database). Only
-  text channels both the bot and the person asking can read are used; bots' messages are left out (`/gossip_optout`
-  only applies to /gossip).
+  messages read per question), `find_players` and `member_names`. Only text channels both the bot and the person
+  asking can read are used; bots' messages are left out (`/gossip_optout` only applies to /gossip).
+* **Matching people to the database**: the database knows people by their Discord user id. `find_players` takes a
+  name (or a user id or `<@id>`) and matches it against Discord user names, display names and nicks, and the
+  database's queue nicks (`qc_players`), saved names (`players`), in-game names from analysed games
+  (`aoe_profiles`) and linked in-game names (`aoe_name_links`). It returns one line per user id with all their
+  names, their rating in this channel, roles and join date. `member_names` does the same for a list of user ids
+  from query results, so people who have left the server still get a name. The agent is told to find a person's
+  id this way first and query by id, never by name.
 
 The agent gets at most 10 turns and answers in up to 250 words; it is told which queue and rating channel the
 question comes from. Models are `GOOGLE_AI_AGENT_MODELS` (default `gemini-3.5-flash-lite,gemini-3.6-flash`: they
