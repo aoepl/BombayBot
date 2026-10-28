@@ -39,12 +39,18 @@ def _error_code(e):
 
 async def _generate(contents: str) -> str:
 	""" Generate text, retrying busy models and falling back to the next model in the list. """
+	resp, _ = await _generate_with(contents, _models())
+	return resp.text
+
+
+async def _generate_with(contents, models, config=None):
+	""" (response, model that gave it), retrying busy models and falling back to the next model in models. """
 	last_error = None
-	for model in _models():
+	for model in models:
 		for attempt in range(len(_RETRY_DELAYS) + 1):
 			try:
-				resp = await _get_client().aio.models.generate_content(model=model, contents=contents)
-				return resp.text
+				resp = await _get_client().aio.models.generate_content(model=model, contents=contents, config=config)
+				return resp, model
 			except Exception as e:
 				last_error = e
 				code = _error_code(e)
@@ -101,61 +107,6 @@ async def generate_replay_summary(game_text: str) -> str | None:
 	)
 
 
-async def find_quarrels(chat: str) -> list[tuple[int, int]]:
-	""" The quarrels in a chat log (/gossip) as (first message #, last message #) pairs, at most 6. """
-	import json
-	import re
-	answer = await _generate(
-		(
-			"Below is a Discord chat log; each line starts with '#number'. Find the quarrels: arguments, beefs, heated "
-			"disagreements or trash talk between people (friendly banter with no real disagreement is not a quarrel). "
-			"Answer with JSON only: a list of at most 6 [first message number, last message number] pairs, e.g. "
-			"[[12, 30], [101, 110]], or [] when there are none.\n\n"
-			f"{chat}"
-		)
-	)
-	found = re.search(r'\[.*\]', answer or '', re.S)
-	spans = []
-	for pair in (json.loads(found.group(0)) if found else []):
-		if isinstance(pair, (list, tuple)) and len(pair) == 2 and all(isinstance(x, int) for x in pair):
-			spans.append((min(pair), max(pair)))
-	return spans[:6]
-
-
-async def generate_gossip(chat: str, where: str, when: str) -> str | None:
-	""" A short, neutral summary of the disagreements in a channel's chat log (/gossip), for people who missed them,
-	then a little friendly banter about the spectators and the light moments. """
-	return await _generate(
-		(
-			"You summarise a gaming community's Discord (Age of Empires II pickup games) for members who missed the chat. "
-			f"Below is the chat from {where} over {when}. Each line is '#number [time] Name (replying to #n Other): "
-			"message [reactions]'; reactions show the emoji and who reacted (e.g. [😂 Morty, Orca +2]) or just a count "
-			"(e.g. [😂×3]) when it wasn't looked up. Find the disagreements: arguments, disputes and heated exchanges "
-			"between people.\n"
-			"Start with a section headed **📰 What happened**: ONE paragraph of at most 100 words covering the disagreements, "
-			"most significant first: who disagreed with whom and about what, each side's point put fairly, who else weighed "
-			"in or reacted, and where it stands (resolved, agreed to disagree, or still open). Fewer details beat going "
-			"over 100 words.\n"
-			"Rules: be neutral and factual, like a news summary. Do not say who was right or wrong, do not take sides, do not "
-			"joke or tease, and do not judge anyone's character. Use only names and events that appear in the chat and do not "
-			"invent anything. Never quote insults, slurs or crude remarks in any language (including Hindi and Hinglish): "
-			"say that someone made a personal remark or an insult instead. Leave out personal details (health, mental "
-			"health, family, money). Friendly banter with no real disagreement is not a disagreement. If there were none, "
-			"say so in one sentence in place of the paragraph.\n"
-			"Then a section headed **🍿 From the stands**: at most 100 words of light, friendly banter "
-			"about the spectators (who grabbed popcorn, piled on with reactions, chimed in from the side) and the light "
-			"moments in the chat (jokes, puns, odd tangents, funny one-liners). Tease gently, like friends would. Here, and "
-			"only here, humour is welcome. Call back the chat's own jokes, including cheeky puns and innuendo the members "
-			"made themselves, even when they play on words from a disagreement (e.g. someone reading a sentence about it "
-			"in a funny way): retell them playfully and keep it tame, never explicit, and don't invent new innuendo. Never "
-			"mock anyone for their side of a disagreement or anyone who seemed upset, never take a side, and the rules on "
-			"insults and personal details still apply. Leave the section out if there is "
-			"nothing light to say. Discord markdown, no other sections.\n\n"
-			f"{chat}"
-		)
-	)
-
-
 MAP_TYPES = ('Open', 'Closed', 'Semi Closed', 'Hybrid', 'Nomad', 'Water')
 
 
@@ -195,3 +146,67 @@ async def classify_map(map_name: str) -> str | None:
 		if t.lower() in text:
 			return t
 	return None
+
+
+AGENT_MAX_STEPS = 10         # model turns per question; the last one has to answer without tools
+TOOL_RESULT_CHARS = 20_000   # one tool result sent back to the model is cut to this
+
+
+def _agent_models():
+	""" Models for /ask: they have to support function calling, so GOOGLE_AI_AGENT_MODELS rather than the main list. """
+	return list(dict.fromkeys(m.strip() for m in cfg.GOOGLE_AI_AGENT_MODELS.split(',') if m.strip())) or _models()
+
+
+async def _call_tool(client, name: str, args: dict) -> dict:
+	""" One MCP tool call as a function response for the model: {'result': text} or {'error': text}. """
+	try:
+		result = await client.call_tool(name, args)
+	except Exception as e:  # noqa: BLE001 - the model sees the error and can try something else
+		return {'error': str(e)}
+	text = '\n'.join(c.text for c in result.content if getattr(c, 'text', None))
+	if len(text) > TOOL_RESULT_CHARS:
+		text = text[:TOOL_RESULT_CHARS] + '\n(cut: ask for less)'
+	return {'error': text} if result.is_error else {'result': text}
+
+
+async def run_agent(question: str, instructions: str, clients) -> tuple[str, list[str]]:
+	"""
+	Answer question with the tools of the connected MCP clients (mcp.Client), calling them as the model asks, at
+	most AGENT_MAX_STEPS turns. Returns (answer, names of the tools called in order).
+	"""
+	declarations, owner = [], {}
+	for client in clients:
+		for tool in (await client.list_tools()).tools:
+			owner[tool.name] = client
+			declarations.append(types.FunctionDeclaration(
+				name=tool.name, description=tool.description or '', parameters_json_schema=tool.input_schema))
+
+	def config(tools_allowed):
+		return types.GenerateContentConfig(
+			system_instruction=instructions,
+			tools=[types.Tool(function_declarations=declarations)],
+			automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+			tool_config=types.ToolConfig(function_calling_config=types.FunctionCallingConfig(
+				mode='AUTO' if tools_allowed else 'NONE')),
+		)
+
+	contents = [types.Content(role='user', parts=[types.Part.from_text(text=question)])]
+	models, used = _agent_models(), []
+	for step in range(AGENT_MAX_STEPS):
+		last = step == AGENT_MAX_STEPS - 1
+		resp, model = await _generate_with(contents, models, config(not last))
+		models = [model]  # stay on one model: its thought signatures are in the conversation
+		calls = resp.function_calls
+		if not calls:
+			return resp.text or '', used
+		contents.append(resp.candidates[0].content)
+		parts = []
+		for call in calls:
+			used.append(call.name)
+			if call.name in owner:
+				response = await _call_tool(owner[call.name], call.name, dict(call.args or {}))
+			else:
+				response = {'error': f"No tool named {call.name}."}
+			parts.append(types.Part.from_function_response(name=call.name, response=response))
+		contents.append(types.Content(role='user', parts=parts))
+	return '', used

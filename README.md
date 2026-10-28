@@ -71,6 +71,44 @@ Reports over the games analysed in the queue channel (uploads and automatic brea
   are closed). Games analysed before this was added need
   uploading again (they are re-analysed with the newer version).
 
+### /ask: AI answers from the database and Discord
+`/ask question` answers a question in plain words, e.g. "who has the best win rate on Arena this month?" or "what
+did people say about the new map in #general this week?". An AI agent (Gemini, with function calling) looks the
+answer up itself through two MCP servers, which run inside the bot (`bot/ask/`) and are opened for each question:
+* **Database** (`sql_server.py`): `list_tables` (tables and columns) and `query` (one SELECT, WITH, SHOW, DESCRIBE
+  or EXPLAIN query). Every query runs in a READ ONLY transaction, stops after 5 seconds and returns at most 200
+  rows; locking, files, `SLEEP` and the system schemas are refused. For a second guard set `ASK_DB_URI` to a MySQL
+  user that can only `SELECT` on the bot's database (otherwise `DB_URI` is used).
+* **Discord** (`discord_server.py`): `list_channels`, `read_messages`, `search_messages` (last 30 days at most, 5,000
+  messages read per question), `find_players` and `member_names`. Only public text channels both the bot and the
+  person asking can read are used, and bots' messages are left out. Private and restricted channels are never
+  read: a channel @everyone can't see or read the history of, or an age-restricted (NSFW) channel, is skipped even
+  when the person asking can read it.
+* **Opt-in only**: only members who opted in can use `/ask`, and the AI only gets the Discord messages of
+  opted-in members (saved in the `ask_optin` table). `/ask_optin` first shows the risks, privately; the member
+  then opts in by running it again with `confirm: I understand the risks`. Running `/ask_optin` again later opts
+  them out. The risks it lists:
+  * anyone's /ask can read their messages from the last 30 days in the public channels;
+  * those messages are sent to Google's Gemini API, which may keep or use them depending on the API plan;
+  * answers are posted publicly, anyone can ask about them, and the AI can quote them out of context or be wrong;
+  * /ask is set to be quirky and ruthless and may repeat insults or slurs, theirs included;
+  * opting out stops future reads but doesn't remove answers already posted.
+
+  Everyone else's messages are skipped without their content being looked at, and the tools only tell the AI how
+  many were left out. Opting in or not doesn't change the database side: stats, ratings and names are used for
+  everyone.
+* **Matching people to the database**: the database knows people by their Discord user id. `find_players` takes a
+  name (or a user id or `<@id>`) and matches it against Discord user names, display names and nicks, and the
+  database's queue nicks (`qc_players`), saved names (`players`), in-game names from analysed games
+  (`aoe_profiles`) and linked in-game names (`aoe_name_links`). It returns one line per user id with all their
+  names, their rating in this channel, roles and join date. `member_names` does the same for a list of user ids
+  from query results, so people who have left the server still get a name. The agent is told to find a person's
+  id this way first and query by id, never by name.
+
+The agent gets at most 10 turns and answers in up to 250 words; it is told which queue and rating channel the
+question comes from. Models are `GOOGLE_AI_AGENT_MODELS` (default `gemini-3.5-flash-lite,gemini-3.6-flash`: they
+need function calling). Once every 30 seconds per member.
+
 ### Game breakdowns from recorded games
 Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).
 BombayBot analyses it, saves every player's performance (see Player insights) and posts a breakdown of the game.
