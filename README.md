@@ -71,6 +71,23 @@ Reports over the games analysed in the queue channel (uploads and automatic brea
   are closed). Games analysed before this was added need
   uploading again (they are re-analysed with the newer version).
 
+### /ask: AI answers from the database and Discord
+`/ask question` answers a question in plain words, e.g. "who has the best win rate on Arena this month?" or "what
+did people say about the new map in #general this week?". An AI agent (Gemini, with function calling) looks the
+answer up itself through two MCP servers, which run inside the bot (`bot/ask/`) and are opened for each question:
+* **Database** (`sql_server.py`): `list_tables` (tables and columns) and `query` (one SELECT, WITH, SHOW, DESCRIBE
+  or EXPLAIN query). Every query runs in a READ ONLY transaction, stops after 5 seconds and returns at most 200
+  rows; locking, files, `SLEEP` and the system schemas are refused. For a second guard set `ASK_DB_URI` to a MySQL
+  user that can only `SELECT` on the bot's database (otherwise `DB_URI` is used).
+* **Discord** (`discord_server.py`): `list_channels`, `read_messages`, `search_messages` (last 30 days at most, 5,000
+  messages read per question), `find_members` and `member_names` (names for the user ids in the database). Only
+  text channels both the bot and the person asking can read are used; bots' messages are left out (`/gossip_optout`
+  only applies to /gossip).
+
+The agent gets at most 10 turns and answers in up to 250 words; it is told which queue and rating channel the
+question comes from. Models are `GOOGLE_AI_AGENT_MODELS` (default `gemini-3.5-flash-lite,gemini-3.6-flash`: they
+need function calling). Once per minute per member.
+
 ### Game breakdowns from recorded games
 Members upload a recorded game with `/replay upload` (an .aoe2record file, or a .zip with one inside).
 BombayBot analyses it, saves every player's performance (see Player insights) and posts a breakdown of the game.

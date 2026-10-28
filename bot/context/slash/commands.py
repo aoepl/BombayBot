@@ -679,6 +679,13 @@ async def _gossip(
 async def _gossip_optout(interaction: Interaction): await run_slash(bot.commands.gossip_optout, interaction=interaction)
 
 
+@dc.slash_command(name='ask', description='Ask the AI about games, ratings or this server; it looks it up in the database and Discord.', **guild_kwargs)
+async def _ask(
+		interaction: Interaction,
+		question: str = SlashOption(description='e.g. Who has the best win rate on Arena this month?', max_length=500),
+): await run_slash(bot.commands.ask, interaction=interaction, question=question)
+
+
 @groups.admin_rating.subcommand(name='unhide_player', description='Unhide player from the leaderboard.')
 async def _rating_unhide(
 		interaction: Interaction,
