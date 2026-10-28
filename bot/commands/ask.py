@@ -2,9 +2,14 @@
 """
 /ask: a question in plain words, answered by an AI agent that looks things up itself through two MCP servers:
 the bot's database (read-only SQL: ratings, matches, analysed games ...) and this Discord server (channels, messages,
-members). Only channels both the bot and the person asking can read are used.
+members). Only public channels both the bot and the person asking can read are used: never private or restricted
+ones (channels @everyone can't read, and age-restricted channels).
+
+Discord messages are opt-in: the AI only gets the messages of members who ran /ask_optin (run again to opt out).
+Everyone else's messages are skipped without being read for the answer; their stats in the database and their names
+are still used.
 """
-__all__ = ['ask']
+__all__ = ['ask', 'ask_optin']
 
 import time
 from contextlib import AsyncExitStack
@@ -12,11 +17,38 @@ from datetime import datetime, timezone
 
 from nextcord import Embed
 
+from core.database import db
+
 import bot
 
-COOLDOWN_S = 60          # per member
+COOLDOWN_S = 30          # per member
 QUESTION_CHARS = 500
 _last_run = {}
+
+db.ensure_table(dict(
+	tname="ask_optin",
+	columns=[
+		dict(cname="user_id", ctype=db.types.int),
+		dict(cname="at", ctype=db.types.int),
+	],
+	primary_keys=["user_id"]
+))
+
+
+async def _opted_in():
+	return {r['user_id'] for r in await db.select(('user_id',), 'ask_optin')}
+
+
+async def ask_optin(ctx):
+	""" Switch on or off whether /ask may read the author's Discord messages. """
+	if ctx.author.id in await _opted_in():
+		await db.delete('ask_optin', where=dict(user_id=ctx.author.id))
+		await ctx.reply_dm("You're opted out: /ask won't read your Discord messages any more. Your stats and name "
+			"can still be used. Run /ask_optin again to opt back in.")
+	else:
+		await db.insert('ask_optin', dict(user_id=ctx.author.id, at=int(time.time())), on_dublicate='replace')
+		await ctx.reply_dm("You're opted in: /ask can now read your Discord messages in the channels the person "
+			"asking can read. Run /ask_optin again to opt out.")
 
 
 def _instructions(ctx) -> str:
@@ -38,6 +70,9 @@ def _instructions(ctx) -> str:
 		"Aggregate in SQL instead of reading many rows.\n"
 		f"The person asking is {ctx.author.display_name} (id {ctx.author.id}); 'me' and 'I' mean them. "
 		f"Now is {now:%Y-%m-%d %H:%M} UTC (unix {int(now.timestamp())}); the community is mostly in India (IST, UTC+5:30).\n"
+		"Discord messages are opt-in: you only see the messages of members who ran /ask_optin, and the tools say how "
+		"many others were left out. Never guess what those people said; when the answer needs them, say they "
+		"haven't opted in with /ask_optin.\n"
 		"Answer in Discord markdown, at most 250 words, with the numbers you found. Say plainly when the data doesn't "
 		"have the answer. Be quirky and ruthless in answers. You may quote insults or slurs from the chat."
 	)
@@ -62,7 +97,7 @@ async def ask(ctx, question: str):
 		async with AsyncExitStack() as stack:
 			clients = [
 				await stack.enter_async_context(Client(build_sql_server())),
-				await stack.enter_async_context(Client(build_discord_server(guild, ctx.author, ctx.qc.rating.channel_id))),
+				await stack.enter_async_context(Client(build_discord_server(guild, ctx.author, ctx.qc.rating.channel_id, await _opted_in()))),
 			]
 			answer, used = await run_agent(question, _instructions(ctx), clients)
 	except Exception:

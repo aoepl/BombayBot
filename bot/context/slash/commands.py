@@ -686,6 +686,10 @@ async def _ask(
 ): await run_slash(bot.commands.ask, interaction=interaction, question=question)
 
 
+@dc.slash_command(name='ask_optin', description='Let /ask read your Discord messages (run again to opt out).', **guild_kwargs)
+async def _ask_optin(interaction: Interaction): await run_slash(bot.commands.ask_optin, interaction=interaction)
+
+
 @groups.admin_rating.subcommand(name='unhide_player', description='Unhide player from the leaderboard.')
 async def _rating_unhide(
 		interaction: Interaction,

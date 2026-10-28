@@ -3,7 +3,8 @@
 MCP server for /ask: the Discord server's channels, messages and members, through the bot's own connection.
 
 One is built per /ask, for the server and the member asking: only text channels both the bot and that member can
-read are used. find_players and member_names tie Discord user ids to the people in the database (queue nicks, saved
+read are used, never private or restricted ones (channels @everyone can't read, and age-restricted channels), and
+only the messages of members who opted in with /ask_optin are given to the AI. find_players and member_names tie Discord user ids to the people in the database (queue nicks, saved
 names, in-game names and linked names), read-only through the SQL server's connection.
 """
 from datetime import datetime, timedelta, timezone
@@ -31,6 +32,11 @@ def _key(name: str) -> str:
 def _readable(channel, member):
 	perms = channel.permissions_for(member)
 	return perms.view_channel and perms.read_message_history
+
+
+def _public(channel, guild):
+	""" Not private or restricted: @everyone can see the channel and read its history, and it isn't age-restricted. """
+	return _readable(channel, guild.default_role) and not channel.is_nsfw()
 
 
 def _user_id(text: str):
@@ -98,12 +104,14 @@ async def _players(guild, user_ids, rating_channel_id, brief=False) -> list:
 	return lines
 
 
-def build_discord_server(guild: Guild, member: Member, rating_channel_id: int) -> MCPServer:
+def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, opted_in: set) -> MCPServer:
 	server = MCPServer("bombaybot-discord", instructions=f"Read-only access to the Discord server {guild.name}.")
 	budget = [READ_BUDGET]
+	left_out = [0]  # messages read but not given to the AI: their authors haven't run /ask_optin
 
 	def channels():
-		return [c for c in guild.text_channels if _readable(c, member) and _readable(c, guild.me)]
+		return [c for c in guild.text_channels
+			if _public(c, guild) and _readable(c, member) and _readable(c, guild.me)]
 
 	def channel(name: str):
 		""" A readable channel by id or name; names match without emoji and separators (💬・qc-general = qc general). """
@@ -116,7 +124,8 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int) -
 				return found[0]
 			if found:
 				raise ToolError(f"#{name} matches several channels: {', '.join('#' + c.name for c in found[:10])}.")
-		raise ToolError(f"No channel #{name} that you and I can both read. Channels: "
+		raise ToolError(f"No public channel #{name} that you and I can both read (private and restricted channels are "
+			"never read). Channels: "
 			+ ', '.join('#' + c.name for c in readable[:60]))
 
 	def line(m):
@@ -129,15 +138,32 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int) -
 		return f"[{m.created_at.strftime('%Y-%m-%d %H:%M')}] {m.author.display_name} (id {m.author.id}): {text}" + \
 			(f" [{reacts}]" if reacts else '')
 
+	def note(lines, empty):
+		""" The tool's answer, saying how many messages were left out because their authors didn't opt in. """
+		text = '\n'.join(lines) or empty
+		if left_out[0]:
+			text += (f"\n({left_out[0]} messages from members who haven't opted in with /ask_optin were left out; "
+				"you can't see what they said)")
+			left_out[0] = 0
+		return text
+
 	async def history(c, days, match=None, limit=MAX_MESSAGES):
-		""" The latest messages (oldest first) of a channel over the last days, optionally only the matching ones. """
+		"""
+		The latest messages (oldest first) of a channel over the last days from members who opted in, optionally only
+		the matching ones. The content of anyone else's message isn't looked at.
+		"""
 		if budget[0] <= 0:
 			return []
 		since = datetime.now(timezone.utc) - timedelta(days=max(1, min(days, MAX_DAYS)))
 		found = []
 		async for m in c.history(after=since, limit=budget[0], oldest_first=False):
 			budget[0] -= 1
-			if not m.author.bot and (match is None or match(m)):
+			if m.author.bot:
+				continue
+			if m.author.id not in opted_in:
+				left_out[0] += 1
+				continue
+			if match is None or match(m):
 				found.append(m)
 				if len(found) >= limit:
 					break
@@ -145,7 +171,7 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int) -
 
 	@server.tool()
 	async def list_channels() -> str:
-		""" The text channels you can read, with their category and topic. """
+		""" The public text channels you can read, with their category and topic. """
 		return '\n'.join(
 			f"#{c.name}" + (f" (in {c.category.name})" if c.category else '') + (f": {c.topic[:150]}" if c.topic else '')
 			for c in channels()
@@ -155,18 +181,19 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int) -
 	async def read_messages(channel_name: str, days: int = 1, limit: int = 100) -> str:
 		"""
 		The latest messages of one text channel over the last days (1-30), oldest first, at most limit (up to 200).
-		Bots' messages are left out.
+		Only messages from members who opted in with /ask_optin; bots' messages are left out.
 		"""
 		if budget[0] <= 0:
 			raise ToolError("Read budget for this question is used up; answer with what you have.")
 		lines = await history(channel(channel_name), days, limit=max(1, min(limit, MAX_MESSAGES)))
-		return '\n'.join(lines) or "No messages in that period."
+		return note(lines, "No messages in that period.")
 
 	@server.tool()
 	async def search_messages(text: str, channel_name: str = '', days: int = 7, user_id: int = 0) -> str:
 		"""
 		Messages containing text (case-insensitive; empty text matches everything) over the last days (1-30), in one
 		channel or, when channel_name is empty, every channel you can read. user_id keeps only that person's messages.
+		Only messages from members who opted in with /ask_optin.
 		"""
 		needle = text.strip().lower()
 		chans = [channel(channel_name)] if channel_name else channels()
@@ -180,7 +207,7 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int) -
 			out += [f"#{c.name} {ln}" for ln in lines]
 			if len(out) >= MAX_MESSAGES:
 				break
-		return '\n'.join(out) or "Nothing found."
+		return note(out, "Nothing found.")
 
 	@server.tool()
 	async def find_players(name: str) -> str:
