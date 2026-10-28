@@ -84,10 +84,19 @@ answer up itself through two MCP servers, which run inside the bot (`bot/ask/`) 
   person asking can read are used, and bots' messages are left out. Private and restricted channels are never
   read: a channel @everyone can't see or read the history of, or an age-restricted (NSFW) channel, is skipped even
   when the person asking can read it.
-* **Messages are opt-in**: the AI only gets the Discord messages of members who ran `/ask_optin` (run it again to
-  opt out; saved in the `ask_optin` table). Everyone else's messages are skipped without their content being looked
-  at, and the tools only tell the AI how many were left out. Opting in or not doesn't change the database side:
-  stats, ratings and names are used for everyone. `/gossip_optout` only applies to /gossip.
+* **Opt-in only**: only members who opted in can use `/ask`, and the AI only gets the Discord messages of
+  opted-in members (saved in the `ask_optin` table). `/ask_optin` first shows the risks, privately; the member
+  then opts in by running it again with `confirm: I understand the risks`. Running `/ask_optin` again later opts
+  them out. The risks it lists:
+  * anyone's /ask can read their messages from the last 30 days in the public channels;
+  * those messages are sent to Google's Gemini API, which may keep or use them depending on the API plan;
+  * answers are posted publicly, anyone can ask about them, and the AI can quote them out of context or be wrong;
+  * /ask is set to be quirky and ruthless and may repeat insults or slurs, theirs included;
+  * opting out stops future reads but doesn't remove answers already posted.
+
+  Everyone else's messages are skipped without their content being looked at, and the tools only tell the AI how
+  many were left out. Opting in or not doesn't change the database side: stats, ratings and names are used for
+  everyone. `/gossip_optout` only applies to /gossip.
 * **Matching people to the database**: the database knows people by their Discord user id. `find_players` takes a
   name (or a user id or `<@id>`) and matches it against Discord user names, display names and nicks, and the
   database's queue nicks (`qc_players`), saved names (`players`), in-game names from analysed games

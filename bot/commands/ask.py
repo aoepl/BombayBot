@@ -5,9 +5,9 @@ the bot's database (read-only SQL: ratings, matches, analysed games ...) and thi
 members). Only public channels both the bot and the person asking can read are used: never private or restricted
 ones (channels @everyone can't read, and age-restricted channels).
 
-Discord messages are opt-in: the AI only gets the messages of members who ran /ask_optin (run again to opt out).
-Everyone else's messages are skipped without being read for the answer; their stats in the database and their names
-are still used.
+Opt-in: only members who ran /ask_optin (and confirmed the risks it lists) can use /ask, and the AI only gets the
+Discord messages of opted-in members (run /ask_optin again to opt out). Everyone else's messages are skipped without
+being read for the answer; their stats in the database and their names are still used.
 """
 __all__ = ['ask', 'ask_optin']
 
@@ -39,16 +39,47 @@ async def _opted_in():
 	return {r['user_id'] for r in await db.select(('user_id',), 'ask_optin')}
 
 
-async def ask_optin(ctx):
-	""" Switch on or off whether /ask may read the author's Discord messages. """
+CONFIRM = 'I understand the risks'  # also the only choice of /ask_optin's confirm option
+
+RISKS = (
+	"**Before you opt in to /ask, know what it means:**\n"
+	"⚠️ **Your messages can be read.** Whenever anyone runs /ask, the AI can read your messages from the last 30 days "
+	"in the server's public channels (never private or age-restricted ones).\n"
+	"⚠️ **They leave Discord.** Messages the AI reads are sent to Google (the Gemini API) to write the answer. How "
+	"Google keeps or uses them depends on the bot's API plan, and on a free plan Google may use them to improve its "
+	"products.\n"
+	"⚠️ **Answers are public.** The answer is posted in the channel for everyone to see. Anyone in the server can ask "
+	"about you, and the AI can quote you out of context or get you wrong.\n"
+	"⚠️ **It can be harsh.** /ask is set to be quirky and ruthless, and it may repeat insults or slurs from the chat, "
+	"including yours.\n"
+	"⚠️ **Opting out doesn't undo answers.** Opting out stops /ask reading your messages from then on, but answers "
+	"already posted stay.\n"
+	"ℹ️ /ask only works for members who opted in. Your stats, ratings and names in the bot's database are used either "
+	"way."
+)
+
+
+async def ask_optin(ctx, confirm: str = None):
+	"""
+	Opt in to /ask (only after confirming the risks), or out again: opted-in members can use /ask, and it may read
+	their Discord messages.
+	"""
 	if ctx.author.id in await _opted_in():
+		if confirm == CONFIRM:
+			await ctx.reply_dm("You're already opted in. Run /ask_optin without confirm to opt out.")
+			return
 		await db.delete('ask_optin', where=dict(user_id=ctx.author.id))
-		await ctx.reply_dm("You're opted out: /ask won't read your Discord messages any more. Your stats and name "
-			"can still be used. Run /ask_optin again to opt back in.")
+		await ctx.reply_dm("You're opted out: /ask won't read your Discord messages any more, and you can't use "
+			"/ask until you opt in again. Answers already posted stay. Your stats and name can still be used.")
+	elif confirm != CONFIRM:
+		await ctx.reply_dm(embed=Embed(title="Opt in to /ask?", colour=0xe67e22, description=RISKS + "\n\n"
+			f"To opt in, run **/ask_optin** again and pick **confirm: {CONFIRM}**. Run /ask_optin at any time later to "
+			"opt out."))
 	else:
 		await db.insert('ask_optin', dict(user_id=ctx.author.id, at=int(time.time())), on_dublicate='replace')
-		await ctx.reply_dm("You're opted in: /ask can now read your Discord messages in the channels the person "
-			"asking can read. Run /ask_optin again to opt out.")
+		await ctx.reply_dm("You're opted in: you can use /ask, and it can read your messages in the server's public "
+			"channels, send them to Google's Gemini API and quote you in public answers. Run /ask_optin again to opt "
+			"out.")
 
 
 def _instructions(ctx) -> str:
@@ -84,6 +115,10 @@ async def ask(ctx, question: str):
 	from bot.ask.sql_server import build_sql_server
 	from bot.bombay.ai import run_agent
 
+	opted_in = await _opted_in()
+	if ctx.author.id not in opted_in:
+		raise bot.Exc.PermissionError("/ask is only for members who opted in, as it lets the AI read their Discord "
+			"messages. Run /ask_optin to see the risks and opt in.")
 	question = question.strip()[:QUESTION_CHARS]
 	if not question:
 		raise bot.Exc.ValueError("Ask a question.")
@@ -97,7 +132,7 @@ async def ask(ctx, question: str):
 		async with AsyncExitStack() as stack:
 			clients = [
 				await stack.enter_async_context(Client(build_sql_server())),
-				await stack.enter_async_context(Client(build_discord_server(guild, ctx.author, ctx.qc.rating.channel_id, await _opted_in()))),
+				await stack.enter_async_context(Client(build_discord_server(guild, ctx.author, ctx.qc.rating.channel_id, opted_in))),
 			]
 			answer, used = await run_agent(question, _instructions(ctx), clients)
 	except Exception:

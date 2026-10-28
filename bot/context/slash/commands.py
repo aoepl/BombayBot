@@ -686,8 +686,13 @@ async def _ask(
 ): await run_slash(bot.commands.ask, interaction=interaction, question=question)
 
 
-@dc.slash_command(name='ask_optin', description='Let /ask read your Discord messages (run again to opt out).', **guild_kwargs)
-async def _ask_optin(interaction: Interaction): await run_slash(bot.commands.ask_optin, interaction=interaction)
+@dc.slash_command(name='ask_optin', description='See the risks and opt in to /ask (it can read your messages); run again to opt out.', **guild_kwargs)
+async def _ask_optin(
+		interaction: Interaction,
+		# The same text as CONFIRM in bot/commands/ask.py (bot.commands isn't loaded yet when this module is).
+		confirm: str = SlashOption(choices=['I understand the risks'], required=False,
+			description='Opt in, after reading the risks shown without it'),
+): await run_slash(bot.commands.ask_optin, interaction=interaction, confirm=confirm)
 
 
 @groups.admin_rating.subcommand(name='unhide_player', description='Unhide player from the leaderboard.')
