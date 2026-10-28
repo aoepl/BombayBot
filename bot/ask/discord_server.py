@@ -3,7 +3,8 @@
 MCP server for /ask: the Discord server's channels, messages and members, through the bot's own connection.
 
 One is built per /ask, for the server and the member asking: only text channels both the bot and that member can
-read are used.
+read are used. find_players and member_names tie Discord user ids to the people in the database (queue nicks, saved
+names, in-game names and linked names), read-only through the SQL server's connection.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -13,10 +14,13 @@ from nextcord import Guild, Member
 
 from core.utils import get_nick
 
+from bot.ask.sql_server import _read
+
 MESSAGE_CHARS = 300      # one message is cut to this
 MAX_MESSAGES = 200       # messages a tool returns at most
 READ_BUDGET = 5000       # messages read from Discord per /ask, across all tools
 MAX_DAYS = 30
+MAX_PLAYERS = 15         # people find_players describes at most
 
 
 def _key(name: str) -> str:
@@ -29,7 +33,72 @@ def _readable(channel, member):
 	return perms.view_channel and perms.read_message_history
 
 
-def build_discord_server(guild: Guild, member: Member) -> MCPServer:
+def _user_id(text: str):
+	""" The user id in '123456789012345678' or '<@123…>' / '<@!123…>', else None. """
+	text = text.strip().removeprefix('<@').removeprefix('!').removesuffix('>')
+	return int(text) if text.isdigit() and len(text) >= 15 else None
+
+
+def _like(needle: str) -> str:
+	return '%' + needle.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+
+
+async def _db_ids(needle: str) -> list:
+	""" User ids whose name in the database contains needle: queue nicks, saved names, in-game and linked names. """
+	rows, _ = await _read(
+		"SELECT user_id FROM qc_players WHERE nick LIKE %(n)s "
+		"UNION SELECT user_id FROM players WHERE name LIKE %(n)s "
+		"UNION SELECT user_id FROM aoe_profiles WHERE user_id IS NOT NULL AND name LIKE %(n)s "
+		"UNION SELECT user_id FROM aoe_name_links WHERE user_id IS NOT NULL AND name LIKE %(n)s",
+		dict(n=_like(needle)), max_rows=100)
+	return [r['user_id'] for r in rows if r['user_id']]
+
+
+async def _players(guild, user_ids, rating_channel_id, brief=False) -> list:
+	""" One line per user id with everything that names them, in Discord and in the database. """
+	user_ids = [int(u) for u in user_ids]
+	if not user_ids:
+		return []
+	where = dict(ids=user_ids, ch=rating_channel_id)
+	names, ratings = {}, {}
+
+	def add(uid, kind, value):
+		if value and value not in names.setdefault(uid, {}).setdefault(kind, []):
+			names[uid][kind].append(value)
+
+	for sql, kind in (
+		("SELECT user_id, nick AS v FROM qc_players WHERE user_id IN %(ids)s", 'queue nick'),
+		("SELECT user_id, name AS v FROM players WHERE user_id IN %(ids)s", 'saved name'),
+		("SELECT user_id, CONCAT(name, ' (profile ', profile_id, ')') AS v FROM aoe_profiles WHERE user_id IN %(ids)s",
+			'in-game'),
+		("SELECT user_id, name AS v FROM aoe_name_links WHERE user_id IN %(ids)s", 'linked in-game name'),
+	):
+		for r in (await _read(sql, where, max_rows=1000))[0]:
+			add(r['user_id'], kind, r['v'])
+	for r in (await _read(
+		"SELECT user_id, rating, wins, losses, draws FROM qc_players WHERE channel_id = %(ch)s AND user_id IN %(ids)s",
+		where, max_rows=1000))[0]:
+		ratings[r['user_id']] = r
+
+	lines = []
+	for uid in dict.fromkeys(user_ids):
+		m = guild.get_member(uid)
+		known = names.get(uid, {})
+		if m is None and not known:
+			lines.append(f"{uid}: unknown (not in the server or the database)")
+			continue
+		parts = [f"Discord {m.display_name} (user {m.name})" if m else "not in the server any more"]
+		parts += [f"{kind}: {', '.join(v[:5])}" for kind, v in known.items()]
+		if r := ratings.get(uid):
+			parts.append(f"rating here {r['rating']}, {r['wins']}W {r['losses']}L {r['draws']}D")
+		if m and not brief:
+			parts.append(f"joined {m.joined_at:%Y-%m-%d}, roles: "
+				+ (', '.join(r.name for r in m.roles if not r.is_default()) or 'none'))
+		lines.append(f"{uid}: " + ' | '.join(parts))
+	return lines
+
+
+def build_discord_server(guild: Guild, member: Member, rating_channel_id: int) -> MCPServer:
 	server = MCPServer("bombaybot-discord", instructions=f"Read-only access to the Discord server {guild.name}.")
 	budget = [READ_BUDGET]
 
@@ -114,25 +183,34 @@ def build_discord_server(guild: Guild, member: Member) -> MCPServer:
 		return '\n'.join(out) or "Nothing found."
 
 	@server.tool()
-	async def find_members(name: str) -> str:
-		""" Members whose name, display name or nick contains name, with their user id, roles and join date. """
-		needle = name.strip().lower()
-		found = [m for m in guild.members if not m.bot and any(
-			needle in (n or '').lower() for n in (m.name, m.display_name, get_nick(m)))][:25]
-		return '\n'.join(
-			f"{m.display_name} (user {m.name}, id {m.id}), joined {m.joined_at:%Y-%m-%d}, roles: "
-			+ (', '.join(r.name for r in m.roles if not r.is_default()) or 'none')
-			for m in found
-		) or "No members found."
+	async def find_players(name: str) -> str:
+		"""
+		People whose name contains name, matched across Discord (user name, display name, nick) and the database
+		(queue nicks, saved names, in-game names from analysed games and linked in-game names), one line per Discord
+		user id with all their names, rating in this channel, roles and join date. Also takes a user id or <@id>.
+		Use the user id in database queries (user_id columns).
+		"""
+		name = name.strip()
+		if (uid := _user_id(name)) is not None:
+			return '\n'.join(await _players(guild, [uid], rating_channel_id)) or "No player with that id."
+		needle = name.lower()
+		if len(needle) < 2:
+			raise ToolError("Give at least 2 characters of the name.")
+		ids = [m.id for m in guild.members if not m.bot and any(
+			needle in (n or '').lower() for n in (m.name, m.display_name, get_nick(m)))]
+		ids += await _db_ids(needle)
+		ids = list(dict.fromkeys(ids))
+		lines = await _players(guild, ids[:MAX_PLAYERS], rating_channel_id)
+		if len(ids) > MAX_PLAYERS:
+			lines.append(f"(+{len(ids) - MAX_PLAYERS} more: give more of the name)")
+		return '\n'.join(lines) or "No players found."
 
 	@server.tool()
 	async def member_names(user_ids: list[int]) -> str:
-		""" The current display names for user ids (e.g. user_id values from the database), at most 100. """
-		lines = []
-		for uid in user_ids[:100]:
-			m = guild.get_member(uid)
-			name = m.display_name if m else 'not in the server'
-			lines.append(f"{uid}: {name}")
-		return '\n'.join(lines)
+		"""
+		Who user ids are (e.g. user_id values from the database), at most 100: Discord name, queue nick and in-game
+		names, rating in this channel. People who left the server still get their names from the database.
+		"""
+		return '\n'.join(await _players(guild, user_ids[:100], rating_channel_id, brief=True))
 
 	return server
