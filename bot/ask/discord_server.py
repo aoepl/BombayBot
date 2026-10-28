@@ -19,6 +19,11 @@ READ_BUDGET = 5000       # messages read from Discord per /ask, across all tools
 MAX_DAYS = 30
 
 
+def _key(name: str) -> str:
+	""" A channel name with only its letters and digits, lowercased. """
+	return ''.join(ch for ch in name.lower() if ch.isalnum())
+
+
 def _readable(channel, member):
 	perms = channel.permissions_for(member)
 	return perms.view_channel and perms.read_message_history
@@ -32,11 +37,18 @@ def build_discord_server(guild: Guild, member: Member) -> MCPServer:
 		return [c for c in guild.text_channels if _readable(c, member) and _readable(c, guild.me)]
 
 	def channel(name: str):
-		name = name.strip().lstrip('#').lower()
-		for c in channels():
-			if c.name.lower() == name or str(c.id) == name:
-				return c
-		raise ToolError(f"No channel #{name} that you and I can both read; use list_channels.")
+		""" A readable channel by id or name; names match without emoji and separators (💬・qc-general = qc general). """
+		name = name.strip().lstrip('#<').rstrip('>')
+		readable = channels()
+		key = _key(name)
+		for match in (lambda c: str(c.id) == name or _key(c.name) == key, lambda c: key and key in _key(c.name)):
+			found = [c for c in readable if match(c)]
+			if len(found) == 1:
+				return found[0]
+			if found:
+				raise ToolError(f"#{name} matches several channels: {', '.join('#' + c.name for c in found[:10])}.")
+		raise ToolError(f"No channel #{name} that you and I can both read. Channels: "
+			+ ', '.join('#' + c.name for c in readable[:60]))
 
 	def line(m):
 		text = m.clean_content.replace('\n', ' ').strip()
