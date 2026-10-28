@@ -107,61 +107,6 @@ async def generate_replay_summary(game_text: str) -> str | None:
 	)
 
 
-async def find_quarrels(chat: str) -> list[tuple[int, int]]:
-	""" The quarrels in a chat log (/gossip) as (first message #, last message #) pairs, at most 6. """
-	import json
-	import re
-	answer = await _generate(
-		(
-			"Below is a Discord chat log; each line starts with '#number'. Find the quarrels: arguments, beefs, heated "
-			"disagreements or trash talk between people (friendly banter with no real disagreement is not a quarrel). "
-			"Answer with JSON only: a list of at most 6 [first message number, last message number] pairs, e.g. "
-			"[[12, 30], [101, 110]], or [] when there are none.\n\n"
-			f"{chat}"
-		)
-	)
-	found = re.search(r'\[.*\]', answer or '', re.S)
-	spans = []
-	for pair in (json.loads(found.group(0)) if found else []):
-		if isinstance(pair, (list, tuple)) and len(pair) == 2 and all(isinstance(x, int) for x in pair):
-			spans.append((min(pair), max(pair)))
-	return spans[:6]
-
-
-async def generate_gossip(chat: str, where: str, when: str) -> str | None:
-	""" A short, neutral summary of the disagreements in a channel's chat log (/gossip), for people who missed them,
-	then a little friendly banter about the spectators and the light moments. """
-	return await _generate(
-		(
-			"You summarise a gaming community's Discord (Age of Empires II pickup games) for members who missed the chat. "
-			f"Below is the chat from {where} over {when}. Each line is '#number [time] Name (replying to #n Other): "
-			"message [reactions]'; reactions show the emoji and who reacted (e.g. [😂 Morty, Orca +2]) or just a count "
-			"(e.g. [😂×3]) when it wasn't looked up. Find the disagreements: arguments, disputes and heated exchanges "
-			"between people.\n"
-			"Start with a section headed **📰 What happened**: ONE paragraph of at most 100 words covering the disagreements, "
-			"most significant first: who disagreed with whom and about what, each side's point put fairly, who else weighed "
-			"in or reacted, and where it stands (resolved, agreed to disagree, or still open). Fewer details beat going "
-			"over 100 words.\n"
-			"Rules: be neutral and factual, like a news summary. Do not say who was right or wrong, do not take sides, do not "
-			"joke or tease, and do not judge anyone's character. Use only names and events that appear in the chat and do not "
-			"invent anything. Never quote insults, slurs or crude remarks in any language (including Hindi and Hinglish): "
-			"say that someone made a personal remark or an insult instead. Leave out personal details (health, mental "
-			"health, family, money). Friendly banter with no real disagreement is not a disagreement. If there were none, "
-			"say so in one sentence in place of the paragraph.\n"
-			"Then a section headed **🍿 From the stands**: at most 100 words of light, friendly banter "
-			"about the spectators (who grabbed popcorn, piled on with reactions, chimed in from the side) and the light "
-			"moments in the chat (jokes, puns, odd tangents, funny one-liners). Tease gently, like friends would. Here, and "
-			"only here, humour is welcome. Call back the chat's own jokes, including cheeky puns and innuendo the members "
-			"made themselves, even when they play on words from a disagreement (e.g. someone reading a sentence about it "
-			"in a funny way): retell them playfully and keep it tame, never explicit, and don't invent new innuendo. Never "
-			"mock anyone for their side of a disagreement or anyone who seemed upset, never take a side, and the rules on "
-			"insults and personal details still apply. Leave the section out if there is "
-			"nothing light to say. Discord markdown, no other sections.\n\n"
-			f"{chat}"
-		)
-	)
-
-
 MAP_TYPES = ('Open', 'Closed', 'Semi Closed', 'Hybrid', 'Nomad', 'Water')
 
 
