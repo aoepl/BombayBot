@@ -94,8 +94,10 @@ answer up itself through two MCP servers, which run inside the bot (`bot/ask/`) 
   * /ask is set to be quirky and ruthless and may repeat insults or slurs, theirs included;
   * opting out stops future reads but doesn't remove answers already posted.
 
-  Everyone else's messages are skipped without their content being looked at, and the tools only tell the AI how
-  many were left out. Opting in or not doesn't change the database side: stats, ratings and names are used for
+  Everyone else's messages are never read: Discord sends a channel's history to the bot in bulk (a bot can't
+  fetch only some authors' messages), and a message whose author hasn't opted in is dropped on its author id
+  alone. Its content, attachments and reactions aren't looked at, and nothing about it, not even how many there
+  were, reaches the AI. Opting in or not doesn't change the database side: stats, ratings and names are used for
   everyone.
 * **Matching people to the database**: the database knows people by their Discord user id. `find_players` takes a
   name (or a user id or `<@id>`) and matches it against Discord user names, display names and nicks, and the
