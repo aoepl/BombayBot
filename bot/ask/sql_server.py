@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MCP server for /ask: read-only access to the bot's MySQL database (tables, columns and SELECT queries).
+MCP server for /ask: read-only access to the bot's MySQL or MariaDB database (tables, columns and SELECT queries).
 
 Every query runs in a READ ONLY transaction with a time limit, and only SELECT, WITH, SHOW, DESCRIBE and EXPLAIN
 are accepted. Set ASK_DB_URI to a MySQL user that can only SELECT to add a second guard; without it the bot's own
@@ -27,6 +27,7 @@ _FORBIDDEN = re.compile(
 )
 
 _ask_db = None
+_version = None  # the database server's VERSION(), e.g. '8.4.3' or '10.11.6-MariaDB'
 
 
 async def _db():
@@ -38,6 +39,22 @@ async def _db():
 		_ask_db = init_db(cfg.ASK_DB_URI)
 		await _ask_db.connect()
 	return _ask_db
+
+
+async def _server_version(cur) -> str:
+	global _version
+	if _version is None:
+		await cur.execute('SELECT VERSION() AS v')
+		_version = (await cur.fetchone())['v']
+	return _version
+
+
+async def _set_time_limit(cur, on: bool):
+	""" MySQL limits a query with MAX_EXECUTION_TIME (ms, SELECT only), MariaDB with max_statement_time (s). """
+	if 'mariadb' in (await _server_version(cur)).lower():
+		await cur.execute('SET SESSION max_statement_time = %s', (TIME_LIMIT_MS / 1000 if on else 0,))
+	else:
+		await cur.execute('SET SESSION MAX_EXECUTION_TIME = %s', (TIME_LIMIT_MS if on else 0,))
 
 
 def _check(sql: str) -> str:
@@ -64,16 +81,16 @@ async def _read(sql: str, args=None, max_rows: int = MAX_ROWS):
 	conn_db = await _db()
 	async with conn_db.pool.acquire() as conn:
 		async with conn.cursor() as cur:
-			await cur.execute('SET SESSION MAX_EXECUTION_TIME = %s', (TIME_LIMIT_MS,))
+			await _set_time_limit(cur, True)
 			await cur.execute('START TRANSACTION READ ONLY')
 			try:
 				await cur.execute(sql, args)
 				rows = await cur.fetchmany(max_rows + 1)
-			except Exception as e:  # noqa: BLE001 - the model gets the MySQL error and can fix its query
+			except Exception as e:  # noqa: BLE001 - the model gets the database error and can fix its query
 				raise ToolError(str(e))
 			finally:
 				await cur.execute('ROLLBACK')
-				await cur.execute('SET SESSION MAX_EXECUTION_TIME = 0')
+				await _set_time_limit(cur, False)
 	return [{k: _cell(v) for k, v in r.items()} for r in rows[:max_rows]], len(rows) > max_rows
 
 
@@ -82,7 +99,7 @@ def build_sql_server() -> MCPServer:
 
 	@server.tool()
 	async def list_tables() -> str:
-		""" Every table in the bot's database with its approximate row count and its columns (name and type). """
+		""" The database server's version, then every table with its approximate row count and its columns. """
 		tables, _ = await _read(
 			"SELECT TABLE_NAME AS t, TABLE_ROWS AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() "
 			"ORDER BY TABLE_NAME", max_rows=500)
@@ -92,12 +109,12 @@ def build_sql_server() -> MCPServer:
 		by_table = {}
 		for c in columns:
 			by_table.setdefault(c['t'], []).append(f"{c['c']} {c['type']}")
-		return '\n'.join(f"{t['t']} (~{t['n'] or 0} rows): {', '.join(by_table.get(t['t'], []))}" for t in tables)
+		return f"Server: {_version}\n" + '\n'.join(f"{t['t']} (~{t['n'] or 0} rows): {', '.join(by_table.get(t['t'], []))}" for t in tables)
 
 	@server.tool()
 	async def query(sql: str, max_rows: int = DEFAULT_ROWS) -> str:
 		"""
-		Run one read-only MySQL 8 query (SELECT, WITH, SHOW, DESCRIBE or EXPLAIN) and get the rows as JSON.
+		Run one read-only query (MySQL or MariaDB, see list_tables for which) (SELECT, WITH, SHOW, DESCRIBE or EXPLAIN) and get the rows as JSON.
 		Aggregate in SQL (COUNT, AVG, GROUP BY, ORDER BY ... LIMIT) instead of fetching many rows.
 		max_rows: rows to return, at most 200. Queries stop after 5 seconds.
 		"""
