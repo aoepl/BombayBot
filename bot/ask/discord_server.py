@@ -4,7 +4,8 @@ MCP server for /ask: the Discord server's channels, messages and members, throug
 
 One is built per /ask, for the server and the member asking: only text channels both the bot and that member can
 read are used, never private or restricted ones (channels @everyone can't read, and age-restricted channels), and
-only the messages of members who opted in with /ask_optin are given to the AI. find_players and member_names tie Discord user ids to the people in the database (queue nicks, saved
+only the messages of members who opted in with /ask_optin are given to the AI, with only their own words (no
+quotes of others, no reactions). find_players and member_names tie Discord user ids to the people in the database (queue nicks, saved
 names, in-game names and linked names), read-only through the SQL server's connection.
 """
 from datetime import datetime, timedelta, timezone
@@ -127,15 +128,29 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 			"never read). Channels: "
 			+ ', '.join('#' + c.name for c in readable[:60]))
 
+	def own_text(m):
+		"""
+		What the author wrote themselves: quoted lines ('> …', usually someone else's words) are left out, and so are
+		forwarded messages and embeds (never read). Mentions show as names.
+		"""
+		lines = [ln for ln in m.clean_content.split('\n') if not ln.lstrip().startswith('>')]
+		return ' '.join(ln.strip() for ln in lines if ln.strip())
+
 	def line(m):
-		text = m.clean_content.replace('\n', ' ').strip()
+		"""
+		One message for the AI. Only the author's own words: no quotes of others, and no reactions (they would tell
+		what members who didn't opt in reacted with). A reply says whose message it answers only when that author
+		opted in too.
+		"""
+		text = own_text(m)
 		if len(text) > MESSAGE_CHARS:
 			text = text[:MESSAGE_CHARS] + '…'
 		if m.attachments:
 			text += ' [attachment]'
-		reacts = ' '.join(f"{r.emoji}×{r.count}" for r in m.reactions)
-		return f"[{m.created_at.strftime('%Y-%m-%d %H:%M')}] {m.author.display_name} (id {m.author.id}): {text}" + \
-			(f" [{reacts}]" if reacts else '')
+		ref = m.reference.resolved if m.reference else None
+		to = getattr(ref, 'author', None)
+		reply = f" (replying to {to.display_name})" if to is not None and to.id in opted_in and not to.bot else ''
+		return f"[{m.created_at.strftime('%Y-%m-%d %H:%M')}] {m.author.display_name} (id {m.author.id}){reply}: {text}"
 
 	async def history(c, days, match=None, limit=MAX_MESSAGES):
 		"""
@@ -143,6 +158,7 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 		the matching ones. Discord sends a channel's history in bulk (a bot can't ask for some authors only), so every
 		message arrives here, but a message whose author hasn't opted in is dropped on its author id alone: its
 		content, attachments and reactions aren't looked at, and nothing about it (not even a count) reaches the AI.
+		Opted-in messages are passed on with only their author's own words (see line).
 		"""
 		if budget[0] <= 0:
 			return []
@@ -192,7 +208,7 @@ def build_discord_server(guild: Guild, member: Member, rating_channel_id: int, o
 				out.append("(read budget used up: not every channel was searched)")
 				break
 			lines = await history(c, days, limit=MAX_MESSAGES - len(out), match=lambda m: (
-				(not needle or needle in m.clean_content.lower()) and (not user_id or m.author.id == user_id)))
+				(not needle or needle in own_text(m).lower()) and (not user_id or m.author.id == user_id)))
 			out += [f"#{c.name} {ln}" for ln in lines]
 			if len(out) >= MAX_MESSAGES:
 				break
