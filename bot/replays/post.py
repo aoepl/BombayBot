@@ -4,7 +4,7 @@ import re
 
 from nextcord import Embed, Colour
 
-from .analysis import mmss
+from .analysis import DEFEND_FULL_SHARE, mmss
 
 SEAT_ORDER = {'Flank': 0, 'Pocket': 1, None: 2}
 COLOR_EMOJI = {0: '🔵', 1: '🔴', 2: '🟢', 3: '🟡', 4: '🩵', 5: '🟣', 6: '⚪', 7: '🟠'}
@@ -318,7 +318,10 @@ METHOD = [
 		"enemy army and castles sent into the base compared with the most-attacked base, plus 0.05 a minute "
 		"attacked by 2+ enemies at once (up to 0.3). **Workers lost** to enemies (villagers, fishing ships, trade carts) "
 		"take 0.5 off for every 5% of the workforce lost before 40:00; after 40:00 only raids taking 20%+ of the "
-		"workforce within a few minutes count, 0.5 per 5% of them. At most 3 off, never below 1."),
+		"workforce within a few minutes count, 0.5 per 5% of them. At most 3 off, never below 1. **Defending an ally's base**: "
+		"a player whose army fought in an ally's base while it was attacked (30+ army orders there while enemies were in it) "
+		"shares that base's score by their share of its defence: 40%+ of the defending orders takes the base's score, less "
+		"takes part of it. It only ever raises the score."),
 	("Team play: helping allies", "Weighted average of: **tributes sent** 50%; **army orders into allies' bases** 35% "
 		"(defending them); **flares** 15%."),
 	("Overall", "Flank: execution 27%, pressure 36%, holding position 27%, team play 10%. Pocket: 40%, 25%, 25%, 10%."),
@@ -388,6 +391,13 @@ def explain_text(name, civ, ex):
 	sv = ex['surv']
 	if sc['surv'] is None:
 		out.append(f"\n**Holding position —** not scored: {sv['note']}, so its weight goes to the other scores")
+	elif sv.get('defended'):  # defended an ally's base: its holding score, by the share of its defence
+		pen = sv.get('worker_penalty') or 0
+		own = 'a held position' if sv.get('untested') else 'own base'
+		out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}\n"
+			f"= {sv['own_score']:g} ({own}) + ({sv['defended_score']:g} {sv['defended']}'s base − {sv['own_score']:g}) × "
+			f"{sv['defend_weight']:g} (share of its defence {round(100 * sv['defend_share'])}%, full at {round(100 * DEFEND_FULL_SHARE)}%)"
+			+ (f" − {pen:g} for workers lost to enemies" if pen else "") + f" → **{_fmt_score(sc['surv'])}**")
 	elif sv.get('untested'):
 		if sv.get('worker_penalty'):
 			out.append(f"\n**Holding position {_fmt_score(sc['surv'])}**\n• {sv['note']}\n= 7 for a held position − {sv['worker_penalty']:g} "
