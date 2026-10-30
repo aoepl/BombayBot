@@ -240,6 +240,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 
 	# ---- army orders: pressure dealt, pressure received, help given to allies
 	press_out, press_in, help_out = Counter(), Counter(), Counter()
+	defend_in = defaultdict(Counter)  # (player, base owner) -> minute -> army orders in that friendly base (own or an ally's)
 	press_matrix = Counter()
 	timeline_in = defaultdict(Counter)  # defender -> minute -> orders
 	into_by = defaultdict(Counter)  # (attacker, defender) -> minute -> army orders into the defender's base
@@ -265,8 +266,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			timeline_in[b][int(a['t'] // 60000)] += 1
 			into_by[(pid, b)][int(a['t'] // 60000)] += 1
 			team_into[(players[pid]['team_id'], b)][int(a['t'] // 60000)] += 1
-		elif b != pid:
-			help_out[pid] += 1
+		else:
+			defend_in[(pid, b)][int(a['t'] // 60000)] += 1
+			if b != pid:
+				help_out[pid] += 1
 
 	# ---- castles: placement, where, outcome
 	castles = []
@@ -552,6 +555,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	# afterwards, or did they have to rebuild somewhere else? A base the enemy never got into scores HOLD_UNTESTED.
 	max_in = max(pressure.values()) if pressure else 0
 	survival, survival_note, surv_detail = {}, {}, {}
+	hold_window = {}  # tested base -> (pressure start, when it was lost or the end), for allies who defended it
 	for p in pids:
 		enemy_castles = sum(1 for c in castles if c['forward'] and c['base'] == p and c['status'] != 'unclear')
 		stats[p]['enemy_castles_in_base'] = enemy_castles
@@ -591,6 +595,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 				if sum(1 for b in rest if base_of(b['x'], b['y']) != p) >= 0.6 * len(rest):
 					lost_at = a['t']
 					break
+		hold_window[p] = (pressure_start, lost_at if lost_at is not None else end)
 		hold_min = max(0.0, ((lost_at if lost_at is not None else end) - pressure_start) / 60000)
 		hold_credit = round(HOLD_TIME_MAX * min(1.0, hold_min / HOLD_TIME_FULL) * (0.5 + 0.5 * difficulty) * (1 - held), 2)
 		value = 1 + held * (4 + 5 * difficulty) + min(cleared[p], 1.0) + hold_credit
@@ -614,6 +619,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			f"main base lost{held_txt} ({round(home * 100)}% of new economy buildings at home, {moved_tcs} Town Centers rebuilt elsewhere{cleared_txt})"
 		)
 		stats[p]['base_lost'] = held < 0.4
+	ally_defence(players, pids, survival, survival_note, surv_detail, hold_window, defend_in, timeline_in)
 	for p in pids:  # what enemy forward towers and castles made this player spend on defence
 		dsp = stats[p].get('defence_spent') or {}
 		if dsp.get('resources') or dsp.get('villager_minutes'):
@@ -1219,6 +1225,42 @@ def production_uptime(busy, first_use, mil_times, start, end, skip=()):
 	return round((eco + mil) / 2, 2)
 
 
+def ally_defence(players, pids, survival, survival_note, surv_detail, hold_window, defend_in, timeline_in):
+	"""
+	Holding position for defending an ally's base. A player whose army fought in an ally's base while it was under
+	attack (army orders there in minutes enemy armies were in it, from the pressure starting until the base was lost
+	or the game ended) shares that base's holding score, by their share of the defending orders in it (the owner's
+	and every ally's): DEFEND_FULL_SHARE or more takes the base's score, less takes part of it. It only ever raises
+	a player's own score, so helping a base that fell costs nothing. Raises survival in place and adds a note.
+	"""
+	base_score = dict(survival)  # each base's own result, before anyone's defence credit
+	for p in pids:
+		best = None
+		for b, (start, stop) in hold_window.items():
+			if b == p or players[b]['team_id'] != players[p]['team_id'] or base_score.get(b) is None:
+				continue
+			minutes = [m for m, n in timeline_in[b].items() if n and start // 60000 <= m <= stop // 60000]
+			mine = sum(defend_in[(p, b)].get(m, 0) for m in minutes)
+			if mine < DEFEND_MIN_ORDERS:
+				continue
+			everyone = sum(defend_in[(q, b)].get(m, 0) for q in pids if players[q]['team_id'] == players[b]['team_id']
+				for m in minutes)
+			share = mine / everyone if everyone else 0.0
+			weight = min(1.0, share / DEFEND_FULL_SHARE)
+			own = survival[p] if survival[p] is not None else HOLD_UNTESTED
+			value = own + (base_score[b] - own) * weight
+			if value > own + 0.05 and (best is None or value > best[0]):
+				best = (value, b, mine, share, own, weight)
+		if best is None:
+			continue
+		value, b, mine, share, own, weight = best
+		survival[p] = round(min(10.0, value), 2)
+		survival_note[p] += (f"; defended {players[b]['name']}'s base with army while it was attacked ({mine} army orders "
+			f"there, {round(share * 100)}% of its defence): holding position from that base")
+		surv_detail.setdefault(p, {}).update(defended=players[b]['name'], defend_orders=mine, defend_share=round(share, 2),
+			defended_score=round(base_score[b], 2), own_score=round(own, 2), defend_weight=round(weight, 2))
+
+
 def villager_value(times, attacked_minutes=(), alive=None):
 	"""
 	Value of villagers made: full value while the player has under 120 alive, then less and less until 150,
@@ -1261,6 +1303,9 @@ DEFENCE_VILL_CAP = 90000           # one job's villager time counts until the vi
 VILLAGER_MINUTE = 25               # resources a villager-minute is worth
 DEFENCE_KINDS = ('Wall', 'Gate', 'Tower', 'Palisade')
 HOLD_UNTESTED = 7.0       # holding position for a base never seriously attacked: the enemy was kept out
+# An ally who defends a base under attack with their army shares its holding position (see ally_defence):
+DEFEND_MIN_ORDERS = 30    # army orders in the ally's base, in minutes the enemy was in it, to count as defending it ...
+DEFEND_FULL_SHARE = 0.4   # ... and the share of the base's defending orders that earns the base's full score
 # Workers (villagers, fishing ships, trade carts) lost to enemies cost holding position:
 WORKER_LOSS_STEP = 0.05          # every 5% of the workforce lost ...
 WORKER_LOSS_PENALTY = 0.5        # ... takes this much off
