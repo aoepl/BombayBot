@@ -989,6 +989,7 @@ WORKER_QUEUE_MAX = 2
 # Villager upgrades that make every villager gather more (faster walking, bigger loads): villager value goes up by
 # this share for each one finished.
 VILLAGER_UPGRADES = {'Wheelbarrow': 0.10, 'Hand Cart': 0.15}
+FREE_VILLAGER_UPGRADES = {'Vikings': {'Wheelbarrow': 'Feudal Age', 'Hand Cart': 'Castle Age'}}  # given free on reaching the age
 # Civs whose Town Centers and Docks work faster, by age (Dark, Feudal, Castle, Imperial): villagers and fishing ships
 # come out sooner.
 TC_WORK_RATE = {'Persians': (1.05, 1.10, 1.15, 1.20)}
@@ -1282,6 +1283,10 @@ def villager_estimate(A, players, villagers, army_alive, end, reached=None):
 			n = start + sum(1 for x in made if x <= t) - sum(1 for x in lost if x <= t)
 			army = army_alive[pid][min(len(army_alive[pid]) - 1, m)] if army_alive.get(pid) else 0
 			alive.append(max(0, min(n, POP_CAP - army)))
+		for u, age in FREE_VILLAGER_UPGRADES.get(p.get('civ'), {}).items():  # free with an age (Vikings)
+			got = min((t for t in (reached or {}).get((pid, age), ()) if t <= end), default=None)
+			if got is not None:
+				eco_ups[u] = min(got, eco_ups.get(u, got))
 		mult = 1 + sum(VILLAGER_UPGRADES[u] for u in eco_ups)
 		out[pid] = dict(made=made, lost=lost, alive=alive, eco_ups=eco_ups, mult=mult, villagers=kinds['Villager'], fishing=kinds['Fishing Ship'],
 			ships_lost=ships_lost,
