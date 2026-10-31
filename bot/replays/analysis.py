@@ -407,7 +407,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	exec_parts[3] = _minmax(first_mil, invert=True)
 	for p in pids:
 		stats[p]['army'] = army[p]
-	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end)
+	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end, ages_reached(rec))
 	vill_killed = Counter()
 	for p in pids:
 		for e, n in vest[p]['killers'].items():
@@ -977,6 +977,9 @@ REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of a
 
 VILLAGER_TRAIN = 25000     # ms per villager at one Town Center
 WORKER_TRAIN = {'Villager': VILLAGER_TRAIN, 'Fishing Ship': 40000}  # fishing ships are economy workers too
+# Town Center research and how long it takes (standard times, ms): it holds up the villager queue while it runs.
+TC_RESEARCH_MS = {'Feudal Age': 130000, 'Castle Age': 160000, 'Imperial Age': 190000, 'Loom': 25000,
+	'Wheelbarrow': 75000, 'Hand Cart': 55000, 'Town Watch': 25000, 'Town Patrol': 40000}
 VILLAGER_HIT_GRACE = 20000  # ms: a targeted villager its owner ordered again after this got away
 VILLAGER_CONFIRM = 3 * 60000  # hits in the last 3 minutes analysed can't be confirmed (no time to see it again)
 START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
@@ -1102,7 +1105,20 @@ def worker_loss_penalty(vest_p, carts_lost, carts_queued):
 		count=len(times), share=round(total, 3))
 
 
-def villager_estimate(A, players, villagers, army_alive, end):
+REACHED = re.compile(r'<player_id,(\d+),\d+> advanced to the (Feudal Age|Castle Age|Imperial Age)')
+
+
+def ages_reached(rec):
+	""" {(player, age): [times]} from the game's own "advanced to the X Age" messages in the recording. """
+	out = defaultdict(list)
+	for c in rec.get('chat') or []:
+		m = REACHED.search(c.get('message') or '')
+		if m:
+			out[(int(m.group(1)), m.group(2))].append(c['t'])
+	return out
+
+
+def villager_estimate(A, players, villagers, army_alive, end, reached=None):
 	"""
 	Estimated economy workers alive per minute: villagers plus fishing ships. The replay has no unit counts, so:
 	- made: each queue click is 1 villager (5 with Shift); with several Town Centers selected each villager
@@ -1154,7 +1170,39 @@ def villager_estimate(A, players, villagers, army_alive, end):
 	for pid, p in players.items():
 		made, free, kinds = [], defaultdict(int), Counter()
 		busy, first_use = [], {}  # (building, start, end) of each worker trained; first queue per building
+		researched = set()
+		queue = defaultdict(list)  # building -> [start, end, worker kind or None for research], in the order queued
+
+		def push(b, t, ms, kind):
+			start = max(t, free[b])
+			queue[b].append([start, start + ms, kind])
+			free[b] = start + ms
+
 		for a in A:
+			if a['a'] == 'RESEARCH' and a.get('player_id') == pid and a['t'] <= end and a.get('object_ids'):
+				# Research at a Town Center (an age, Loom, Wheelbarrow ...) holds up its villager queue: the game trains
+				# and researches one thing at a time in each building. A technology is researched once: repeat clicks
+				# (or ones that failed for lack of resources) don't hold anything up.
+				tech = _name('technologies', a['technology_id'])
+				b = a['object_ids'][0]
+				if tech not in TC_RESEARCH_MS or b not in free or (tech, b) in researched:
+					continue
+				researched.add((tech, b))
+				done = min((t for t in (reached or {}).get((pid, tech), ()) if t >= a['t']), default=None)
+				if done is None:
+					push(b, a['t'], TC_RESEARCH_MS[tech], None)
+					continue
+				# The game says when the age was reached: the research ran up to then. Workers the estimate had
+				# coming out of this Town Center during it came out after (clicks that failed for lack of food make
+				# the queue look longer than it was, so the estimate is reset here).
+				start = max(a['t'], done - TC_RESEARCH_MS[tech])
+				before = [q for q in queue[b] if q[1] <= start]
+				after = [q for q in queue[b] if q[1] > start]
+				queue[b] = before + [[start, done, None]]
+				free[b] = done
+				for q in after:
+					push(b, done, q[1] - q[0], q[2])
+				continue
 			if a['a'] != 'DE_QUEUE' or a.get('player_id') != pid or a['t'] > end:
 				continue
 			kind = _name('objects', a['unit_id'])
@@ -1164,10 +1212,12 @@ def villager_estimate(A, players, villagers, army_alive, end):
 			for _ in range(a.get('amount', 1) or 1):
 				b = min(ids, key=lambda i: free[i])  # the Town Center (or Dock) with the shortest queue
 				first_use.setdefault(b, a['t'])
-				busy.append((b, max(a['t'], free[b]), max(a['t'], free[b]) + WORKER_TRAIN[kind]))
-				free[b] = max(a['t'], free[b]) + WORKER_TRAIN[kind]
-				if free[b] <= end:  # still training when the game was decided: not made
-					made.append(free[b])
+				push(b, a['t'], WORKER_TRAIN[kind], kind)
+		for b, qs in queue.items():
+			for start, stop, kind in qs:
+				busy.append((b, start, stop))
+				if kind and stop <= end:  # still training when the game was decided: not made
+					made.append(stop)
 					kinds[kind] += 1
 		made.sort()
 		lost = [t for o, t in deleted.items() if owner.get(o) == pid]
