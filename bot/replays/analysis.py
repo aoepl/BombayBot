@@ -977,12 +977,15 @@ REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of a
 
 VILLAGER_TRAIN = 25000     # ms per villager at one Town Center
 WORKER_TRAIN = {'Villager': VILLAGER_TRAIN, 'Fishing Ship': 40000}  # fishing ships are economy workers too
+# Civs whose Town Centers and Docks work faster, by age (Dark, Feudal, Castle, Imperial): villagers and fishing ships
+# come out sooner.
+TC_WORK_RATE = {'Persians': (1.05, 1.10, 1.15, 1.20)}
 # Town Center research and how long it takes (standard times, ms): it holds up the villager queue while it runs.
 TC_RESEARCH_MS = {'Feudal Age': 130000, 'Castle Age': 160000, 'Imperial Age': 190000, 'Loom': 25000,
 	'Wheelbarrow': 75000, 'Hand Cart': 55000, 'Town Watch': 25000, 'Town Patrol': 40000}
 VILLAGER_HIT_GRACE = 20000  # ms: a targeted villager its owner ordered again after this got away
 VILLAGER_CONFIRM = 3 * 60000  # hits in the last 3 minutes analysed can't be confirmed (no time to see it again)
-START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
+START_VILLAGERS = {'Chinese': 6, 'Mayans': 4, 'Maya': 4}  # the reference names them Maya now
 
 
 def fishing_ship_hits(A, players, villagers, end):
@@ -1173,6 +1176,16 @@ def villager_estimate(A, players, villagers, army_alive, end, reached=None):
 		researched = set()
 		queue = defaultdict(list)  # building -> [start, end, worker kind or None for research], in the order queued
 
+		rate = TC_WORK_RATE.get(p.get('civ'))
+
+		def work_rate(t):
+			""" How fast this civ's Town Centers and Docks work at t (Persians: faster each age). """
+			if not rate:
+				return 1.0
+			age = sum(1 for a in ('Feudal Age', 'Castle Age', 'Imperial Age')
+				if any(x <= t for x in (reached or {}).get((pid, a), ())))
+			return rate[age]
+
 		def push(b, t, ms, kind):
 			start = max(t, free[b])
 			queue[b].append([start, start + ms, kind])
@@ -1212,7 +1225,7 @@ def villager_estimate(A, players, villagers, army_alive, end, reached=None):
 			for _ in range(a.get('amount', 1) or 1):
 				b = min(ids, key=lambda i: free[i])  # the Town Center (or Dock) with the shortest queue
 				first_use.setdefault(b, a['t'])
-				push(b, a['t'], WORKER_TRAIN[kind], kind)
+				push(b, a['t'], round(WORKER_TRAIN[kind] / work_rate(max(a['t'], free[b]))), kind)
 		for b, qs in queue.items():
 			for start, stop, kind in qs:
 				busy.append((b, start, stop))
