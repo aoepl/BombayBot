@@ -292,7 +292,8 @@ METHOD = [
 		"Feudal army, Feudal production uptime: Town Centers, Docks and military buildings kept busy; after a tower rush, "
 		"the click against tower rushes' timings, full by 17:54; the better counts); **Imperial Age "
 		"click**; **villager value** (villagers and fishing ships made and kept alive, replacements after attacks "
-		"counting extra); **first military unit** (a quarter weight; a forward tower or castle counts); **unplanned floating** (minutes of the player's "
+		"counting extra; a Town Center trains one at a time and its research holds the queue up; ×1.10 with Wheelbarrow "
+		"and another +15% with Hand Cart, as every villager gathers more); **first military unit** (a quarter weight; a forward tower or castle counts); **unplanned floating** (minutes of the player's "
 		"own spending sitting in the bank; saving for a 550+ purchase and being near 200 population don't count). "
 		"Plus a bonus up to +1.5 for fighting several enemies at once: up to +0.75 for minutes attacking 2+ enemies' "
 		"units, up to +0.75 for minutes attacked by 2+ enemies (by how well they traded), as a share of the game from 8:00."),
