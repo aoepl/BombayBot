@@ -167,10 +167,10 @@ What the breakdown shows:
 * Each player also gets four scores from 1 to 10, relative to the lobby: execution, pressure, survival and team play.
   A part nobody in the lobby did (no forward castles or towers, no tributes, nobody in Imperial Age) is left
   out and its weight spread over the other parts. Saving for an age-up or an expensive technology (550+
-  resources; the 2 minutes before the click) is not a gap in military production. Execution weighs the first military unit at a quarter of the others.
+  resources; the 2 minutes before the click) is not a gap in military production.
   Overall weights: flanks execution 27%, pressure 36%, holding position 27%, team 10%; pockets 40/25/25/10;
   others 32/32/26/10.
-  Execution: Castle and Imperial Age timing, villager value, first military unit and floating. A player who made
+  Execution: Castle and Imperial Age timing, villager value and floating (the first military unit isn't scored). A player who made
   8+ Feudal military units scores the better of their Castle Age click time and their Feudal production uptime
   (Town Centers and Docks kept busy, military buildings producing every minute), so a late Castle Age after a
   strong Feudal army is not penalised.

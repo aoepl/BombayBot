@@ -713,6 +713,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		st = stats[p]
 		ex_parts = []
 		for i, (name, raw, fmt, lower_better, always) in enumerate(exec_info):
+			if not EXEC_WEIGHTS[i]:  # not scored
+				continue
 			done = always or _did(raw)
 			v = raw.get(p)
 			part = dict(name=name, value=fmt(v) if v is not None else "never", score=round(exec_parts[i][p], 1) if done else None,
@@ -1373,8 +1375,10 @@ def villager_value(times, attacked_minutes=(), alive=None, mult=1.0):
 
 
 FLOAT_FROM = 10 * 60000
-# Execution parts: Castle Age timing, Imperial Age click, villager value, first military unit (quarter weight), floating
-EXEC_WEIGHTS = (1.0, 1.0, 1.0, 0.25, 1.0)
+# Execution parts: Castle Age timing, Imperial Age click, villager value, first military unit, floating. The first
+# military unit isn't scored any more (weight 0): it said little about how well a player played. It's still worked out
+# (strategies, first push and the replay use it).
+EXEC_WEIGHTS = (1.0, 1.0, 1.0, 0.0, 1.0)
 # Execution bonus on top: fighting several enemies at once, and holding when focused by several.
 # Full bonus at a quarter of the minutes from 8:00 spent clicking 2+ enemies' units (early minutes count more) ...
 MULTI_FULL, MULTI_BONUS_MAX = 0.25, 0.75
