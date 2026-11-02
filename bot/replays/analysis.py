@@ -2622,9 +2622,9 @@ FEUDAL_BOOM_FARMS = 8
 FISH_BOOM_SHIPS = 5  # working fishing ships up to 10 minutes after Castle Age
 
 
-def working_fishing_ships(A, pid, until, villagers=()):
+def working_fishing_ships(A, pid, until, villagers=(), since=0):
 	"""
-	(fishing ships made, fishing ships that went to work) up to `until`. The replay doesn't say which unit is
+	(fishing ships made, fishing ships that went to work) from `since` up to `until`. The replay doesn't say which unit is
 	a fishing ship, so a ship counts as working when its Dock's gather point was on a fish when it came out
 	(new ships go straight to fishing), or when the player ordered units onto fish (the fish a Dock gather
 	point was set on, by anyone). Ships sent to a spot on the water and never ordered stay idle.
@@ -2648,7 +2648,7 @@ def working_fishing_ships(A, pid, until, villagers=()):
 		for _ in range(a.get('amount', 1) or 1):
 			b = min(ids, key=lambda i: free[i])
 			free[b] = max(a['t'], free[b]) + WORKER_TRAIN['Fishing Ship']
-			if free[b] > until:
+			if free[b] > until or free[b] < since:
 				continue
 			made += 1
 			points = [on for t, on in gather.get(b, []) if t <= free[b]]
@@ -2658,7 +2658,7 @@ def working_fishing_ships(A, pid, until, villagers=()):
 		and (a.get('target_id') or -1) > 0 and set(a.get('object_ids') or []) & docks} or fish_ids
 	ordered = set()
 	for a in A:
-		if a['a'] == 'ORDER' and a.get('player_id') == pid and a['t'] <= until and a.get('target_id') in dock_fish:
+		if a['a'] == 'ORDER' and a.get('player_id') == pid and since <= a['t'] <= until and a.get('target_id') in dock_fish:
 			ordered.update(i for i in a.get('object_ids') or [] if i not in villagers and i not in docks)
 	return made, min(made, auto + len(ordered))
 
@@ -2732,9 +2732,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	if drush:
 		opening = "Drush" if opening in ("Standard", "No Castle Age") else f"Drush → {opening}"
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
-	# Fish boom: 5+ fishing ships that went to work (not left idle), up to 10 minutes after Castle Age.
+	# Fish boom: 5+ fishing ships that went to work (not left idle), made between the Castle Age click and 10 minutes after.
 	boom_end = (castle or end) + 10 * 60000
-	fish, fish_working = working_fishing_ships(A, pid, boom_end, villagers)
+	# Fishing ships made from the Castle Age click on: early pond fishing (a Dock in the Dark Age) isn't a boom.
+	fish, fish_working = working_fishing_ships(A, pid, boom_end, villagers, since=castle or end)
 	fish_boom = fish_working >= FISH_BOOM_SHIPS
 	# Named by the economy behind it: extra Town Centers on farms, fishing ships, or both.
 	boom_label = "farm + fish boom" if boom and fish_boom else "fish boom" if fish_boom else "farm boom" if boom else ""
