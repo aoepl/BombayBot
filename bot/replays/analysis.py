@@ -2857,7 +2857,7 @@ def fight_episodes(players, army):
 	for (a, b), windows in per_pair.items():
 		for episode in _episodes(sorted(windows), lambda w: w[0] * 60000):
 			out.append(dict(a=a, b=b, a_killed=sum(w[1] for w in episode), b_killed=sum(w[2] for w in episode),
-				start_m=episode[0][0], end_m=episode[-1][0], windows=len(episode)))
+				start_m=episode[0][0], end_m=episode[-1][0], windows=len(episode), parts=episode))
 	return sorted(out, key=lambda f: f['start_m'])
 
 
@@ -3063,6 +3063,28 @@ def early_kill_moments(kills, players):
 	return out
 
 
+MOMENT_PHASE = 8  # minutes: a longer fight is told in phases this long, each with the units fought with then
+
+
+def _fight_phases(fights):
+	"""
+	Long fights split into phases of at most MOMENT_PHASE minutes for the key moments, so the units named are the
+	ones fighting in that phase (a 24-minute fight from 22:00 isn't told with the Imperial Age units of its end).
+	"""
+	out = []
+	for f in fights:
+		parts = f.get('parts') or [(f['start_m'], f['a_killed'], f['b_killed'])]
+		chunk = []
+		for w in parts + [None]:
+			if chunk and (w is None or w[0] - chunk[0][0] >= MOMENT_PHASE):
+				out.append(dict(f, a_killed=sum(x[1] for x in chunk), b_killed=sum(x[2] for x in chunk),
+					start_m=chunk[0][0], end_m=chunk[-1][0], windows=len(chunk)))
+				chunk = []
+			if w is not None:
+				chunk.append(w)
+	return out
+
+
 def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0, villagers=()):
 	"""
 	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
@@ -3075,7 +3097,7 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 
 	# Major fights, per pair of players (so a sea fight and a land fight at the same time stay apart).
 	if army:
-		for f in fight_episodes(players, army):
+		for f in _fight_phases(fight_episodes(players, army)):
 			a, b, ka, kb, first, last_m = f['a'], f['b'], f['a_killed'], f['b_killed'], f['start_m'], f['end_m']
 			win, lose = (a, b) if ka >= kb else (b, a)
 			t0, t1 = first * 60000, (last_m + 3) * 60000
