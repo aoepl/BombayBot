@@ -39,6 +39,13 @@ def _costs_all():
 		return json.load(f)
 
 
+@lru_cache(maxsize=1)
+def unit_los():
+	""" unit id -> line of sight in tiles (from the tech tree data). """
+	with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'unit_los.json'), encoding='utf-8') as f:
+		return {int(k): v for k, v in json.load(f)['los'].items()}
+
+
 def unit_value(object_id):
 	""" Resource-weighted cost of a unit or building (gold counts most). """
 	return sum(RESOURCE_WEIGHTS.get(k, 1.0) * v for k, v in _costs().get(str(object_id), {}).items())
@@ -1178,7 +1185,7 @@ def villager_estimate(A, players, villagers, army_alive, end, reached=None):
 				and owner.get(target) in players and owner[target] != a['player_id'] \
 				and players[owner[target]]['team_id'] != players[a['player_id']]['team_id']:
 			hits[target].append((a['t'], a['player_id']))
-	# Enemy army attack-moved or sent to attack the ground within VILLAGER_NEAR tiles of where a villager was working,
+	# Enemy army attack-moved or sent to attack the ground within its line of sight of where a villager was working,
 	# or patrolling along a line passing that close. Most villagers die to units that weren't clicked on them, so these
 	# count like a direct attack order when the villager never gets another order.
 	for o, near in villager_near_hits(A, players, vill, owner, end).items():
@@ -1305,9 +1312,13 @@ def villager_estimate(A, players, villagers, army_alive, end, reached=None):
 	return out
 
 
-VILLAGER_NEAR = 3.0         # tiles: enemy army attack-moved or patrolling this close to a villager's work spot ...
-# ... can have killed it. Plain moves and orders on something else nearby don't count: tested against in-game villager
-# counts, they mostly caught villagers that survived (army passing by, fighting next to farms).
+# Enemy army attack-moved or patrolling within its line of sight of a villager's work spot can have killed it: units
+# on those orders attack whatever comes into sight. The units' types aren't in the recording, so the line of sight is
+# that of the army the player was training then (the last ARMY_SIGHT_WINDOW of military queues, weighted by count).
+ARMY_SIGHT_WINDOW = 5 * 60000
+ARMY_SIGHT_DEFAULT = 4      # tiles: before any military unit was queued (scouts, melee)
+# Plain moves and orders on something else nearby don't count: tested against in-game villager counts, they mostly
+# caught villagers that survived (army passing by, fighting next to farms).
 VILLAGER_NEAR_ORDERS = {'DE_ATTACK_MOVE', 'ATTACK_GROUND', 'PATROL'}
 
 
@@ -1322,18 +1333,28 @@ def _dist_to_line(px, py, ax, ay, bx, by):
 def villager_near_hits(A, players, vill, owner, end):
 	"""
 	{villager: [(time, attacker)]} for every time enemy army was attack-moved, sent to attack the ground or patrolled
-	within VILLAGER_NEAR tiles of the spot the villager was last sent to (a patrol along its whole line, from where the
-	army last was to the patrol point): units that fight whatever they meet, so they kill villagers nobody clicked on.
+	within its line of sight of the spot the villager was last sent to (a patrol along its whole line, from where the
+	army last was to the patrol point): units that fight whatever they see, so they kill villagers nobody clicked on.
 	"""
 	team = {p: players[p]['team_id'] for p in players}
 	spot = {}           # villager -> (x, y) where it was last sent
 	army_at = {}        # army unit -> (x, y) where it was last sent (a patrol starts there)
 	out = defaultdict(list)
 	by_team = defaultdict(set)  # team -> its villagers with a known spot
+	los = unit_los()
+	trained = defaultdict(list)  # player -> [(time, line of sight, count)] of military units queued
+
+	def sight(p, t):
+		recent = [(l, n) for q, l, n in trained[p] if t - ARMY_SIGHT_WINDOW <= q <= t] or [(l, n) for _, l, n in trained[p][-5:]]
+		return sum(l * n for l, n in recent) / sum(n for _, n in recent) if recent else ARMY_SIGHT_DEFAULT
 	for a in A:
 		t, p = a['t'], a.get('player_id')
 		if t > end:
 			break
+		if a['a'] == 'DE_QUEUE' and p in players and _name('objects', a['unit_id']) not in WORKER_TRAIN \
+				and a['unit_id'] in los and _name('objects', a['unit_id']) not in ('Trade Cart', 'Trade Cog', 'Transport Ship'):
+			trained[p].append((t, los[a['unit_id']], a.get('amount', 1) or 1))
+			continue
 		x, y = a.get('x'), a.get('y')
 		ids = a.get('object_ids') or []
 		if p not in players or not ids or x is None or x <= 0:
@@ -1352,13 +1373,14 @@ def villager_near_hits(A, players, vill, owner, end):
 			army_at[i] = (x, y)
 		if a['a'] not in VILLAGER_NEAR_ORDERS:
 			continue
+		reach = sight(p, t)
 		for tm, vs in by_team.items():
 			if tm == team[p]:
 				continue
 			for v in vs:
 				vx, vy = spot[v]
 				d = _dist_to_line(vx, vy, sx, sy, x, y) if a['a'] == 'PATROL' else math.hypot(vx - x, vy - y)
-				if d <= VILLAGER_NEAR:
+				if d <= reach:
 					out[v].append((t, p))
 	return out
 

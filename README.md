@@ -207,7 +207,8 @@ What the breakdown shows:
   Fishing ships count as economy workers alongside villagers (a Dock trains one every 40 seconds); warships
   count as army, and transport ships as neither.
   Villagers and fishing ships killed (eco kills): an enemy attack order targeted it, or (villagers) enemy army was
-  attack-moved, sent to attack the ground or patrolled within 3 tiles of where it was working (a patrol along its whole
+  attack-moved, sent to attack the ground or patrolled within its line of sight (that of the army it was training then)
+  of where it was working (a patrol along its whole
   line), and its owner never ordered it again (fishing ships only when their owner had ordered them onto fish, so a
   kill can be told from a survivor); hits in the last 3 minutes before the game is decided are not counted, since there
   is no time to see the villager again (villagers killed by towers, castles or units fighting on their own are not
