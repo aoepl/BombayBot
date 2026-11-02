@@ -286,13 +286,14 @@ def _parts_text(parts):
 METHOD = [
 	("Each part is scored 1–10 within this game", "The best player in the lobby on a part gets 10, the worst 1, and the "
 		"rest in proportion. Army sent at the enemy is scored against the best only: the best gets 10 and the rest their "
-		"share of it (half the best ≈ 5.5). Lower is better for age-up times, the first military unit and floating. A part nobody in "
+		"share of it (half the best ≈ 5.5). Lower is better for age-up times and floating. A part nobody in "
 		"the game did is left out and its weight spread over the rest."),
 	("Execution: how well the player ran their game", "Weighted average of: **Castle Age click** (or, after an 8+ unit "
 		"Feudal army, Feudal production uptime: Town Centers, Docks and military buildings kept busy; after a tower rush, "
 		"the click against tower rushes' timings, full by 17:54; the better counts); **Imperial Age "
 		"click**; **villager value** (villagers and fishing ships made and kept alive, replacements after attacks "
-		"counting extra); **first military unit** (a quarter weight; a forward tower or castle counts); **unplanned floating** (minutes of the player's "
+		"counting extra; a Town Center trains one at a time and its research holds the queue up; ×1.10 with Wheelbarrow "
+		"and another +15% with Hand Cart, as every villager gathers more); **unplanned floating** (minutes of the player's "
 		"own spending sitting in the bank; saving for a 550+ purchase and being near 200 population don't count). "
 		"Plus a bonus up to +1.5 for fighting several enemies at once: up to +0.75 for minutes attacking 2+ enemies' "
 		"units, up to +0.75 for minutes attacked by 2+ enemies (by how well they traded), as a share of the game from 8:00."),

@@ -407,7 +407,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	exec_parts[3] = _minmax(first_mil, invert=True)
 	for p in pids:
 		stats[p]['army'] = army[p]
-	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end)
+	vest = villager_estimate(A, players, villagers, {p: army[p]['_alive'] for p in pids}, end, ages_reached(rec))
 	vill_killed = Counter()
 	for p in pids:
 		for e, n in vest[p]['killers'].items():
@@ -436,6 +436,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 	for p in pids:
 		v = vest[p]
 		stats[p]['_vill_made'], stats[p]['_vill_alive'] = v['made'], v['alive']
+		stats[p]['_vill_mult'], stats[p]['villager_upgrades'] = v['mult'], {u: mmss(t) for u, t in v['eco_ups'].items()}
 		stats[p]['villagers_made'] = v['villagers']
 		stats[p]['fishing_ships_made'] = v['fishing']
 		stats[p]['villagers_lost'] = len(v['lost'])  # villagers and fishing ships killed or deleted
@@ -452,7 +453,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['spend_per_min'] = round(rate)
 		floating[p] = round(banked[p] / max(rate, 100), 2)
 		stats[p]['float_minutes'] = floating[p]
-	exec_parts[2] = _minmax({p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids})
+	exec_parts[2] = _minmax({p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive'], stats[p].get('_vill_mult', 1.0)) for p in pids})
 	exec_parts.append(_minmax(floating, invert=True))
 	# Fighting several enemies at once (execution), and being focused by several (execution by how well the
 	# player traded then, and a harder survival test).
@@ -679,7 +680,7 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		stats[p]['survival_note'] = survival_note[p]
 
 	# ---- why each score is what it is. The recording is not kept, so this is saved with the game for /explain.
-	vill_raw = {p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive']) for p in pids}
+	vill_raw = {p: villager_value(stats[p]['_vill_made'], attacked[p], stats[p]['_vill_alive'], stats[p].get('_vill_mult', 1.0)) for p in pids}
 	on_map_raw = {p: army[p]['avg_units_value_on_map'] * army[p]['damage_efficiency']
 		+ (army[p]['avg_value_on_map'] - army[p]['avg_units_value_on_map']) for p in pids}
 	exec_info = [
@@ -712,6 +713,8 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 		st = stats[p]
 		ex_parts = []
 		for i, (name, raw, fmt, lower_better, always) in enumerate(exec_info):
+			if not EXEC_WEIGHTS[i]:  # not scored
+				continue
 			done = always or _did(raw)
 			v = raw.get(p)
 			part = dict(name=name, value=fmt(v) if v is not None else "never", score=round(exec_parts[i][p], 1) if done else None,
@@ -728,6 +731,10 @@ def analyze(rec: dict, meta: dict = None) -> dict:
 			if i == 0 and st.get('tower_rush') and exec_parts[0][p] == st['tower_rush']['castle_score'] > _minmax(castle_click, invert=True)[p]:
 				part['note'] = (f"scored against tower-rush timings instead ({st['tower_rush']['towers']} forward towers first; a tower "
 					f"rush clicks Castle Age later on purpose; full score by {mmss(TOWER_RUSH_CASTLE[0])})")
+			if i == 2 and st.get('villager_upgrades'):
+				ups = st['villager_upgrades']
+				part['note'] = (f"×{st['_vill_mult']:g} for " + ' and '.join(f"{u} (done {t}, +{round(VILLAGER_UPGRADES[u] * 100)}%)"
+					for u, t in ups.items()) + ": every villager gathers more")
 			if i == 3:
 				part['note'] = "counts a quarter as much as the others" + (
 					f"; the forward tower or castle at {mmss(st['first_military_forward'])} counts as the first" if st.get('first_military_forward') else "")
@@ -977,9 +984,23 @@ REPLACE_WINDOW = 10  # minutes: villagers queued past 150 within 10 minutes of a
 
 VILLAGER_TRAIN = 25000     # ms per villager at one Town Center
 WORKER_TRAIN = {'Villager': VILLAGER_TRAIN, 'Fishing Ship': 40000}  # fishing ships are economy workers too
+# Workers waiting in one Town Center's (or Dock's) queue at most. Clicks while short of food do nothing in the game but
+# look like queued villagers in the recording, so a longer queue is taken as failed clicks: without this cap the
+# estimate made villagers the Town Center never trained and pushed research it did far back.
+WORKER_QUEUE_MAX = 2
+# Villager upgrades that make every villager gather more (faster walking, bigger loads): villager value goes up by
+# this share for each one finished.
+VILLAGER_UPGRADES = {'Wheelbarrow': 0.10, 'Hand Cart': 0.15}
+FREE_VILLAGER_UPGRADES = {'Vikings': {'Wheelbarrow': 'Feudal Age', 'Hand Cart': 'Castle Age'}}  # given free on reaching the age
+# Civs whose Town Centers and Docks work faster, by age (Dark, Feudal, Castle, Imperial): villagers and fishing ships
+# come out sooner.
+TC_WORK_RATE = {'Persians': (1.05, 1.10, 1.15, 1.20)}
+# Town Center research and how long it takes (standard times, ms): it holds up the villager queue while it runs.
+TC_RESEARCH_MS = {'Feudal Age': 130000, 'Castle Age': 160000, 'Imperial Age': 190000, 'Loom': 25000,
+	'Wheelbarrow': 75000, 'Hand Cart': 55000, 'Town Watch': 25000, 'Town Patrol': 40000}
 VILLAGER_HIT_GRACE = 20000  # ms: a targeted villager its owner ordered again after this got away
 VILLAGER_CONFIRM = 3 * 60000  # hits in the last 3 minutes analysed can't be confirmed (no time to see it again)
-START_VILLAGERS = {'Chinese': 6, 'Mayans': 4}
+START_VILLAGERS = {'Chinese': 6, 'Mayans': 4, 'Maya': 4}  # the reference names them Maya now
 
 
 def fishing_ship_hits(A, players, villagers, end):
@@ -1102,7 +1123,20 @@ def worker_loss_penalty(vest_p, carts_lost, carts_queued):
 		count=len(times), share=round(total, 3))
 
 
-def villager_estimate(A, players, villagers, army_alive, end):
+REACHED = re.compile(r'<player_id,(\d+),\d+> advanced to the (Feudal Age|Castle Age|Imperial Age)')
+
+
+def ages_reached(rec):
+	""" {(player, age): [times]} from the game's own "advanced to the X Age" messages in the recording. """
+	out = defaultdict(list)
+	for c in rec.get('chat') or []:
+		m = REACHED.search(c.get('message') or '')
+		if m:
+			out[(int(m.group(1)), m.group(2))].append(c['t'])
+	return out
+
+
+def villager_estimate(A, players, villagers, army_alive, end, reached=None):
 	"""
 	Estimated economy workers alive per minute: villagers plus fishing ships. The replay has no unit counts, so:
 	- made: each queue click is 1 villager (5 with Shift); with several Town Centers selected each villager
@@ -1154,7 +1188,49 @@ def villager_estimate(A, players, villagers, army_alive, end):
 	for pid, p in players.items():
 		made, free, kinds = [], defaultdict(int), Counter()
 		busy, first_use = [], {}  # (building, start, end) of each worker trained; first queue per building
+		researched = set()
+		queue = defaultdict(list)  # building -> [start, end, worker kind or None for research], in the order queued
+
+		rate = TC_WORK_RATE.get(p.get('civ'))
+
+		def work_rate(t):
+			""" How fast this civ's Town Centers and Docks work at t (Persians: faster each age). """
+			if not rate:
+				return 1.0
+			age = sum(1 for a in ('Feudal Age', 'Castle Age', 'Imperial Age')
+				if any(x <= t for x in (reached or {}).get((pid, a), ())))
+			return rate[age]
+
+		def push(b, t, ms, kind):
+			start = max(t, free[b])
+			queue[b].append([start, start + ms, kind])
+			free[b] = start + ms
+
 		for a in A:
+			if a['a'] == 'RESEARCH' and a.get('player_id') == pid and a['t'] <= end and a.get('object_ids'):
+				# Research at a Town Center (an age, Loom, Wheelbarrow ...) holds up its villager queue: the game trains
+				# and researches one thing at a time in each building. A technology is researched once: repeat clicks
+				# (or ones that failed for lack of resources) don't hold anything up.
+				tech = _name('technologies', a['technology_id'])
+				b = a['object_ids'][0]
+				if tech not in TC_RESEARCH_MS or (tech, b) in researched:
+					continue
+				researched.add((tech, b))
+				done = min((t for t in (reached or {}).get((pid, tech), ()) if t >= a['t']), default=None)
+				if done is None:
+					push(b, a['t'], TC_RESEARCH_MS[tech], 'tech:' + tech)
+					continue
+				# The game says when the age was reached: the research ran up to then. Workers the estimate had
+				# coming out of this Town Center during it came out after (clicks that failed for lack of food make
+				# the queue look longer than it was, so the estimate is reset here).
+				start = max(a['t'], done - TC_RESEARCH_MS[tech])
+				before = [q for q in queue[b] if q[1] <= start]
+				after = [q for q in queue[b] if q[1] > start]
+				queue[b] = before + [[start, done, 'tech:' + tech]]
+				free[b] = done
+				for q in after:
+					push(b, done, q[1] - q[0], q[2])
+				continue
 			if a['a'] != 'DE_QUEUE' or a.get('player_id') != pid or a['t'] > end:
 				continue
 			kind = _name('objects', a['unit_id'])
@@ -1164,11 +1240,19 @@ def villager_estimate(A, players, villagers, army_alive, end):
 			for _ in range(a.get('amount', 1) or 1):
 				b = min(ids, key=lambda i: free[i])  # the Town Center (or Dock) with the shortest queue
 				first_use.setdefault(b, a['t'])
-				busy.append((b, max(a['t'], free[b]), max(a['t'], free[b]) + WORKER_TRAIN[kind]))
-				free[b] = max(a['t'], free[b]) + WORKER_TRAIN[kind]
-				if free[b] <= end:  # still training when the game was decided: not made
-					made.append(free[b])
+				waiting = sum(1 for q in queue[b] if q[0] > a['t'] and q[2] in WORKER_TRAIN)
+				if waiting >= WORKER_QUEUE_MAX:  # a longer queue is clicks that failed for lack of food (see below)
+					continue
+				push(b, a['t'], round(WORKER_TRAIN[kind] / work_rate(max(a['t'], free[b]))), kind)
+		eco_ups = {}  # Wheelbarrow / Hand Cart -> when it finished (before the game was decided)
+		for b, qs in queue.items():
+			for start, stop, kind in qs:
+				busy.append((b, start, stop))
+				if kind in WORKER_TRAIN and stop <= end:  # still training when the game was decided: not made
+					made.append(stop)
 					kinds[kind] += 1
+				elif kind and kind[5:] in VILLAGER_UPGRADES and stop <= end:
+					eco_ups[kind[5:]] = min(stop, eco_ups.get(kind[5:], stop))
 		made.sort()
 		lost = [t for o, t in deleted.items() if owner.get(o) == pid]
 		killers = Counter()  # enemy player -> villagers of this player they killed
@@ -1201,7 +1285,12 @@ def villager_estimate(A, players, villagers, army_alive, end):
 			n = start + sum(1 for x in made if x <= t) - sum(1 for x in lost if x <= t)
 			army = army_alive[pid][min(len(army_alive[pid]) - 1, m)] if army_alive.get(pid) else 0
 			alive.append(max(0, min(n, POP_CAP - army)))
-		out[pid] = dict(made=made, lost=lost, alive=alive, villagers=kinds['Villager'], fishing=kinds['Fishing Ship'],
+		for u, age in FREE_VILLAGER_UPGRADES.get(p.get('civ'), {}).items():  # free with an age (Vikings)
+			got = min((t for t in (reached or {}).get((pid, age), ()) if t <= end), default=None)
+			if got is not None:
+				eco_ups[u] = min(got, eco_ups.get(u, got))
+		mult = 1 + sum(VILLAGER_UPGRADES[u] for u in eco_ups)
+		out[pid] = dict(made=made, lost=lost, alive=alive, eco_ups=eco_ups, mult=mult, villagers=kinds['Villager'], fishing=kinds['Fishing Ship'],
 			ships_lost=ships_lost,
 			killers=killers, killed=sorted(killed, key=lambda k: k[0]), busy=busy, first_use=first_use)
 	return out
@@ -1261,11 +1350,12 @@ def ally_defence(players, pids, survival, survival_note, surv_detail, hold_windo
 			defended_score=round(base_score[b], 2), own_score=round(own, 2), defend_weight=round(weight, 2))
 
 
-def villager_value(times, attacked_minutes=(), alive=None):
+def villager_value(times, attacked_minutes=(), alive=None, mult=1.0):
 	"""
 	Value of villagers made: full value while the player has under 120 alive, then less and less until 150,
 	and nothing at 150+ unless the base was attacked in the previous 10 minutes (replacements). With an
-	alive estimate, a villager made after losses counts again because the alive count went down.
+	alive estimate, a villager made after losses counts again because the alive count went down. mult: the villager
+	upgrades finished (Wheelbarrow +10%, Hand Cart +15%), as every villager gathers more with them.
 	"""
 	attacked = set(attacked_minutes)
 	value, count = 0.0, 0
@@ -1281,12 +1371,14 @@ def villager_value(times, attacked_minutes=(), alive=None):
 			m = int(t // 60000)
 			if any(k in attacked for k in range(m - REPLACE_WINDOW, m + 1)):
 				value += 1
-	return round(value, 1)
+	return round(value * mult, 1)
 
 
 FLOAT_FROM = 10 * 60000
-# Execution parts: Castle Age timing, Imperial Age click, villager value, first military unit (quarter weight), floating
-EXEC_WEIGHTS = (1.0, 1.0, 1.0, 0.25, 1.0)
+# Execution parts: Castle Age timing, Imperial Age click, villager value, first military unit, floating. The first
+# military unit isn't scored any more (weight 0): it said little about how well a player played. It's still worked out
+# (strategies, first push and the replay use it).
+EXEC_WEIGHTS = (1.0, 1.0, 1.0, 0.0, 1.0)
 # Execution bonus on top: fighting several enemies at once, and holding when focused by several.
 # Full bonus at a quarter of the minutes from 8:00 spent clicking 2+ enemies' units (early minutes count more) ...
 MULTI_FULL, MULTI_BONUS_MAX = 0.25, 0.75
@@ -1922,7 +2014,7 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 		{p: _absolute(_steady(mil_times[p], stats[p]['first_military'], end, saving_minutes(A, p, stats[p]['ages']))) for p in pids},
 		_minmax({p: army[p]['avg_units'] for p in pids}),
 		_minmax(avg_pop),
-		_minmax({p: villager_value(stats[p].get('_vill_made') or stats[p]['_vill_times'], stats[p]['_attacked'], stats[p].get('_vill_alive')) for p in pids}),
+		_minmax({p: villager_value(stats[p].get('_vill_made') or stats[p]['_vill_times'], stats[p]['_attacked'], stats[p].get('_vill_alive'), stats[p].get('_vill_mult', 1.0)) for p in pids}),
 		_minmax(floating, invert=True),
 	]
 	# Bonus only (never a penalty): trade carts and tributes sent to allies add up to MACRO_BONUS points.
@@ -1941,7 +2033,7 @@ def playstyle(A, players, stats, army, floating, end, trib_out):
 		stats[p]['no_trade_penalty'] = round(penalty, 1)
 		stats[p]['trade_carts'] = trade[p]
 		stats[p]['macro_bonus'] = round(MACRO_BONUS * extra[p] / top_extra, 1) if top_extra else 0.0
-		stats[p]['villager_value'] = villager_value(stats[p].get('_vill_made') or stats[p]['_vill_times'], stats[p]['_attacked'], stats[p].get('_vill_alive'))
+		stats[p]['villager_value'] = villager_value(stats[p].get('_vill_made') or stats[p]['_vill_times'], stats[p]['_attacked'], stats[p].get('_vill_alive'), stats[p].get('_vill_mult', 1.0))
 	# Micro: value traded in fights. A unit that drops out while its owner was clearly fighting counts as lost
 	# in that fight; its value is credited to the enemies fighting that player then, by their share of orders.
 	# Conversions look the same as kills here, and count in full.
@@ -2530,9 +2622,9 @@ FEUDAL_BOOM_FARMS = 8
 FISH_BOOM_SHIPS = 5  # working fishing ships up to 10 minutes after Castle Age
 
 
-def working_fishing_ships(A, pid, until, villagers=()):
+def working_fishing_ships(A, pid, until, villagers=(), since=0):
 	"""
-	(fishing ships made, fishing ships that went to work) up to `until`. The replay doesn't say which unit is
+	(fishing ships made, fishing ships that went to work) from `since` up to `until`. The replay doesn't say which unit is
 	a fishing ship, so a ship counts as working when its Dock's gather point was on a fish when it came out
 	(new ships go straight to fishing), or when the player ordered units onto fish (the fish a Dock gather
 	point was set on, by anyone). Ships sent to a spot on the water and never ordered stay idle.
@@ -2556,7 +2648,7 @@ def working_fishing_ships(A, pid, until, villagers=()):
 		for _ in range(a.get('amount', 1) or 1):
 			b = min(ids, key=lambda i: free[i])
 			free[b] = max(a['t'], free[b]) + WORKER_TRAIN['Fishing Ship']
-			if free[b] > until:
+			if free[b] > until or free[b] < since:
 				continue
 			made += 1
 			points = [on for t, on in gather.get(b, []) if t <= free[b]]
@@ -2566,7 +2658,7 @@ def working_fishing_ships(A, pid, until, villagers=()):
 		and (a.get('target_id') or -1) > 0 and set(a.get('object_ids') or []) & docks} or fish_ids
 	ordered = set()
 	for a in A:
-		if a['a'] == 'ORDER' and a.get('player_id') == pid and a['t'] <= until and a.get('target_id') in dock_fish:
+		if a['a'] == 'ORDER' and a.get('player_id') == pid and since <= a['t'] <= until and a.get('target_id') in dock_fish:
 			ordered.update(i for i in a.get('object_ids') or [] if i not in villagers and i not in docks)
 	return made, min(made, auto + len(ordered))
 
@@ -2640,9 +2732,10 @@ def strategy_parts(st, my_castles, A, pid, players, base_of, attack_times, villa
 	if drush:
 		opening = "Drush" if opening in ("Standard", "No Castle Age") else f"Drush → {opening}"
 	boom = bool(castle and st.get('tc_after_castle', 0) >= 2)  # TC boom: 2+ Town Centers soon after Castle Age
-	# Fish boom: 5+ fishing ships that went to work (not left idle), up to 10 minutes after Castle Age.
+	# Fish boom: 5+ fishing ships that went to work (not left idle), made between the Castle Age click and 10 minutes after.
 	boom_end = (castle or end) + 10 * 60000
-	fish, fish_working = working_fishing_ships(A, pid, boom_end, villagers)
+	# Fishing ships made from the Castle Age click on: early pond fishing (a Dock in the Dark Age) isn't a boom.
+	fish, fish_working = working_fishing_ships(A, pid, boom_end, villagers, since=castle or end)
 	fish_boom = fish_working >= FISH_BOOM_SHIPS
 	# Named by the economy behind it: extra Town Centers on farms, fishing ships, or both.
 	boom_label = "farm + fish boom" if boom and fish_boom else "fish boom" if fish_boom else "farm boom" if boom else ""
@@ -2765,7 +2858,7 @@ def fight_episodes(players, army):
 	for (a, b), windows in per_pair.items():
 		for episode in _episodes(sorted(windows), lambda w: w[0] * 60000):
 			out.append(dict(a=a, b=b, a_killed=sum(w[1] for w in episode), b_killed=sum(w[2] for w in episode),
-				start_m=episode[0][0], end_m=episode[-1][0], windows=len(episode)))
+				start_m=episode[0][0], end_m=episode[-1][0], windows=len(episode), parts=episode))
 	return sorted(out, key=lambda f: f['start_m'])
 
 
@@ -2971,6 +3064,28 @@ def early_kill_moments(kills, players):
 	return out
 
 
+MOMENT_PHASE = 8  # minutes: a longer fight is told in phases this long, each with the units fought with then
+
+
+def _fight_phases(fights):
+	"""
+	Long fights split into phases of at most MOMENT_PHASE minutes for the key moments, so the units named are the
+	ones fighting in that phase (a 24-minute fight from 22:00 isn't told with the Imperial Age units of its end).
+	"""
+	out = []
+	for f in fights:
+		parts = f.get('parts') or [(f['start_m'], f['a_killed'], f['b_killed'])]
+		chunk = []
+		for w in parts + [None]:
+			if chunk and (w is None or w[0] - chunk[0][0] >= MOMENT_PHASE):
+				out.append(dict(f, a_killed=sum(x[1] for x in chunk), b_killed=sum(x[2] for x in chunk),
+					start_m=chunk[0][0], end_m=chunk[-1][0], windows=len(chunk)))
+				chunk = []
+			if w is not None:
+				chunk.append(w)
+	return out
+
+
 def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), end=0, villagers=()):
 	"""
 	A short list (at most 5, by size, shown in time order) of the events that shaped the game: major fights,
@@ -2983,7 +3098,7 @@ def key_moments(players, stats, castles, resigns, army=None, vest=None, A=(), en
 
 	# Major fights, per pair of players (so a sea fight and a land fight at the same time stay apart).
 	if army:
-		for f in fight_episodes(players, army):
+		for f in _fight_phases(fight_episodes(players, army)):
 			a, b, ka, kb, first, last_m = f['a'], f['b'], f['a_killed'], f['b_killed'], f['start_m'], f['end_m']
 			win, lose = (a, b) if ka >= kb else (b, a)
 			t0, t1 = first * 60000, (last_m + 3) * 60000
