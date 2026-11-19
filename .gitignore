@@ -2,5 +2,5 @@
 /logs/
 /data/
 /config.cfg
-/.idea/misc.xml
+/.idea/
 __pycache__/
