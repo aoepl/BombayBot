@@ -31,8 +31,8 @@ class _Config:
     GOOGLE_AI_FALLBACK_MODELS = "gemini-3.6-flash"
     GOOGLE_AI_AGENT_MODELS = "gemini-3.5-flash-lite,gemini-3.6-flash"  # /ask: models that can call tools
     ASK_DB_URI = ""  # /ask: optional mysql://user:password@host/db of a SELECT-only user (else DB_URI)
-    AI_CHANNEL_ID = 0  # extra channel in which /ask and /ask_optin are allowed outside a queue channel
-    AI_FALLBACK_QC_ID = 0  # queue channel whose rating pool /ask uses when run from AI_CHANNEL_ID
+    AI_CHANNEL_ID = 0  # the only channel in which /ask and /ask_optin work
+    AI_FALLBACK_QC_ID = 0  # queue channel whose rating pool /ask uses (since it runs from AI_CHANNEL_ID, not a QC)
 
 
 cfg = _Config()

@@ -18,7 +18,7 @@ from . import SlashContext, autocomplete, groups
 
 guild_kwargs = dict(guild_ids=cfg.DC_SLASH_SERVERS) if len(cfg.DC_SLASH_SERVERS) else dict()
 
-# Slash commands that are also allowed in cfg.AI_CHANNEL_ID (not just inside a queue channel),
+# Slash commands that only run in cfg.AI_CHANNEL_ID (never in a queue channel),
 # using cfg.AI_FALLBACK_QC_ID as their queue-channel context.
 _AI_CHANNEL_COMMANDS = {'ask', 'ask_optin'}
 
@@ -43,16 +43,22 @@ async def run_slash(coro: Callable, interaction: Interaction, **kwargs):
 			embed=error_embed("Bot is under connection, please try agian later...", title="Error")
 		)
 		return
-	qc = bot.queue_channels.get(interaction.channel_id)
-	if qc is None:
-		if interaction.channel_id == cfg.AI_CHANNEL_ID and coro.__name__ in _AI_CHANNEL_COMMANDS:
-			qc = bot.queue_channels.get(cfg.AI_FALLBACK_QC_ID)
-			if qc is None:
-				await interaction.response.send_message(
-					embed=error_embed("AI fallback queue channel is not registered.", title="Error")
-				)
-				return
-		else:
+	if coro.__name__ in _AI_CHANNEL_COMMANDS:
+		if interaction.channel_id != cfg.AI_CHANNEL_ID or not cfg.AI_CHANNEL_ID:
+			where = f"<#{cfg.AI_CHANNEL_ID}>" if cfg.AI_CHANNEL_ID else "the configured AI channel"
+			await interaction.response.send_message(
+				embed=error_embed(f"This command only works in {where}.", title="Error")
+			)
+			return
+		qc = bot.queue_channels.get(cfg.AI_FALLBACK_QC_ID)
+		if qc is None:
+			await interaction.response.send_message(
+				embed=error_embed("AI fallback queue channel is not registered.", title="Error")
+			)
+			return
+	else:
+		qc = bot.queue_channels.get(interaction.channel_id)
+		if qc is None:
 			await interaction.response.send_message(embed=error_embed("Not in a queue channel.", title="Error"))
 			return
 
