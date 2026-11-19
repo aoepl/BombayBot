@@ -77,20 +77,6 @@ async def generate_match_summary(match_text: str) -> str | None:
 	)
 
 
-async def generate_player_summary(stats_text: str) -> str | None:
-	return await _generate(
-		(
-			"You are a sharp, witty esports analyst for a competitive pickup game community. "
-			"Write a punchy 10-15 sentence analysis of the player stats provided. Be ruthless."
-			"Assume 50% winrate is at par"
-			"Be specific with numbers, call out standout strengths and weaknesses, "
-			"and give it personality — like a post-match breakdown. "
-			"Keep it under 1000 characters.\n\n"
-			f"{stats_text}"
-		)
-	)
-
-
 async def generate_replay_summary(game_text: str) -> str | None:
 	return await _generate(
 		(

@@ -1,4 +1,4 @@
-__all__ = ['last_game', 'stats', 'bombayai', 'top', 'rank', 'leaderboard', 'mapstats', 'activity']
+__all__ = ['last_game', 'stats', 'top', 'rank', 'leaderboard', 'mapstats', 'activity']
 
 import datetime
 import io
@@ -283,108 +283,6 @@ async def rank(ctx, player: Member = None):
 
 	else:
 		raise bot.Exc.ValueError(ctx.qc.gt("No rating data found."))
-
-
-async def bombayai(ctx, player: Member = None):
-	from bot.bombay.ai import generate_player_summary
-
-	if player:
-		if (member := await ctx.get_member(player)) is not None:
-			data = await bot.stats.user_stats(ctx.qc.id, member.id, ts_from=None, guild_id=ctx.qc.guild_id)
-			target = get_nick(member)
-			target_id = member.id
-		else:
-			raise bot.Exc.NotFoundError(ctx.qc.gt("Specified user not found."))
-	else:
-		data = await bot.stats.user_stats(ctx.qc.id, ctx.author.id, ts_from=None, guild_id=ctx.qc.guild_id)
-		target = get_nick(ctx.author)
-		target_id = ctx.author.id
-
-	lines = [f"Player: {target}"]
-	lines.append(f"Total matches: {data['total']}")
-
-	if data.get('queues'):
-		lines.append("Queues: " + ", ".join(f"{q['queue_name']} ({q['count']})" for q in data['queues']))
-
-	monthly = await _rating_history_buckets(target_id, ctx.qc.rating.channel_id)
-	if monthly:
-		lines.append("Monthly rating history (most recent first):")
-		lines += [
-			f"  {b['period']}: {b['matches']} matches, {int(b['wins'])}W/{int(b['losses'])}L, "
-			f"{int(b['net_change']):+d} pts, ended at {int(b['end_rating'])}"
-			for b in monthly
-		]
-
-	if r := data.get('ratings'):
-		lines.append(f"Record: {r['wins']}W/{r['losses']}L — {r['win_pct']}% winrate")
-		lines.append(f"Rating: {r['rating']} (max {r['max_rating']}, min {r['min_rating']})")
-		lines.append(f"Streak: current {r['current_streak']:+d}, best win {r['max_win_streak']}, worst loss {r['max_loss_streak']}")
-
-	if data.get('maps'):
-		lines.append("Top maps: " + ", ".join(
-			f"{m['map_name']} {m['win_pct']}% wr ({m['played']} played)" for m in data['maps'][:3]
-		))
-
-	if data.get('best_ally'):
-		ba = data['best_ally'][0]
-		lines.append(f"Best ally: {ba['nick']} ({ba['weighted_win_pct']}% wr, {ba['played']} games)")
-
-	if data.get('worst_ally'):
-		wa = data['worst_ally'][0]
-		lines.append(f"Worst ally: {wa['nick']} ({wa['weighted_win_pct']}% wr, {wa['played']} games)")
-
-	if data.get('best_enemy'):
-		be = data['best_enemy'][0]
-		lines.append(f"Easiest opponent: {be['nick']} ({be['weighted_win_pct']}% wr, {be['played']} games)")
-
-	if data.get('worst_enemy'):
-		we = data['worst_enemy'][0]
-		lines.append(f"Toughest opponent: {we['nick']} ({we['weighted_win_pct']}% wr, {we['played']} games)")
-
-	if pred := data.get('predictions'):
-		lines.append(f"Predictions: {pred['correct']}/{pred['total']} correct ({pred['accuracy']}% accuracy, {int(pred['rating_pts'] or 0)} rating pts)")
-
-	if d := data.get('douche'):
-		lines.append(f"Douche points: received {d['received']}, given {d['given']}")
-
-	summary = await generate_player_summary("\n".join(lines))
-	await ctx.reply(f"**BombayAI analysis for {target}**\n{summary}")
-
-
-async def _rating_history_buckets(user_id: int, channel_id: int):
-	async def _bucket(fmt: str, limit: int):
-		return await db.fetchall(
-			f"""
-			WITH ranked AS (
-				SELECT
-					DATE_FORMAT(FROM_UNIXTIME(at), %s) AS period,
-					at,
-					rating_before + rating_change AS rating,
-					rating_change,
-					ROW_NUMBER() OVER (
-						PARTITION BY DATE_FORMAT(FROM_UNIXTIME(at), %s)
-						ORDER BY at DESC
-					) AS rn
-				FROM qc_rating_history
-				WHERE user_id = %s AND channel_id = %s
-			)
-			SELECT
-				period,
-				COUNT(*) AS matches,
-				SUM(CASE WHEN rating_change > 0 THEN 1 ELSE 0 END) AS wins,
-				SUM(CASE WHEN rating_change < 0 THEN 1 ELSE 0 END) AS losses,
-				SUM(rating_change) AS net_change,
-				MAX(CASE WHEN rn = 1 THEN rating END) AS end_rating
-			FROM ranked
-			GROUP BY period
-			ORDER BY period DESC
-			LIMIT %s
-			""",
-			[fmt, fmt, user_id, channel_id, limit]
-		)
-
-	monthly = await _bucket('%Y-%m', 12)
-	return monthly
 
 
 async def mapstats(ctx, period: str = None):
